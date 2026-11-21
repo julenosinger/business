@@ -5,6 +5,12 @@ import {
   alerts,
   canTransition,
   clean,
+  counterparty,
+  freightBreakdown,
+  kpiSet,
+  punctuality,
+  sortShipments,
+  type KpiKey,
   createShipment,
   kpis,
   nextShipmentId,
@@ -15,6 +21,8 @@ import {
   TRANSITIONS,
   type ShipmentInput,
 } from '../src/lib/logistics'
+import { needsFulfillment } from '../src/lib/stock-checks'
+import { packShipment, pickItem } from '../src/lib/fulfillment'
 import type { AppData } from '../src/lib/types'
 
 const NOW = '2026-11-21T12:00:00.000Z'
@@ -27,11 +35,13 @@ const base = (): AppData =>
     contacts: [],
     entries: [],
     accounts: [],
-    sales: [{ id: 's1', date: TODAY, customerName: 'Ana', items: [], total: 10, cogs: 5, method: 'pix' }],
+    sales: [{ id: 's1', date: TODAY, customerName: 'Ana', items: [{ productId: 'p1', name: 'Café', qty: 5, price: 2, cost: 1 }], total: 10, cogs: 5, method: 'pix' }],
     employees: [],
     treasuryOps: [],
     requests: [],
     shipments: [],
+    purchases: [],
+    receipts: [],
     settings: { company: 'X', branch: 'Y', owner: 'Z', currency: 'BRL', usdcRate: null, approvalLimit: null },
   }) as unknown as AppData
 
@@ -63,6 +73,18 @@ function created(over: Partial<ShipmentInput> = {}) {
 function advance(d: AppData, id: string, path: Parameters<typeof transitionShipment>[2][]): AppData {
   let cur = d
   for (const to of path) {
+    // Remessas de saída com itens do estoque só saem separadas e embaladas (fase 1B).
+    const ship = cur.shipments.find((s) => s.id === id)
+    if (to === 'dispatched' && ship && needsFulfillment(ship) && !ship.fulfillment?.packedAt) {
+      for (const it of ship.items) {
+        const p = pickItem(cur, id, it.id, it.qty, NOW, 'tester')
+        if (!p.ok) throw new Error(`pick: ${p.errors.join(',')}`)
+        cur = p.data
+      }
+      const k = packShipment(cur, id, NOW, 'tester')
+      if (!k.ok) throw new Error(`pack: ${k.errors.join(',')}`)
+      cur = k.data
+    }
     const r = transitionShipment(cur, id, to, { note: 'ok nota' }, NOW, TODAY, 'tester')
     if (!r.ok) throw new Error(`${to}: ${r.errors.join(',')}`)
     cur = r.data
@@ -305,5 +327,139 @@ describe('indicators', () => {
     expect(k.freightByCurrency.USD).toBe(10)
     expect(alerts(d.shipments, TODAY).map((a) => a.reason)).toEqual(['overdue'])
     expect(kpis([], { from: '' }, TODAY).onTimeRate).toBeNull()
+  })
+})
+
+// ---------- Indicadores clicáveis: a lista de cada cartão é o mesmo conjunto que gera o número ----------
+
+/** Cenário misto com todos os estados relevantes para os seis cartões. */
+function scenario() {
+  let d = base()
+  const make = (over: Partial<ShipmentInput>, path: Parameters<typeof transitionShipment>[2][], deliveredAt?: string, createdAt = NOW) => {
+    const r = createShipment(d, input(over), createdAt, 't')
+    if (!r.ok) throw new Error(r.errors.join())
+    d = r.data
+    d = advance(d, r.value.id, path)
+    if (deliveredAt) {
+      const t = transitionShipment(d, r.value.id, 'delivered', { deliveredAt }, NOW, TODAY, 't')
+      if (!t.ok) throw new Error(t.errors.join())
+      d = t.data
+    }
+    return r.value.id
+  }
+  const ids = {
+    draft: make({}, []),
+    ready: make({ currency: 'USD', freightCost: 10 }, ['ready']),
+    moving: make({ carrier: 'Alfa', freightCost: 20 }, ['ready', 'dispatched']),
+    out: make({ carrier: 'Alfa', freightCost: 0, estimatedDelivery: '2026-11-30' }, ['ready', 'dispatched', 'in_transit', 'out_for_delivery']),
+    delayed: make({ carrier: 'Beta', freightCost: 15 }, ['ready', 'dispatched', 'in_transit', 'delayed']),
+    exception: make({ carrier: 'Beta', freightCost: 5, estimatedDelivery: '2026-12-10' }, ['ready', 'dispatched', 'exception']),
+    overdue: make({ estimatedDelivery: '2026-11-10', freightCost: 8 }, ['ready', 'dispatched', 'in_transit']),
+    onTime: make({ estimatedDelivery: '2026-11-21', freightCost: 12 }, ['ready', 'dispatched', 'in_transit'], '2026-11-21'),
+    late: make({ estimatedDelivery: '2026-11-19', freightCost: 7 }, ['ready', 'dispatched', 'in_transit'], '2026-11-21'),
+    noEta: make({ estimatedDelivery: undefined, freightCost: 9 }, ['ready', 'dispatched', 'in_transit'], '2026-11-20', '2026-11-10T09:00:00.000Z'),
+    cancelled: make({ freightCost: 99 }, ['cancelled']),
+    oldDelivered: make({ estimatedDelivery: '2026-09-02', freightCost: 3 }, ['ready', 'dispatched', 'in_transit'], '2026-09-03', '2026-09-01T09:00:00.000Z'),
+  }
+  return { d, ids }
+}
+
+describe('KPI cards: filters and counts share the same definition', () => {
+  const { d, ids } = scenario()
+  const all = d.shipments
+  const get = (key: KpiKey, from = '') => kpiSet(all, key, { from }, TODAY).map((s) => s.id).sort()
+  const idsOf = (...k: (keyof typeof ids)[]) => k.map((x) => ids[x]).sort()
+
+  test('active: ready/dispatched/in transit/out for delivery/delayed/exception only', () => {
+    expect(get('active')).toEqual(idsOf('ready', 'moving', 'out', 'delayed', 'exception', 'overdue'))
+  })
+  test('in transit: dispatched, in transit and out for delivery', () => {
+    expect(get('moving')).toEqual(idsOf('moving', 'out', 'overdue'))
+  })
+  test('delivered: only confirmed deliveries, respecting the period', () => {
+    expect(get('delivered')).toEqual(idsOf('onTime', 'late', 'noEta', 'oldDelivered'))
+    expect(get('delivered', '2026-11-01')).toEqual(idsOf('onTime', 'late', 'noEta'))
+    expect(get('delivered', '2026-11-21')).toEqual(idsOf('onTime', 'late'))
+  })
+  test('delays and exceptions: delayed, exception and overdue estimates', () => {
+    expect(get('problems')).toEqual(idsOf('delayed', 'exception', 'overdue'))
+  })
+  test('freight: recorded freight only, no cancelled, by creation date in period', () => {
+    const got = get('freight')
+    expect(got).not.toContain(ids.cancelled)
+    expect(got).not.toContain(ids.out) // frete 0 = não registrado
+    expect(got).toContain(ids.ready)
+    expect(get('freight', '2026-10-01')).not.toContain(ids.oldDelivered)
+    expect(got).toContain(ids.oldDelivered)
+  })
+  test('on time: deliveries with both estimated and actual dates', () => {
+    expect(get('onTime')).toEqual(idsOf('onTime', 'late', 'oldDelivered'))
+    expect(get('onTime')).not.toContain(ids.noEta)
+  })
+  test('every KPI number equals the size of its list, for every period', () => {
+    for (const from of ['', '2026-11-01', '2026-11-21', '2027-01-01']) {
+      const k = kpis(all, { from }, TODAY)
+      const len = (key: KpiKey) => kpiSet(all, key, { from }, TODAY).length
+      expect(k.active).toBe(len('active'))
+      expect(k.moving).toBe(len('moving'))
+      expect(k.delivered).toBe(len('delivered'))
+      expect(k.problems).toBe(len('problems'))
+      expect(k.onTimeSample).toBe(len('onTime'))
+      expect(Object.values(k.freightByCurrency).reduce((a, b) => a + b, 0)).toBe(Object.values(freightBreakdown(kpiSet(all, 'freight', { from }, TODAY)).byCurrency).reduce((a, b) => a + b, 0))
+    }
+  })
+  test('empty sets are really empty and unavailable metrics are null, not zero', () => {
+    const empty = kpis([], { from: '' }, TODAY)
+    expect(empty.onTimeRate).toBeNull()
+    expect(empty.avgTransitDays).toBeNull()
+    expect(empty.freightByCurrency).toEqual({})
+    for (const key of ['active', 'moving', 'delivered', 'problems', 'freight', 'onTime'] as KpiKey[]) expect(kpiSet([], key, { from: '' }, TODAY)).toEqual([])
+    // período futuro: nada entregue, taxa indisponível
+    const future = kpis(all, { from: '2027-01-01' }, TODAY)
+    expect(future.delivered).toBe(0)
+    expect(future.onTimeRate).toBeNull()
+  })
+  test('selecting a card never mutates shipments', () => {
+    const snapshot = JSON.stringify(all)
+    for (const key of ['active', 'moving', 'delivered', 'problems', 'freight', 'onTime'] as KpiKey[]) kpiSet(all, key, { from: '' }, TODAY)
+    sortShipments(all, 'eta', 'asc')
+    expect(JSON.stringify(all)).toBe(snapshot)
+  })
+})
+
+describe('results helpers', () => {
+  const { d, ids } = scenario()
+  const byId = (id: string) => d.shipments.find((s) => s.id === id)!
+
+  test('punctuality needs both dates and reports days late', () => {
+    expect(punctuality(byId(ids.onTime))).toEqual({ onTime: true, daysLate: 0 })
+    expect(punctuality(byId(ids.late))).toEqual({ onTime: false, daysLate: 2 })
+    expect(punctuality(byId(ids.noEta))).toBeNull()
+    expect(punctuality(byId(ids.moving))).toBeNull()
+  })
+  test('freight breakdown separates currencies and carriers', () => {
+    const b = freightBreakdown(kpiSet(d.shipments, 'freight', { from: '' }, TODAY))
+    expect(Object.keys(b.byCurrency).sort()).toEqual(['BRL', 'USD'])
+    expect(b.byCurrency.USD).toBe(10)
+    const alfa = b.byCarrier.find((c) => c.carrier === 'Alfa' && c.currency === 'BRL')
+    expect(alfa?.total).toBe(20)
+    expect(b.byCarrier[0]!.total).toBeGreaterThanOrEqual(b.byCarrier.at(-1)!.total)
+  })
+  test('counterparty is the supplier on inbound and the recipient otherwise', () => {
+    const inbound = created({ direction: 'inbound', senderName: 'Fornecedor X', recipientName: 'Minha Empresa' }).d.shipments[0]!
+    expect(counterparty(inbound)).toBe('Fornecedor X')
+    expect(counterparty(byId(ids.moving))).toBe('Ana')
+  })
+  test('sorting is stable, reversible and puts missing estimates last', () => {
+    const asc = sortShipments(d.shipments, 'eta', 'asc').map((s) => s.estimatedDelivery)
+    const firstMissing = asc.findIndex((x) => !x)
+    expect(asc.slice(firstMissing).every((x) => !x)).toBe(true)
+    const desc = sortShipments(d.shipments, 'eta', 'desc').map((s) => s.estimatedDelivery)
+    expect(desc.findIndex((x) => !x)).toBe(firstMissing)
+    const idsAsc = sortShipments(d.shipments, 'id', 'asc').map((s) => s.id)
+    expect(idsAsc[0]).toBe('SHP-0001')
+    expect(sortShipments(d.shipments, 'id', 'desc').map((s) => s.id)).toEqual([...idsAsc].reverse())
+    const byStatus = sortShipments(d.shipments, 'status', 'asc').map((s) => s.status)
+    expect(byStatus[0]).toBe('draft')
   })
 })

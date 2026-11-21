@@ -22,26 +22,32 @@ interface Props {
   hint?: string
   /** Cor do valor, quando ele tem significado financeiro (ex.: prejuízo). */
   valueTone?: 'ok' | 'bad'
+  /** Torna o cartão um botão (filtro). */
+  onClick?: () => void
+  selected?: boolean
 }
 
 /** Cartão de indicador compartilhado: ícone colorido, rótulo, valor grande e linha de apoio. */
-export function KpiTile({ tone, icon, label, value, unit, sub, hint, valueTone }: Props) {
+export function KpiTile({ tone, icon, label, value, unit, sub, hint, valueTone, onClick, selected }: Props) {
+  // Dentro de um <button> só pode haver conteúdo de texto em linha; por isso spans quando o cartão é clicável.
+  const Box = onClick ? 'span' : 'div'
+  const block = onClick ? 'block ' : ''
   // Valores longos (ex.: -R$ 1.234.567,89) usam fonte menor para não quebrar a linha.
   const long = typeof value === 'string' && value.length > 12
   return (
-    <TCard tint={tone === 'bad' ? undefined : tone} className="flex h-full flex-col items-start gap-2.5 p-3.5 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
+    <TCard tint={tone === 'bad' ? undefined : tone} onClick={onClick} pressed={onClick ? !!selected : undefined} className="flex h-full flex-col items-start gap-2.5 p-3.5 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
       <span className={`flex size-10 shrink-0 items-center justify-center rounded-xl sm:size-11 ${ICON_TONE[tone]}`}>{icon}</span>
-      <div className="min-w-0 sm:flex-1">
-        <div className="text-xs font-semibold text-muted">{label}</div>
-        <div className={`display num mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-semibold leading-tight ${long ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'} ${valueTone === 'bad' ? 'text-bad' : ''}`}>
+      <Box className={`${block}min-w-0 sm:flex-1`}>
+        <Box className={`${block}text-xs font-semibold text-muted`}>{label}</Box>
+        <Box className={`display num mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-semibold leading-tight ${long ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'} ${valueTone === 'bad' ? 'text-bad' : ''}`}>
           <span className="whitespace-nowrap">{value}</span>
           {unit ? <span className="text-sm font-medium text-muted">{unit}</span> : null}
-        </div>
-        <div className="mt-0.5 flex min-h-4 flex-wrap items-center gap-x-1.5 text-xs text-subtle">
+        </Box>
+        <Box className="mt-0.5 flex min-h-4 flex-wrap items-center gap-x-1.5 text-xs text-subtle">
           {sub}
           {hint ? <Hint text={hint} /> : null}
-        </div>
-      </div>
+        </Box>
+      </Box>
     </TCard>
   )
 }

@@ -27,6 +27,7 @@ interface Form {
   direction: ShipmentDirection
   orderKind: 'none' | 'sale' | 'purchase'
   saleId: string
+  purchaseId: string
   purchaseLabel: string
   senderName: string
   recipientName: string
@@ -37,6 +38,7 @@ interface Form {
   destCity: string
   destCountry: string
   carrier: string
+  carrierId: string
   trackingNumber: string
   method: string
   declaredValue: string
@@ -83,6 +85,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
         direction: editing.direction,
         orderKind: editing.orderRef?.kind ?? 'none',
         saleId: editing.orderRef?.kind === 'sale' ? (editing.orderRef.id ?? '') : '',
+        purchaseId: editing.orderRef?.kind === 'purchase' ? (editing.orderRef.id ?? '') : '',
         purchaseLabel: editing.orderRef?.kind === 'purchase' ? editing.orderRef.label : '',
         senderName: editing.senderName,
         recipientName: editing.recipientName,
@@ -93,6 +96,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
         destCity: editing.destination.city,
         destCountry: editing.destination.country,
         carrier: editing.carrier,
+        carrierId: editing.carrierId ?? '',
         trackingNumber: editing.trackingNumber,
         method: editing.method,
         declaredValue: editing.declaredValue ? String(editing.declaredValue) : '',
@@ -107,6 +111,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
         direction: 'outbound',
         orderKind: 'none',
         saleId: '',
+        purchaseId: '',
         purchaseLabel: '',
         senderName: data.settings.company,
         recipientName: '',
@@ -117,6 +122,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
         destCity: '',
         destCountry: '',
         carrier: '',
+        carrierId: '',
         trackingNumber: '',
         method: '',
         declaredValue: '',
@@ -141,8 +147,9 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
       return {
         ...f,
         direction: d,
-        orderKind: d === 'outbound' ? f.orderKind : f.orderKind === 'sale' ? 'none' : f.orderKind,
+        orderKind: (d === 'outbound' && f.orderKind === 'sale') || (d === 'inbound' && f.orderKind === 'purchase') ? f.orderKind : 'none',
         saleId: d === 'outbound' ? f.saleId : '',
+        purchaseId: d === 'inbound' ? f.purchaseId : '',
         senderName: d === 'outbound' && !f.senderName ? me : f.senderName,
         recipientName: d === 'inbound' && !f.recipientName ? me : f.recipientName,
       }
@@ -162,6 +169,21 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
       }
     })
 
+  const pickPurchase = (id: string) =>
+    setForm((f) => {
+      if (!f) return f
+      const purchase = data.purchases.find((p) => p.id === id)
+      if (!purchase) return { ...f, purchaseId: id }
+      const noItems = f.items.every((i) => !i.productId && !i.name)
+      return {
+        ...f,
+        purchaseId: id,
+        purchaseLabel: purchase.supplierName,
+        senderName: f.senderName || purchase.supplierName,
+        items: noItems ? purchase.items.map((i) => ({ key: seq++, productId: i.productId, name: i.name, sku: i.sku, qty: String(i.qty) })) : f.items,
+      }
+    })
+
   const patchPkg = (key: number, p: Partial<PkgRow>) => set('packages', form.packages.map((x) => (x.key === key ? { ...x, ...p } : x)))
   const patchItem = (key: number, p: Partial<ItemRow>) => set('items', form.items.map((x) => (x.key === key ? { ...x, ...p } : x)))
 
@@ -172,13 +194,14 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
         form.orderKind === 'sale'
           ? { kind: 'sale', id: form.saleId, label: form.saleId }
           : form.orderKind === 'purchase'
-            ? { kind: 'purchase', label: form.purchaseLabel }
+            ? { kind: 'purchase', id: form.purchaseId || undefined, label: form.purchaseLabel }
             : undefined,
       origin: { name: form.originName, city: form.originCity, country: form.originCountry },
       destination: { name: form.destName, city: form.destCity, country: form.destCountry },
       senderName: form.senderName,
       recipientName: form.recipientName,
       carrier: form.carrier,
+      carrierId: form.carrierId || undefined,
       trackingNumber: form.trackingNumber,
       method: form.method,
       packages: form.packages.filter((p) => [p.weightKg, p.lengthCm, p.widthCm, p.heightCm].some((v) => v.trim() !== '')).map((p) => ({ weightKg: numOrZero(p.weightKg), lengthCm: numOrZero(p.lengthCm), widthCm: numOrZero(p.widthCm), heightCm: numOrZero(p.heightCm) })),
@@ -221,7 +244,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
               <select className={inputCls} value={form.orderKind} onChange={(e) => set('orderKind', e.target.value as Form['orderKind'])}>
                 <option value="none">{t('Nenhum', 'None')}</option>
                 {form.direction === 'outbound' ? <option value="sale">{t('Venda', 'Sale')}</option> : null}
-                <option value="purchase">{t('Compra (referência manual)', 'Purchase (manual reference)')}</option>
+                {form.direction === 'inbound' ? <option value="purchase">{t('Compra', 'Purchase')}</option> : null}
               </select>
             </Field>
           </div>
@@ -240,10 +263,25 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
             </div>
           ) : null}
           {form.orderKind === 'purchase' ? (
-            <div className="mt-3">
-              <Field label={t('Referência da compra', 'Purchase reference')} hint={t('Texto livre. Compras ainda não são registros vinculáveis.', 'Free text. Purchases are not linkable records yet.')}>
-                <input {...text('purchaseLabel')} maxLength={80} />
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label={t('Compra registrada', 'Recorded purchase')} hint={t('Compras feitas na aba Compras. Vincular valida os itens e evita receber duas vezes.', 'Purchases made in the Purchases tab. Linking validates items and prevents receiving twice.')}>
+                <select className={inputCls} value={form.purchaseId} onChange={(e) => pickPurchase(e.target.value)}>
+                  <option value="">{t('Nenhuma (referência manual)', 'None (manual reference)')}</option>
+                  {data.purchases
+                    .filter((p) => !p.receiptId || p.id === form.purchaseId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} · {p.supplierName} · {money(p.total)}
+                        {p.stockPosted ? '' : ` · ${t('aguardando recebimento', 'awaiting receipt')}`}
+                      </option>
+                    ))}
+                </select>
               </Field>
+              {!form.purchaseId ? (
+                <Field label={t('Referência manual', 'Manual reference')} hint={t('Texto livre, sem vínculo.', 'Free text, not linked.')}>
+                  <input {...text('purchaseLabel')} maxLength={80} />
+                </Field>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -290,7 +328,25 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
           <h3 className={h}>{t('Transporte', 'Transport')}</h3>
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label={t('Transportadora', 'Carrier')}>
-              <input {...text('carrier')} maxLength={60} />
+              <select
+                className={inputCls}
+                value={form.carrierId}
+                onChange={(e) => {
+                  const c = data.carriers.find((x) => x.id === e.target.value)
+                  setForm({ ...form, carrierId: e.target.value, carrier: c ? c.name : form.carrierId ? '' : form.carrier })
+                }}
+              >
+                <option value="">{t('Outra (digitar nome)', 'Other (type a name)')}</option>
+                {data.carriers
+                  .filter((c) => c.active || c.id === form.carrierId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.active ? '' : ` (${t('inativa', 'inactive')})`}
+                    </option>
+                  ))}
+              </select>
+              {!form.carrierId ? <input {...text('carrier')} className={`${inputCls} mt-2`} maxLength={60} placeholder={t('Nome da transportadora', 'Carrier name')} /> : null}
             </Field>
             <Field label={t('Código de rastreio', 'Tracking number')}>
               <input {...text('trackingNumber')} className={`${inputCls} mono`} maxLength={40} />

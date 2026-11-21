@@ -39,7 +39,7 @@ export function exportBackup(data: AppData): void {
 
 export type ParseResult = { ok: true; data: AppData; counts: { products: number; sales: number; accounts: number } } | { ok: false; error: string }
 
-const LIST_KEYS = ['products', 'moves', 'contacts', 'entries', 'accounts', 'sales', 'employees', 'treasuryOps', 'requests', 'shipments'] as const
+const LIST_KEYS = ['products', 'moves', 'contacts', 'entries', 'accounts', 'sales', 'employees', 'treasuryOps', 'requests', 'shipments', 'purchases', 'receipts', 'carriers', 'returns'] as const
 
 export function parseBackup(text: string): ParseResult {
   let raw: unknown

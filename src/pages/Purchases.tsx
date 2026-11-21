@@ -26,6 +26,7 @@ export function Purchases() {
   const suppliers = data.contacts.filter((c) => c.kind === 'supplier')
   const [supplierId, setSupplierId] = useState('')
   const [paidNow, setPaidNow] = useState(false)
+  const [awaitReceipt, setAwaitReceipt] = useState(false)
   const [dueDate, setDueDate] = useState(addDays(today(), 15))
   const [lines, setLines] = useState<Line[]>([{ key: seq++, productId: '', qty: '', cost: '' }])
   const [limit, setLimit] = useState(15)
@@ -40,11 +41,13 @@ export function Purchases() {
       supplierId: supplierId || undefined,
       paidNow,
       dueDate,
+      awaitReceipt,
       items: parsed.map((l) => ({ productId: l.productId, qty: l.q, cost: l.c })),
     })
     toast.success(paidNow ? t('Compra registrada e paga.', 'Purchase recorded and paid.') : t('Compra registrada como conta a pagar.', 'Purchase recorded as a payable.'))
     setLines([{ key: seq++, productId: '', qty: '', cost: '' }])
     setSupplierId('')
+    setAwaitReceipt(false)
   }
 
   const history = [
@@ -162,10 +165,24 @@ export function Purchases() {
                   </Field>
                 ) : null}
 
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line px-3 py-2.5">
+                  <input type="checkbox" className="mt-0.5 size-4 accent-violet" checked={awaitReceipt} onChange={(e) => setAwaitReceipt(e.target.checked)} />
+                  <span className="text-sm">
+                    <span className="font-medium">{t('Aguardar recebimento da mercadoria', 'Wait for goods receipt')}</span>
+                    <span className="block text-xs text-muted text-pretty">
+                      {t('O estoque só aumenta quando você confirmar o recebimento na Logística Global. Deixe desmarcado para somar agora.', 'Stock only goes up when you confirm the receipt in Global Logistics. Leave unchecked to add it now.')}
+                    </span>
+                  </span>
+                </label>
+
                 <p className="rounded-xl bg-fill/5 px-3 py-2 text-xs text-muted text-pretty">
-                  {paidNow
-                    ? t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e a saída entra no caixa.', 'On save: stock goes up, product cost is updated and the outflow is recorded in cash.')
-                    : t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e uma conta a pagar é criada.', 'On save: stock goes up, product cost is updated and a payable is created.')}
+                  {awaitReceipt
+                    ? paidNow
+                      ? t('Ao registrar: a saída entra no caixa. Estoque e custo dos produtos mudam só no recebimento.', 'On save: the outflow is recorded in cash. Stock and product cost change only on receipt.')
+                      : t('Ao registrar: uma conta a pagar é criada. Estoque e custo dos produtos mudam só no recebimento.', 'On save: a payable is created. Stock and product cost change only on receipt.')
+                    : paidNow
+                      ? t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e a saída entra no caixa.', 'On save: stock goes up, product cost is updated and the outflow is recorded in cash.')
+                      : t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e uma conta a pagar é criada.', 'On save: stock goes up, product cost is updated and a payable is created.')}
                 </p>
 
                 <div className="flex items-center justify-between border-t border-line pt-4">

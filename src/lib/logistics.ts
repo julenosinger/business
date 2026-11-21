@@ -15,6 +15,7 @@ import type {
   ShipmentParty,
   ShipmentStatus,
 } from './types'
+import { checkOrderCoverage, checkOutboundStock, allPicked, needsFulfillment } from './stock-checks'
 
 export const DEFAULT_ORG = 'local'
 
@@ -85,10 +86,51 @@ export type ErrorCode =
   | 'invalid_document'
   | 'duplicate_document'
   | 'only_draft_removable'
+  | 'not_picked'
+  | 'not_packed'
+  | 'insufficient_stock'
+  | 'item_not_in_order'
+  | 'exceeds_order_qty'
+  | 'unknown_purchase'
+  | 'purchase_already_received'
+  | 'invalid_qty'
+  | 'not_outbound'
+  | 'not_ready'
+  | 'already_packed'
+  | 'not_inbound'
+  | 'not_delivered'
+  | 'already_received'
+  | 'invalid_receipt'
+  | 'receipt_note_required'
+  | 'stock_mode_required'
+  | 'invalid_name'
+  | 'pod_exists'
+  | 'pod_required'
+  | 'already_closed'
+  | 'duplicate_carrier'
+  | 'invalid_url'
+  | 'invalid_email'
+  | 'carrier_in_use'
+  | 'inactive_carrier'
+  | 'unknown_carrier'
+  | 'invalid_service_level'
+  | 'freight_posted'
+  | 'already_posted'
+  | 'currency_mismatch'
+  | 'nothing_to_post'
+  | 'not_international'
+  | 'invalid_hs'
+  | 'invalid_incoterm'
+  | 'return_shipment'
+  | 'exceeds_returnable'
+  | 'restock_not_allowed'
+  | 'decision_required'
+  | 'return_not_arrived'
+  | 'invalid_resolution'
 
 export type Outcome<T> = { ok: true; data: AppData; value: T } | { ok: false; errors: ErrorCode[] }
 
-const fail = <T>(...errors: ErrorCode[]): Outcome<T> => ({ ok: false, errors })
+export const fail = <T>(...errors: ErrorCode[]): Outcome<T> => ({ ok: false, errors })
 
 // ---------- Sanitização ----------
 
@@ -99,10 +141,10 @@ export function clean(value: unknown, max: number): string {
   return value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
 }
 
-const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
+export const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 const isMoney = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
 const isDate = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`))
-const dateOf = (iso: string): string => iso.slice(0, 10)
+export const dateOf = (iso: string): string => iso.slice(0, 10)
 const TRACKING_RE = /^[A-Za-z0-9][A-Za-z0-9._\-/ ]{2,39}$/
 
 // ---------- Entrada ----------
@@ -115,6 +157,8 @@ export interface ShipmentInput {
   senderName: string
   recipientName: string
   carrier: string
+  /** Transportadora cadastrada (opcional). Quando informada, o nome vem do cadastro. */
+  carrierId?: string
   trackingNumber: string
   method: string
   packages: Omit<ShipmentPackage, 'id'>[]
@@ -130,7 +174,7 @@ type Clean = Omit<ShipmentInput, 'packages' | 'items'> & { packages: Omit<Shipme
 const party = (p: ShipmentParty): ShipmentParty => ({ name: clean(p.name, 80), city: clean(p.city, 80), country: clean(p.country, 60) })
 
 /** Valida e normaliza os dados de uma remessa contra os cadastros existentes. */
-export function normalizeInput(d: AppData, input: ShipmentInput): { errors: ErrorCode[]; value: Clean } {
+export function normalizeInput(d: AppData, input: ShipmentInput, selfId?: string): { errors: ErrorCode[]; value: Clean } {
   const errors = new Set<ErrorCode>()
   if (!DIRECTIONS.includes(input.direction)) errors.add('invalid_direction')
   if (!CURRENCIES.includes(input.currency)) errors.add('invalid_currency')
@@ -143,6 +187,20 @@ export function normalizeInput(d: AppData, input: ShipmentInput): { errors: Erro
 
   const trackingNumber = clean(input.trackingNumber, 40)
   if (trackingNumber && !TRACKING_RE.test(trackingNumber)) errors.add('invalid_tracking')
+
+  let carrier = clean(input.carrier, 60)
+  let carrierId: string | undefined
+  if (input.carrierId) {
+    const c = d.carriers.find((x) => x.id === input.carrierId)
+    if (!c) errors.add('unknown_carrier')
+    else {
+      // Transportadora inativa não pode ser escolhida de novo, mas uma remessa que já a usa continua válida.
+      const current = selfId ? d.shipments.find((s) => s.id === selfId)?.carrierId : undefined
+      if (!c.active && c.id !== current) errors.add('inactive_carrier')
+      carrierId = c.id
+      carrier = c.name
+    }
+  }
 
   const estimatedDelivery = input.estimatedDelivery ? clean(input.estimatedDelivery, 10) : undefined
   if (estimatedDelivery && !isDate(estimatedDelivery)) errors.add('invalid_date')
@@ -157,8 +215,15 @@ export function normalizeInput(d: AppData, input: ShipmentInput): { errors: Erro
       if (!sale || sale.canceledAt) errors.add('unknown_sale')
       else orderRef = { kind: 'sale', id: sale.id, label: label || sale.id }
     } else if (input.orderRef.kind === 'purchase') {
-      // Compras ainda não são registros próprios: guarda só a referência de texto, sem vínculo validado.
-      if (label) orderRef = { kind: 'purchase', label }
+      if (input.orderRef.id) {
+        // Compra registrada na aba Compras (a partir da fase 1B): vínculo validado.
+        const purchase = d.purchases.find((p) => p.id === input.orderRef?.id)
+        if (!purchase) errors.add('unknown_purchase')
+        else orderRef = { kind: 'purchase', id: purchase.id, label: label || purchase.supplierName }
+      } else if (label) {
+        // Sem compra registrada: guarda só a referência de texto, sem vínculo validado.
+        orderRef = { kind: 'purchase', label }
+      }
     }
   }
 
@@ -178,6 +243,10 @@ export function normalizeInput(d: AppData, input: ShipmentInput): { errors: Erro
     return { productId: product?.id, name, sku: clean(it.sku || product?.sku || '', 40), qty: it.qty }
   })
 
+  if (orderRef?.id) {
+    for (const e of checkOrderCoverage(d, { id: selfId, direction: input.direction, orderRef, items })) errors.add(e)
+  }
+
   return {
     errors: [...errors],
     value: {
@@ -187,7 +256,8 @@ export function normalizeInput(d: AppData, input: ShipmentInput): { errors: Erro
       destination,
       senderName: clean(input.senderName, 80),
       recipientName,
-      carrier: clean(input.carrier, 60),
+      carrier,
+      carrierId,
       trackingNumber,
       method: clean(input.method, 40),
       packages,
@@ -203,7 +273,7 @@ export function normalizeInput(d: AppData, input: ShipmentInput): { errors: Erro
 // ---------- Identificadores e eventos ----------
 
 let counter = 0
-const uid = (): string => `${Date.now().toString(36)}${(counter++).toString(36)}${Math.random().toString(36).slice(2, 6)}`
+export const uid = (): string => `${Date.now().toString(36)}${(counter++).toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
 /** Próximo código SHP-0001 (maior número existente + 1). */
 export function nextShipmentId(shipments: readonly Shipment[]): string {
@@ -216,9 +286,9 @@ export function nextShipmentId(shipments: readonly Shipment[]): string {
 
 const withIds = <T extends object>(list: T[]): (T & { id: string })[] => list.map((x) => ({ ...x, id: uid() }))
 
-const event = (e: Omit<ShipmentEvent, 'id' | 'source'>): ShipmentEvent => ({ id: uid(), source: 'manual', ...e })
+export const event = (e: Omit<ShipmentEvent, 'id' | 'source'>): ShipmentEvent => ({ id: uid(), source: 'manual', ...e })
 
-const replace = (d: AppData, s: Shipment): AppData => ({ ...d, shipments: d.shipments.map((x) => (x.id === s.id ? s : x)) })
+export const replace = (d: AppData, s: Shipment): AppData => ({ ...d, shipments: d.shipments.map((x) => (x.id === s.id ? s : x)) })
 
 // ---------- Operações ----------
 
@@ -241,7 +311,7 @@ export function createShipment(d: AppData, input: ShipmentInput, now: string, ac
   return { ok: true, data: { ...d, shipments: [s, ...d.shipments] }, value: { id } }
 }
 
-const FIELD_KEYS = ['orderRef', 'origin', 'destination', 'senderName', 'recipientName', 'carrier', 'trackingNumber', 'method', 'packages', 'items', 'declaredValue', 'currency', 'freightCost', 'estimatedDelivery'] as const
+const FIELD_KEYS = ['orderRef', 'origin', 'destination', 'senderName', 'recipientName', 'carrier', 'carrierId', 'trackingNumber', 'method', 'packages', 'items', 'declaredValue', 'currency', 'freightCost', 'estimatedDelivery'] as const
 
 const strip = (list: object[]): string => JSON.stringify(list.map(({ ...rest }) => ({ ...rest, id: undefined })))
 
@@ -250,8 +320,10 @@ export function updateShipment(d: AppData, id: string, input: ShipmentInput, now
   const cur = d.shipments.find((s) => s.id === id)
   if (!cur) return fail('not_found')
   if (LOCKED_STATUSES.includes(cur.status)) return fail('locked')
-  const { errors, value } = normalizeInput(d, { ...input, direction: cur.direction })
+  const { errors, value } = normalizeInput(d, { ...input, direction: cur.direction }, cur.id)
   if (errors.length) return fail(...errors)
+  // O custo já foi lançado em contas a pagar: alterar o frete aqui deixaria os dois valores diferentes.
+  if (value.freightCost !== cur.freightCost && isFreightPosted(d, cur)) return fail('freight_posted')
 
   const changed = FIELD_KEYS.filter((k) => {
     if (k === 'packages' || k === 'items') return strip(cur[k]) !== strip(value[k])
@@ -265,6 +337,8 @@ export function updateShipment(d: AppData, id: string, input: ShipmentInput, now
     direction: cur.direction,
     packages: changed.includes('packages') ? withIds(value.packages) : cur.packages,
     items: changed.includes('items') ? withIds(value.items) : cur.items,
+    // Os itens mudaram: a separação anterior deixa de valer.
+    fulfillment: changed.includes('items') ? undefined : cur.fulfillment,
     events: [...cur.events, event({ kind: 'edit', at: now, description: '', fields: [...changed], actor: clean(actor, 60) })],
     updatedAt: now,
   }
@@ -292,7 +366,16 @@ export function transitionShipment(d: AppData, id: string, to: ShipmentStatus, o
     if (!cur.destination.city || !cur.destination.country) errors.push('missing_destination')
     if (cur.items.length === 0 && cur.packages.length === 0) errors.push('missing_contents')
   }
-  if (to === 'dispatched' && !cur.carrier) errors.push('missing_carrier')
+  if (to === 'dispatched') {
+    if (!cur.carrier) errors.push('missing_carrier')
+    // Remessas de saída com itens do estoque só saem separadas, embaladas e conferidas (sem baixar estoque de novo).
+    if (needsFulfillment(cur)) {
+      if (!allPicked(cur)) errors.push('not_picked')
+      else if (!cur.fulfillment?.packedAt) errors.push('not_packed')
+      const stock = checkOutboundStock(d, cur)
+      if (!stock.ok) errors.push(...stock.errors)
+    }
+  }
 
   let deliveredAt = cur.deliveredAt
   if (to === 'delivered') {
@@ -318,7 +401,7 @@ export interface TrackingInput {
   description: string
 }
 
-const TRACKABLE: readonly ShipmentStatus[] = ['dispatched', 'in_transit', 'out_for_delivery', 'delayed', 'exception', 'delivered', 'returned']
+export const TRACKABLE: readonly ShipmentStatus[] = ['dispatched', 'in_transit', 'out_for_delivery', 'delayed', 'exception', 'delivered', 'returned']
 
 const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
 /** Chave de deduplicação: mesmo instante (ao minuto), local e descrição. */
@@ -367,6 +450,9 @@ export function removeDraft(d: AppData, id: string): Outcome<{ id: string }> {
 
 // ---------- Leituras e indicadores ----------
 
+/** O custo de frete já virou uma conta a pagar que ainda existe. */
+export const isFreightPosted = (d: AppData, s: Shipment): boolean => !!s.freight?.postedAccountId && d.accounts.some((a) => a.id === s.freight?.postedAccountId)
+
 export const isLocked = (s: Shipment): boolean => LOCKED_STATUSES.includes(s.status)
 
 /** Atrasada: prevista para antes de hoje e ainda não entregue, cancelada ou devolvida. */
@@ -389,6 +475,8 @@ export interface Period {
   from: string
 }
 
+export type KpiKey = 'active' | 'moving' | 'delivered' | 'problems' | 'freight' | 'onTime'
+
 export interface LogisticsKpis {
   active: number
   moving: number
@@ -401,30 +489,115 @@ export interface LogisticsKpis {
   freightByCurrency: Record<string, number>
 }
 
+const deliveredInPeriod = (shipments: readonly Shipment[], period: Period): Shipment[] =>
+  shipments.filter((s) => s.status === 'delivered' && !!s.deliveredAt && (!period.from || (s.deliveredAt ?? '') >= period.from))
+
+/**
+ * Conjunto de remessas por trás de cada indicador. É a única definição: os números dos cartões e as listas
+ * mostradas ao clicar neles saem daqui, então nunca divergem.
+ * - active, moving e problems são o retrato atual (não dependem do período).
+ * - delivered e onTime usam a data real de entrega dentro do período.
+ * - freight usa a data de criação dentro do período, sem canceladas e só com frete registrado (maior que zero).
+ */
+export function kpiSet(shipments: readonly Shipment[], key: KpiKey, period: Period, today: string): Shipment[] {
+  switch (key) {
+    case 'active':
+      return shipments.filter((s) => ACTIVE_STATUSES.includes(s.status))
+    case 'moving':
+      return shipments.filter((s) => MOVING_STATUSES.includes(s.status))
+    case 'delivered':
+      return deliveredInPeriod(shipments, period)
+    case 'problems':
+      return shipments.filter((s) => s.status === 'delayed' || s.status === 'exception' || isOverdue(s, today))
+    case 'freight':
+      return shipments.filter((s) => (!period.from || dateOf(s.createdAt) >= period.from) && s.status !== 'cancelled' && s.freightCost > 0)
+    case 'onTime':
+      return deliveredInPeriod(shipments, period).filter((s) => !!s.estimatedDelivery)
+  }
+}
+
 export function kpis(shipments: readonly Shipment[], period: Period, today: string): LogisticsKpis {
-  const inCreated = (s: Shipment) => !period.from || dateOf(s.createdAt) >= period.from
-  const deliveredIn = shipments.filter((s) => s.status === 'delivered' && s.deliveredAt && (!period.from || s.deliveredAt >= period.from))
-  const withEta = deliveredIn.filter((s) => s.estimatedDelivery)
+  const withEta = kpiSet(shipments, 'onTime', period, today)
   const onTime = withEta.filter((s) => (s.deliveredAt ?? '') <= (s.estimatedDelivery ?? ''))
-  const durations = deliveredIn.flatMap((s) => {
+  const durations = kpiSet(shipments, 'delivered', period, today).flatMap((s) => {
     const start = dispatchedOn(s)
     return start && s.deliveredAt ? [Math.max(0, dayDiff(start, s.deliveredAt))] : []
   })
-  const freightByCurrency: Record<string, number> = {}
-  for (const s of shipments.filter(inCreated)) {
-    if (s.status === 'cancelled' || s.freightCost <= 0) continue
-    freightByCurrency[s.currency] = round2((freightByCurrency[s.currency] ?? 0) + s.freightCost)
-  }
   return {
-    active: shipments.filter((s) => ACTIVE_STATUSES.includes(s.status)).length,
-    moving: shipments.filter((s) => MOVING_STATUSES.includes(s.status)).length,
-    delivered: deliveredIn.length,
-    problems: shipments.filter((s) => s.status === 'delayed' || s.status === 'exception' || isOverdue(s, today)).length,
+    active: kpiSet(shipments, 'active', period, today).length,
+    moving: kpiSet(shipments, 'moving', period, today).length,
+    delivered: kpiSet(shipments, 'delivered', period, today).length,
+    problems: kpiSet(shipments, 'problems', period, today).length,
     onTimeRate: withEta.length ? (onTime.length / withEta.length) * 100 : null,
     onTimeSample: withEta.length,
     avgTransitDays: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
-    freightByCurrency,
+    freightByCurrency: freightBreakdown(kpiSet(shipments, 'freight', period, today)).byCurrency,
   }
+}
+
+export interface FreightBreakdown {
+  byCurrency: Record<string, number>
+  byCarrier: { carrier: string; currency: string; total: number; count: number }[]
+}
+
+/** Soma de frete por moeda e por transportadora (moedas nunca são misturadas). Valores zerados não entram. */
+export function freightBreakdown(set: readonly Shipment[]): FreightBreakdown {
+  const byCurrency: Record<string, number> = {}
+  const carriers = new Map<string, { carrier: string; currency: string; total: number; count: number }>()
+  for (const s of set) {
+    if (s.freightCost <= 0) continue
+    byCurrency[s.currency] = round2((byCurrency[s.currency] ?? 0) + s.freightCost)
+    const name = s.carrier || ''
+    const k = `${name}|${s.currency}`
+    const cur = carriers.get(k) ?? { carrier: name, currency: s.currency, total: 0, count: 0 }
+    carriers.set(k, { ...cur, total: round2(cur.total + s.freightCost), count: cur.count + 1 })
+  }
+  return { byCurrency, byCarrier: [...carriers.values()].sort((a, b) => b.total - a.total) }
+}
+
+export interface Punctuality {
+  onTime: boolean
+  /** Dias de atraso na entrega (0 quando no prazo). */
+  daysLate: number
+}
+
+/** Pontualidade de uma entrega. Null quando faltam a data prevista ou a data real. */
+export function punctuality(s: Shipment): Punctuality | null {
+  if (s.status !== 'delivered' || !s.deliveredAt || !s.estimatedDelivery) return null
+  const late = dayDiff(s.estimatedDelivery, s.deliveredAt)
+  return { onTime: late <= 0, daysLate: Math.max(0, late) }
+}
+
+/** Cliente ou fornecedor da remessa: quem envia nas entradas, quem recebe nas demais. */
+export const counterparty = (s: Shipment): string => (s.direction === 'inbound' ? s.senderName || s.origin.name : s.recipientName || s.destination.name)
+
+export type SortKey = 'id' | 'counterparty' | 'eta' | 'status' | 'updated'
+
+/** Ordena sem alterar a lista original. Remessas sem data prevista ficam sempre no fim ao ordenar por previsão. */
+export function sortShipments(list: readonly Shipment[], key: SortKey, dir: 'asc' | 'desc'): Shipment[] {
+  const sign = dir === 'asc' ? 1 : -1
+  const cmp = (a: Shipment, b: Shipment): number => {
+    switch (key) {
+      case 'id':
+        return a.id.localeCompare(b.id, undefined, { numeric: true })
+      case 'counterparty':
+        return counterparty(a).localeCompare(counterparty(b))
+      case 'status':
+        return ALL_STATUSES.indexOf(a.status) - ALL_STATUSES.indexOf(b.status)
+      case 'updated':
+        return a.updatedAt.localeCompare(b.updatedAt)
+      case 'eta':
+        return (a.estimatedDelivery ?? '').localeCompare(b.estimatedDelivery ?? '')
+    }
+  }
+  return [...list].sort((a, b) => {
+    if (key === 'eta') {
+      if (!a.estimatedDelivery && !b.estimatedDelivery) return a.id.localeCompare(b.id)
+      if (!a.estimatedDelivery) return 1
+      if (!b.estimatedDelivery) return -1
+    }
+    return sign * cmp(a, b) || a.id.localeCompare(b.id)
+  })
 }
 
 export function statusCounts(shipments: readonly Shipment[]): Record<ShipmentStatus, number> {
@@ -433,7 +606,7 @@ export function statusCounts(shipments: readonly Shipment[]): Record<ShipmentSta
   return out
 }
 
-export type AlertReason = 'exception' | 'delayed' | 'overdue' | 'no_tracking'
+export type AlertReason = 'exception' | 'delayed' | 'overdue' | 'no_tracking' | 'awaiting_receipt'
 
 export interface LogisticsAlert {
   shipment: Shipment
@@ -448,8 +621,9 @@ export function alerts(shipments: readonly Shipment[], today: string): Logistics
     else if (s.status === 'delayed') out.push({ shipment: s, reason: 'delayed' })
     else if (isOverdue(s, today)) out.push({ shipment: s, reason: 'overdue' })
     else if (MOVING_STATUSES.includes(s.status) && !s.trackingNumber) out.push({ shipment: s, reason: 'no_tracking' })
+    else if (s.direction === 'inbound' && s.status === 'delivered' && !s.receiptId && !s.returnId) out.push({ shipment: s, reason: 'awaiting_receipt' })
   }
-  const weight: Record<AlertReason, number> = { exception: 0, delayed: 1, overdue: 2, no_tracking: 3 }
+  const weight: Record<AlertReason, number> = { exception: 0, delayed: 1, overdue: 2, no_tracking: 3, awaiting_receipt: 4 }
   return out.sort((a, b) => weight[a.reason] - weight[b.reason])
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
-import { AlertTriangle, CalendarClock, CheckCircle2, Clock, Gauge, LineChart, ListChecks, PackageCheck, PackagePlus, PieChart, Plus, RefreshCw, Search, Truck, Wallet } from 'lucide-react'
+import { AlertTriangle, CalendarClock, CheckCircle2, Clock, Gauge, LineChart, ListChecks, PackageCheck, PackagePlus, PieChart, Plus, RefreshCw, Truck, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge, Button, Empty, inputCls } from '@/components/ui'
+import { Badge, Button, Empty } from '@/components/ui'
 import { Bar, C, Donut } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -10,12 +10,18 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { CountBars } from '@/components/logistics/CountBars'
 import { ShipmentDrawer } from '@/components/logistics/ShipmentDrawer'
 import { ShipmentForm } from '@/components/logistics/ShipmentForm'
-import { DirectionBadge, StatusBadge, dateTimeText, eventDetail, eventTitle, formatAmount, routeText, statusColor, statusLabel } from '@/components/logistics/labels'
+import { CarriersPanel } from '@/components/logistics/CarriersPanel'
+import { FreightReport } from '@/components/logistics/FreightReport'
+import { ReturnRequestModal, ReturnsPanel } from '@/components/logistics/ReturnsPanel'
+import { InsightsPanel } from '@/components/logistics/InsightsPanel'
+import { isReturnFinal } from '@/lib/returns'
+import { ShipmentResults, type ResultFilters } from '@/components/logistics/ShipmentResults'
+import { StatusBadge, dateTimeText, eventDetail, eventTitle, formatAmount, statusColor, statusLabel } from '@/components/logistics/labels'
 import { useStore } from '@/lib/store'
-import { ALL_STATUSES, DIRECTIONS, MOVING_STATUSES, alerts, eventFeed, isOverdue, kpis, statusCounts, upcoming, type AlertReason } from '@/lib/logistics'
+import { ALL_STATUSES, MOVING_STATUSES, alerts, eventFeed, isOverdue, kpiSet, kpis, statusCounts, upcoming, type AlertReason, type KpiKey } from '@/lib/logistics'
 import { addDays, fmtDate, num, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
-import type { Shipment, ShipmentDirection, ShipmentStatus } from '@/lib/types'
+import type { Shipment } from '@/lib/types'
 
 type PeriodId = '7' | '30' | '90' | 'all'
 
@@ -27,18 +33,19 @@ const alertText = (r: AlertReason): string =>
     delayed: t('Remessa atrasada', 'Delayed shipment'),
     overdue: t('Previsão de entrega vencida', 'Estimated delivery date passed'),
     no_tracking: t('Despachada sem código de rastreio', 'Dispatched without a tracking number'),
+    awaiting_receipt: t('Entregue e aguardando conferência de recebimento', 'Delivered and awaiting goods receipt'),
   })[r]
 
 export function Logistics() {
   const { data } = useStore()
   const [period, setPeriod] = useState<PeriodId>('30')
   const [, refresh] = useState(0)
-  const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<ShipmentStatus | 'all'>('all')
-  const [dirFilter, setDirFilter] = useState<ShipmentDirection | 'all'>('all')
-  const [limit, setLimit] = useState(15)
+  const [kpi, setKpi] = useState<KpiKey | null>(null)
+  const [filters, setFilters] = useState<ResultFilters>({ q: '', status: 'all', dir: 'all' })
   const [openId, setOpenId] = useState<string | null>(null)
   const [form, setForm] = useState<Shipment | 'new' | null>(null)
+  const [tab, setTab] = useState<'overview' | 'carriers' | 'freight' | 'returns' | 'insights'>('overview')
+  const [returnModal, setReturnModal] = useState<{ open: boolean; shipmentId: string | null }>({ open: false, shipmentId: null })
 
   const shipments = data.shipments
   const todayStr = today()
@@ -76,14 +83,29 @@ export function Logistics() {
   const freightCurrency = k.freightByCurrency[data.settings.currency] !== undefined ? data.settings.currency : Object.keys(k.freightByCurrency)[0]
   const otherFreight = Object.entries(k.freightByCurrency).filter(([c]) => c !== freightCurrency)
 
-  const needle = q.trim().toLowerCase()
-  const list = shipments.filter(
-    (s) =>
-      (statusFilter === 'all' || s.status === statusFilter) &&
-      (dirFilter === 'all' || s.direction === dirFilter) &&
-      (!needle || [s.id, s.trackingNumber, s.recipientName, s.carrier, s.destination.city, s.origin.city].some((v) => v.toLowerCase().includes(needle))),
-  )
-  const shown = list.slice(0, limit)
+  // Conjuntos por indicador: os mesmos que geram os números dos cartões.
+  const sets: Record<KpiKey, Shipment[]> = {
+    active: kpiSet(shipments, 'active', { from }, todayStr),
+    moving: kpiSet(shipments, 'moving', { from }, todayStr),
+    delivered: kpiSet(shipments, 'delivered', { from }, todayStr),
+    problems: kpiSet(shipments, 'problems', { from }, todayStr),
+    freight: kpiSet(shipments, 'freight', { from }, todayStr),
+    onTime: kpiSet(shipments, 'onTime', { from }, todayStr),
+  }
+  const base = kpi ? sets[kpi] : shipments
+  const periodText = period === 'all' ? t('em todo o histórico', 'in all history') : t(`nos últimos ${days} dias`, `in the last ${days} days`)
+
+  const pick = (key: KpiKey) => {
+    setKpi((cur) => (cur === key ? null : key))
+    // No celular a lista fica abaixo dos cartões: leva o usuário até ela sem recarregar a página.
+    window.setTimeout(() => {
+      const el = document.getElementById('shipment-results')
+      // Só rola quando a lista está abaixo da dobra (celular e telas baixas).
+      if (el && el.getBoundingClientRect().top > window.innerHeight * 0.55) el.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    }, 0)
+  }
+  const patchFilters = (f: Partial<ResultFilters>) => setFilters((cur) => ({ ...cur, ...f }))
+  const clearFilters = () => setFilters({ q: '', status: 'all', dir: 'all' })
 
   const onClose = useCallback(() => setOpenId(null), [])
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
@@ -130,15 +152,32 @@ export function Logistics() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 2xl:grid-cols-6">
-        <KpiTile tone="sky" icon={<PackageCheck size={20} />} label={t('Remessas ativas', 'Active shipments')} value={String(k.active)} sub={count(drafts, t('rascunho', 'draft'), t('rascunhos', 'drafts'))} />
-        <KpiTile tone="violet" icon={<Truck size={20} />} label={t('Em trânsito', 'In transit')} value={String(k.moving)} sub={t('despachadas ou a caminho', 'dispatched or on the way')} />
-        <KpiTile tone="ok" icon={<CheckCircle2 size={20} />} label={t('Entregues', 'Delivered')} value={String(k.delivered)} sub={period === 'all' ? t('em todo o histórico', 'all time') : t(`nos últimos ${days} dias`, `in the last ${days} days`)} />
-        <KpiTile tone="bad" icon={<AlertTriangle size={20} />} label={t('Atrasos e exceções', 'Delays and exceptions')} value={String(k.problems)} valueTone={k.problems ? 'bad' : undefined} sub={k.problems ? t('precisam de atenção', 'need attention') : t('Nada pendente', 'Nothing pending')} />
+      <PillTabs
+        label={t('Seções da logística', 'Logistics sections')}
+        value={tab}
+        onChange={(v) => setTab(v)}
+        items={[
+          { id: 'overview', label: t('Visão geral', 'Overview') },
+          { id: 'carriers', label: `${t('Transportadoras', 'Carriers')} (${data.carriers.length})` },
+          { id: 'freight', label: t('Custos de frete', 'Freight costs') },
+          { id: 'returns', label: `${t('Devoluções', 'Returns')} (${data.returns.filter((r) => !isReturnFinal(r)).length})` },
+          { id: 'insights', label: t('Análises', 'Insights') },
+        ]}
+      />
+
+      {tab === 'overview' ? (
+        <>
+      <div role="group" aria-label={t('Indicadores de logística. Clique para filtrar as remessas.', 'Logistics indicators. Click to filter shipments.')} id="logistics-kpis" className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 2xl:grid-cols-6">
+        <KpiTile tone="sky" icon={<PackageCheck size={20} />} label={t('Remessas ativas', 'Active shipments')} onClick={() => pick('active')} selected={kpi === 'active'} value={String(k.active)} sub={count(drafts, t('rascunho', 'draft'), t('rascunhos', 'drafts'))} />
+        <KpiTile tone="violet" icon={<Truck size={20} />} label={t('Em trânsito', 'In transit')} onClick={() => pick('moving')} selected={kpi === 'moving'} value={String(k.moving)} sub={t('despachadas ou a caminho', 'dispatched or on the way')} />
+        <KpiTile tone="ok" icon={<CheckCircle2 size={20} />} label={t('Entregues', 'Delivered')} onClick={() => pick('delivered')} selected={kpi === 'delivered'} value={String(k.delivered)} sub={period === 'all' ? t('em todo o histórico', 'all time') : t(`nos últimos ${days} dias`, `in the last ${days} days`)} />
+        <KpiTile tone="bad" icon={<AlertTriangle size={20} />} label={t('Atrasos e exceções', 'Delays and exceptions')} onClick={() => pick('problems')} selected={kpi === 'problems'} value={String(k.problems)} valueTone={k.problems ? 'bad' : undefined} sub={k.problems ? t('precisam de atenção', 'need attention') : t('Nada pendente', 'Nothing pending')} />
         <KpiTile
           tone="warn"
           icon={<Wallet size={20} />}
           label={t('Custo de frete', 'Freight costs')}
+          onClick={() => pick('freight')}
+          selected={kpi === 'freight'}
           value={freightCurrency ? formatAmount(k.freightByCurrency[freightCurrency] ?? 0, freightCurrency) : '—'}
           sub={otherFreight.length ? otherFreight.map(([c, v]) => formatAmount(v, c)).join(' · ') : freightCurrency ? t('remessas criadas no período', 'shipments created in the period') : t('Sem frete registrado', 'No freight recorded')}
         />
@@ -146,6 +185,8 @@ export function Logistics() {
           tone="ok"
           icon={<Gauge size={20} />}
           label={t('Entregas no prazo', 'On-time delivery')}
+          onClick={() => pick('onTime')}
+          selected={kpi === 'onTime'}
           value={k.onTimeRate === null ? '—' : `${num(k.onTimeRate)}%`}
           sub={k.onTimeRate === null ? t('Sem entregas com data prevista', 'No deliveries with an estimated date') : count(k.onTimeSample, t('entrega avaliada', 'delivery measured'), t('entregas avaliadas', 'deliveries measured'))}
         />
@@ -166,6 +207,19 @@ export function Logistics() {
         </TCard>
       ) : (
         <>
+          <ShipmentResults
+            base={base}
+            kpi={kpi}
+            periodText={periodText}
+            filters={filters}
+            today={todayStr}
+            onFilters={patchFilters}
+            onClearKpi={() => setKpi(null)}
+            onClearFilters={clearFilters}
+            onOpen={setOpenId}
+            onNew={() => setForm('new')}
+          />
+
           <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
             <div className="space-y-4 sm:space-y-5">
               <TCard className="p-4 sm:p-5">
@@ -193,7 +247,7 @@ export function Logistics() {
                 <PanelTitle icon={<Clock size={18} />} title={t('Rastreamento e entregas', 'Tracking and deliveries')} subtitle={t('Últimos registros de todas as remessas', 'Latest records across all shipments')} />
                 <ul className="mt-4 space-y-3">
                   {feed.map((f) => (
-                    <li key={f.event.id} className="flex items-start gap-3">
+                    <li key={`${f.shipment.id}-${f.event.id}`} className="flex items-start gap-3">
                       <span className="mt-1.5 size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-pretty">
@@ -248,8 +302,8 @@ export function Logistics() {
                         <button
                           type="button"
                           onClick={() => {
-                            setStatusFilter(s)
-                            setLimit(15)
+                            patchFilters({ status: s })
+                            document.getElementById('shipment-results')?.scrollIntoView({ block: 'nearest' })
                           }}
                           className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1 text-left hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                           aria-label={`${t('Filtrar por', 'Filter by')} ${statusLabel(s)}`}
@@ -310,135 +364,15 @@ export function Logistics() {
             </div>
           </div>
 
-          <TCard className="overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:px-5">
-              <PanelTitle icon={<Truck size={18} />} title={t('Remessas', 'Shipments')} subtitle={count(list.length, t('remessa', 'shipment'), t('remessas', 'shipments'))} />
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-2 rounded-xl border border-line bg-fill/5 px-3 focus-within:ring-2 focus-within:ring-violet/50">
-                  <Search size={15} className="text-subtle" />
-                  <input
-                    aria-label={t('Buscar remessas', 'Search shipments')}
-                    placeholder={t('Código, rastreio, destinatário…', 'ID, tracking, recipient…')}
-                    value={q}
-                    onChange={(e) => {
-                      setQ(e.target.value)
-                      setLimit(15)
-                    }}
-                    className="min-h-10 w-44 bg-transparent text-sm outline-none placeholder:text-subtle"
-                  />
-                </label>
-                <select
-                  aria-label={t('Filtrar por status', 'Filter by status')}
-                  className={`${inputCls} !min-h-10 !w-auto`}
-                  value={statusFilter}
-                  onChange={(e) => {
-                    setStatusFilter(e.target.value as ShipmentStatus | 'all')
-                    setLimit(15)
-                  }}
-                >
-                  <option value="all">{t('Todos os status', 'All statuses')}</option>
-                  {ALL_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {statusLabel(s)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={t('Filtrar por tipo', 'Filter by type')}
-                  className={`${inputCls} !min-h-10 !w-auto`}
-                  value={dirFilter}
-                  onChange={(e) => {
-                    setDirFilter(e.target.value as ShipmentDirection | 'all')
-                    setLimit(15)
-                  }}
-                >
-                  <option value="all">{t('Todos os tipos', 'All types')}</option>
-                  {DIRECTIONS.map((d) => (
-                    <option key={d} value={d}>
-                      {d === 'inbound' ? t('Entrada', 'Inbound') : d === 'outbound' ? t('Saída', 'Outbound') : t('Transferência', 'Transfer')}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {list.length === 0 ? (
-              <Empty icon={<Search size={22} />} title={t('Nada encontrado', 'Nothing found')} text={t('Ajuste a busca ou os filtros.', 'Adjust the search or filters.')} />
-            ) : (
-              <>
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full min-w-[760px] border-collapse [&_tbody_tr]:border-t [&_tbody_tr]:border-line">
-                    <thead>
-                      <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-subtle">
-                        <th className="px-4 py-2.5">{t('Código', 'ID')}</th>
-                        <th className="px-3 py-2.5">{t('Rota', 'Route')}</th>
-                        <th className="px-3 py-2.5">{t('Transportadora', 'Carrier')}</th>
-                        <th className="px-3 py-2.5">{t('Previsão', 'ETA')}</th>
-                        <th className="px-3 py-2.5">Status</th>
-                        <th className="px-4 py-2.5 text-right">{t('Frete', 'Freight')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shown.map((s) => (
-                        <tr key={s.id} className="transition hover:bg-fill/5">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {openRow(s)}
-                              <DirectionBadge direction={s.direction} />
-                            </div>
-                          </td>
-                          <td className="max-w-[220px] px-3 py-3 text-sm">
-                            <div className="truncate">{routeText(s)}</div>
-                            <div className="truncate text-xs text-subtle">{s.recipientName}</div>
-                          </td>
-                          <td className="px-3 py-3 text-sm">
-                            <div>{s.carrier || <span className="text-subtle">—</span>}</div>
-                            {s.trackingNumber ? <div className="mono text-xs text-subtle">{s.trackingNumber}</div> : null}
-                          </td>
-                          <td className="num whitespace-nowrap px-3 py-3 text-sm">
-                            {s.estimatedDelivery ? fmtDate(s.estimatedDelivery) : '—'}
-                            {isOverdue(s, todayStr) ? <span className="ml-1.5 text-xs text-bad">{t('vencida', 'overdue')}</span> : null}
-                          </td>
-                          <td className="px-3 py-3">
-                            <StatusBadge status={s.status} />
-                          </td>
-                          <td className="num whitespace-nowrap px-4 py-3 text-right text-sm">{s.freightCost ? formatAmount(s.freightCost, s.currency) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <ul className="divide-y divide-line md:hidden">
-                  {shown.map((s) => (
-                    <li key={s.id} className="space-y-1.5 p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-2">
-                          {openRow(s)}
-                          <DirectionBadge direction={s.direction} />
-                        </span>
-                        <StatusBadge status={s.status} />
-                      </div>
-                      <p className="text-sm">{routeText(s)}</p>
-                      <p className="text-xs text-subtle">
-                        {s.recipientName}
-                        {s.carrier ? ` · ${s.carrier}` : ''}
-                        {s.estimatedDelivery ? ` · ${t('previsão', 'ETA')} ${fmtDate(s.estimatedDelivery)}` : ''}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-                {list.length > shown.length ? (
-                  <div className="border-t border-line p-3 text-center">
-                    <Button variant="ghost" small onClick={() => setLimit((l) => l + 15)}>
-                      {t('Ver mais', 'View more')} ({list.length - shown.length})
-                    </Button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </TCard>
         </>
       )}
+        </>
+      ) : null}
+
+      {tab === 'carriers' ? <CarriersPanel /> : null}
+      {tab === 'freight' ? <FreightReport shipments={shipments} from={from} periodText={period === 'all' ? t('em todo o histórico', 'across all history') : t(`nos últimos ${days} dias`, `in the last ${days} days`)} onOpen={setOpenId} /> : null}
+      {tab === 'insights' ? <InsightsPanel shipments={shipments} from={from} periodText={period === 'all' ? t('em todo o histórico', 'across all history') : t(`nos últimos ${days} dias`, `in the last ${days} days`)} onOpen={setOpenId} /> : null}
+      {tab === 'returns' ? <ReturnsPanel onNew={() => setReturnModal({ open: true, shipmentId: null })} onOpenShipment={setOpenId} /> : null}
 
       <ShipmentDrawer
         shipment={openShipment}
@@ -447,7 +381,13 @@ export function Logistics() {
           setOpenId(null)
           setForm(s)
         }}
+        onRequestReturn={(id) => {
+          setOpenId(null)
+          setTab('returns')
+          setReturnModal({ open: true, shipmentId: id })
+        }}
       />
+      <ReturnRequestModal open={returnModal.open} shipmentId={returnModal.shipmentId} onClose={() => setReturnModal({ open: false, shipmentId: null })} onCreated={() => setReturnModal({ open: false, shipmentId: null })} />
       <ShipmentForm target={form} onClose={() => setForm(null)} onSaved={(id) => setOpenId(id)} />
     </div>
   )

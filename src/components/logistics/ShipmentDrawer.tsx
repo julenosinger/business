@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, FilePlus2, FileText, Pencil, PlusCircle, RefreshCw, Trash2, Truck, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FilePlus2, FileText, PackageCheck, PackageOpen, Pencil, PlusCircle, Receipt, RefreshCw, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Field, inputCls } from '@/components/ui'
 import { useStore } from '@/lib/store'
@@ -8,6 +8,12 @@ import { DOCUMENT_TYPES, isLocked, isOverdue, lastTrackingEvent, nextStatuses } 
 import { fmtDate, num, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Shipment, ShipmentDocumentType, ShipmentEvent, ShipmentStatus } from '@/lib/types'
+import { FulfillmentPanel } from './FulfillmentPanel'
+import { FreightPanel } from './FreightPanel'
+import { InternationalPanel } from './InternationalPanel'
+import { ReturnBadge } from './ReturnsPanel'
+import { trackingUrl } from '@/lib/carriers'
+import { ReceivingPanel } from './ReceivingPanel'
 import { DirectionBadge, StatusBadge, dateTimeText, documentLabel, eventDetail, eventTitle, explain, formatAmount, localDateTime, statusLabel } from './labels'
 
 const TRACKABLE: readonly ShipmentStatus[] = ['dispatched', 'in_transit', 'out_for_delivery', 'delayed', 'exception', 'delivered', 'returned']
@@ -19,6 +25,9 @@ function EventIcon({ e }: { e: ShipmentEvent }) {
   if (e.kind === 'tracking') return <Truck className={cls} />
   if (e.kind === 'document') return <FileText className={cls} />
   if (e.kind === 'edit') return <Pencil className={cls} />
+  if (e.kind === 'fulfillment') return <PackageCheck className={cls} />
+  if (e.kind === 'receipt') return <PackageOpen className={cls} />
+  if (e.kind === 'freight') return <Receipt className={cls} />
   if (e.kind === 'status' && e.toStatus === 'delivered') return <CheckCircle2 className={cls} />
   if (e.kind === 'status' && (e.toStatus === 'exception' || e.toStatus === 'delayed')) return <AlertTriangle className={cls} />
   return <RefreshCw className={cls} />
@@ -38,7 +47,7 @@ function Timeline({ shipment }: { shipment: Shipment }) {
             <p className="text-sm font-semibold text-pretty">{eventTitle(e)}</p>
             {detail ? <p className="text-sm text-muted text-pretty">{detail}</p> : null}
             <p className="mt-0.5 text-xs text-subtle">
-              {e.kind === 'tracking' && e.occurredAt ? `${dateTimeText(e.occurredAt)} · ${t('registrado em', 'recorded on')} ${dateTimeText(e.at)}` : dateTimeText(e.at)} · {t('Manual', 'Manual')} · {e.actor}
+              {e.kind === 'tracking' && e.occurredAt ? `${dateTimeText(e.occurredAt)} · ${t('registrado em', 'recorded on')} ${dateTimeText(e.at)}` : dateTimeText(e.at)} · {e.source === 'carrier' ? t('Transportadora (verificado)', 'Carrier (verified)') : t('Manual', 'Manual')} · {e.actor}
             </p>
           </li>
         )
@@ -60,11 +69,13 @@ interface Props {
   shipment: Shipment | null
   onClose: () => void
   onEdit: (s: Shipment) => void
+  /** Abre a solicitação de devolução desta remessa (aba Devoluções). */
+  onRequestReturn: (shipmentId: string) => void
 }
 
 /** Detalhe da remessa: resumo, ações de status, rastreio manual, documentos e histórico de auditoria. */
-export function ShipmentDrawer({ shipment, onClose, onEdit }: Props) {
-  const { transitionShipment, addShipmentEvent, addShipmentDocument, removeShipmentDraft } = useStore()
+export function ShipmentDrawer({ shipment, onClose, onEdit, onRequestReturn }: Props) {
+  const { data, transitionShipment, addShipmentEvent, addShipmentDocument, removeShipmentDraft } = useStore()
   const panelRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const open = shipment !== null
@@ -167,6 +178,7 @@ export function ShipmentDrawer({ shipment, onClose, onEdit }: Props) {
   }
 
   const last = s ? lastTrackingEvent(s) : undefined
+  const link = s ? trackingUrl(data.carriers.find((c) => c.id === s.carrierId), s.trackingNumber) : null
   const locked = s ? isLocked(s) : false
   const overdue = s ? isOverdue(s, today()) : false
   const totalWeight = s ? s.packages.reduce((sum, p) => sum + p.weightKg, 0) : 0
@@ -270,11 +282,53 @@ export function ShipmentDrawer({ shipment, onClose, onEdit }: Props) {
                   ) : null}
                 </section>
 
+                <FulfillmentPanel s={s} />
+                <ReceivingPanel s={s} />
+                <FreightPanel s={s} />
+                <InternationalPanel s={s} />
+                {s.direction === 'outbound' && s.status === 'delivered' ? (
+                  <section aria-label={t('Devoluções', 'Returns')} className="space-y-2 rounded-xl border border-line p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">{t('Devoluções', 'Returns')}</h3>
+                      <Button small variant="ghost" onClick={() => onRequestReturn(s.id)}>
+                        {t('Solicitar devolução', 'Request a return')}
+                      </Button>
+                    </div>
+                    {data.returns.filter((r) => r.shipmentId === s.id).length ? (
+                      <ul className="divide-y divide-line rounded-lg border border-line">
+                        {data.returns
+                          .filter((r) => r.shipmentId === s.id)
+                          .map((r) => (
+                            <li key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                              <span className="mono font-semibold">{r.id}</span>
+                              <ReturnBadge status={r.status} />
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-subtle">{t('Nenhuma devolução solicitada para esta remessa.', 'No returns requested for this shipment.')}</p>
+                    )}
+                  </section>
+                ) : null}
+
                 {/* Resumo */}
                 <section aria-label={t('Resumo', 'Summary')}>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
                     <Row label={t('Transportadora', 'Carrier')}>{s.carrier}</Row>
-                    <Row label={t('Código de rastreio', 'Tracking number')}>{s.trackingNumber ? <span className="mono">{s.trackingNumber}</span> : ''}</Row>
+                    <Row label={t('Código de rastreio', 'Tracking number')}>
+                      {s.trackingNumber ? (
+                        <>
+                          <span className="mono">{s.trackingNumber}</span>
+                          {link ? (
+                            <a href={link} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+                              {t('Abrir rastreio', 'Open tracking')}
+                            </a>
+                          ) : null}
+                        </>
+                      ) : (
+                        ''
+                      )}
+                    </Row>
                     <Row label={t('Método', 'Method')}>{s.method}</Row>
                     <Row label={t('Pedido', 'Order')}>{s.orderRef ? `${s.orderRef.kind === 'sale' ? t('Venda', 'Sale') : t('Compra', 'Purchase')} · ${s.orderRef.label}` : ''}</Row>
                     <Row label={t('Remetente', 'Sender')}>{s.senderName}</Row>
@@ -298,7 +352,7 @@ export function ShipmentDrawer({ shipment, onClose, onEdit }: Props) {
                       <span className="font-semibold">{last.description}</span>
                       {last.location ? ` · ${last.location}` : ''}
                       <span className="block text-xs text-subtle">
-                        {dateTimeText(last.occurredAt ?? last.at)} · {t('informado manualmente por', 'entered manually by')} {last.actor}
+                        {dateTimeText(last.occurredAt ?? last.at)} · {last.source === 'carrier' ? t('enviado pela transportadora (verificado):', 'sent by the carrier (verified):') : t('informado manualmente por', 'entered manually by')} {last.actor}
                       </span>
                     </p>
                   ) : (

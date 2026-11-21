@@ -20,6 +20,12 @@ import {
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
 import * as logistics from './logistics'
+import * as fulfillment from './fulfillment'
+import * as receiving from './receiving'
+import * as carriers from './carriers'
+import * as freight from './freight'
+import * as international from './international'
+import * as returns from './returns'
 import { buildDemoData } from './demo'
 import { t } from './i18n'
 
@@ -48,6 +54,10 @@ export function emptyData(): AppData {
     treasuryOps: [],
     requests: [],
     shipments: [],
+  carriers: [],
+  returns: [],
+  purchases: [],
+  receipts: [],
     settings: emptySettings(),
   }
 }
@@ -76,6 +86,8 @@ export interface PurchaseInput {
   paidNow: boolean
   dueDate: string
   items: { productId: string; qty: number; cost: number }[]
+  /** Registra a compra sem somar o estoque: ele só entra no recebimento de mercadorias (aba Logística). */
+  awaitReceipt?: boolean
 }
 
 /** Resultado de uma operação de logística para a interface (sem o estado interno). */
@@ -114,6 +126,25 @@ export interface Store {
   addShipmentEvent: (id: string, input: logistics.TrackingInput) => LogisticsResult<{ eventId: string }>
   addShipmentDocument: (id: string, input: { type: ShipmentDocumentType; reference: string }) => LogisticsResult<{ documentId: string }>
   removeShipmentDraft: (id: string) => LogisticsResult<{ id: string }>
+  pickShipmentItem: (id: string, itemId: string, qty: number) => LogisticsResult<{ picked: number }>
+  packShipment: (id: string) => LogisticsResult<{ mode: 'sale_deducted' | 'on_hand' }>
+  recordShipmentPod: (id: string, input: fulfillment.PodInput) => LogisticsResult<{ id: string }>
+  closeShipmentFulfillment: (id: string) => LogisticsResult<{ id: string }>
+  receiveShipmentGoods: (id: string, input: receiving.ReceiptInput) => LogisticsResult<receiving.ReceiptResult>
+  createCarrier: (input: carriers.CarrierInput) => LogisticsResult<{ id: string }>
+  updateCarrier: (id: string, input: carriers.CarrierInput) => LogisticsResult<{ id: string }>
+  setCarrierActive: (id: string, active: boolean) => LogisticsResult<{ id: string }>
+  removeCarrier: (id: string) => LogisticsResult<{ id: string }>
+  setShipmentFreight: (id: string, input: freight.FreightInput) => LogisticsResult<{ total: number }>
+  postShipmentFreight: (id: string, dueDate: string) => LogisticsResult<{ accountId: string; amount: number }>
+  setShipmentInternational: (id: string, input: international.InternationalInput) => LogisticsResult<{ id: string }>
+  requestReturn: (input: returns.ReturnRequestInput) => LogisticsResult<{ id: string }>
+  authorizeReturn: (id: string, note?: string) => LogisticsResult<{ id: string }>
+  rejectReturn: (id: string, note: string) => LogisticsResult<{ id: string }>
+  cancelReturn: (id: string, note?: string) => LogisticsResult<{ id: string }>
+  createReturnShipment: (id: string) => LogisticsResult<{ shipmentId: string }>
+  inspectReturn: (id: string, input: returns.InspectionInput) => LogisticsResult<{ restocked: { productId: string; qty: number }[] }>
+  resolveReturn: (id: string, input: returns.ResolutionInput) => LogisticsResult<{ id: string }>
   updateSettings: (patch: Partial<Settings>) => void
   importData: (next: AppData) => void
   loadDemo: () => void
@@ -318,15 +349,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const date = today()
           const total = round2(input.items.reduce((s, i) => s + i.qty * i.cost, 0))
           const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
+          const awaiting = !!input.awaitReceipt
           const next: AppData = {
             ...d,
-            products: d.products.map((p) => {
-              const it = input.items.find((i) => i.productId === p.id)
-              return it ? { ...p, stock: p.stock + it.qty, cost: it.cost } : p
-            }),
-            moves: [
-              ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`) })),
-              ...d.moves,
+            // Fluxo padrão: a compra soma o estoque na hora. Aguardando recebimento: o estoque só entra no recebimento.
+            products: awaiting
+              ? d.products
+              : d.products.map((p) => {
+                  const it = input.items.find((i) => i.productId === p.id)
+                  return it ? { ...p, stock: p.stock + it.qty, cost: it.cost } : p
+                }),
+            moves: awaiting
+              ? d.moves
+              : [
+                  ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`) })),
+                  ...d.moves,
+                ],
+            purchases: [
+              {
+                id: receiving.nextPurchaseId(d.purchases),
+                date,
+                supplierId: supplier?.id,
+                supplierName: name,
+                items: input.items.map((i) => {
+                  const p = d.products.find((x) => x.id === i.productId)
+                  return { productId: i.productId, name: p?.name ?? '', sku: p?.sku ?? '', qty: i.qty, cost: i.cost }
+                }),
+                total,
+                stockPosted: !awaiting,
+                createdAt: new Date().toISOString(),
+              },
+              ...d.purchases,
             ],
           }
           const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
@@ -408,6 +461,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       transitionShipment: (id, to, opts = {}) => runShipmentOp((d, now) => logistics.transitionShipment(d, id, to, opts, now, today(), actor())),
       addShipmentEvent: (id, input) => runShipmentOp((d, now) => logistics.addTrackingEvent(d, id, input, now, actor())),
       addShipmentDocument: (id, input) => runShipmentOp((d, now) => logistics.addDocument(d, id, input, now, actor())),
+      pickShipmentItem: (id, itemId, qty) => runShipmentOp((d, now) => fulfillment.pickItem(d, id, itemId, qty, now, actor())),
+      packShipment: (id) => runShipmentOp((d, now) => fulfillment.packShipment(d, id, now, actor())),
+      recordShipmentPod: (id, input) => runShipmentOp((d, now) => fulfillment.recordPod(d, id, input, now, actor())),
+      closeShipmentFulfillment: (id) => runShipmentOp((d, now) => fulfillment.closeFulfillment(d, id, now, actor())),
+      // Único ponto da logística que soma estoque: só depois da conferência do recebimento e uma única vez.
+      receiveShipmentGoods: (id, input) => runShipmentOp((d, now) => receiving.receiveGoods(d, id, input, now, today(), actor())),
+      createCarrier: (input) => runShipmentOp((d, now) => carriers.createCarrier(d, input, now)),
+      updateCarrier: (id, input) => runShipmentOp((d, now) => carriers.updateCarrier(d, id, input, now)),
+      setCarrierActive: (id, active) => runShipmentOp((d, now) => carriers.setCarrierActive(d, id, active, now)),
+      removeCarrier: (id) => runShipmentOp((d) => carriers.removeCarrier(d, id)),
+      setShipmentFreight: (id, input) => runShipmentOp((d, now) => freight.setFreight(d, id, input, now, actor())),
+      // Cria uma conta a pagar (Logística) uma única vez, na moeda do app. O pagamento segue pelo financeiro normal.
+      postShipmentFreight: (id, dueDate) => runShipmentOp((d, now) => freight.postFreight(d, id, { dueDate }, now, d.settings.currency, actor())),
+      setShipmentInternational: (id, input) => runShipmentOp((d, now) => international.setInternational(d, id, input, now, actor())),
+      requestReturn: (input) => runShipmentOp((d, now) => returns.requestReturn(d, input, now, actor())),
+      authorizeReturn: (id, note = '') => runShipmentOp((d, now) => returns.authorizeReturn(d, id, note, now, actor())),
+      rejectReturn: (id, note) => runShipmentOp((d, now) => returns.rejectReturn(d, id, note, now, actor())),
+      cancelReturn: (id, note = '') => runShipmentOp((d, now) => returns.cancelReturn(d, id, note, now, actor())),
+      createReturnShipment: (id) => runShipmentOp((d, now) => returns.createReturnShipment(d, id, now, actor())),
+      // Único ponto da devolução que mexe no estoque: só itens inspecionados em bom estado e com decisão de reestocar.
+      inspectReturn: (id, input) => runShipmentOp((d, now) => returns.inspectReturn(d, id, input, now, today(), actor())),
+      resolveReturn: (id, input) => runShipmentOp((d, now) => returns.resolveReturn(d, id, input, now, actor())),
       removeShipmentDraft: (id) => {
         const out = logistics.removeDraft(data, id)
         if (!out.ok) return out
