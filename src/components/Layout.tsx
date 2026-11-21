@@ -1,48 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { ConnectKitButton } from 'connectkit'
 import { clsx } from 'clsx'
-import {
-  BarChart3,
-  BookOpen,
-  Boxes,
-  Building2,
-  Landmark,
-  LayoutDashboard,
-  Menu,
-  Moon,
-  Receipt,
-  Settings,
-  ShoppingBag,
-  ShoppingCart,
-  Sun,
-  Truck,
-  UserRound,
-  Users,
-  Wallet,
-  X,
-} from 'lucide-react'
-import { useNav, type PageId } from '@/lib/nav'
+import { Menu, Moon, Sun, Wallet } from 'lucide-react'
+import { MobileDrawer, Sidebar, useSidebarWidth } from '@/components/sidebar/Sidebar'
+import { sidebar, useSidebar } from '@/lib/sidebar'
+import { useNav } from '@/lib/nav'
 import { useStore } from '@/lib/store'
 import { shortAddr } from '@/lib/format'
 import { t, useLang } from '@/lib/i18n'
 import { setTheme, useTheme } from '@/lib/theme'
-
-function navItems(): { id: PageId; label: string; icon: ReactNode; badge?: string }[] {
-  return [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-    { id: 'accounting', label: t('Contabilidade', 'Accounting'), icon: <BookOpen size={18} /> },
-    { id: 'finance', label: t('Contas a pagar e receber', 'Payables and receivables'), icon: <Receipt size={18} /> },
-    { id: 'sales', label: t('Vendas e PDV', 'Sales and POS'), icon: <ShoppingCart size={18} /> },
-    { id: 'stock', label: t('Estoque', 'Inventory'), icon: <Boxes size={18} /> },
-    { id: 'purchases', label: t('Compras', 'Purchases'), icon: <ShoppingBag size={18} /> },
-    { id: 'customers', label: t('Clientes', 'Customers'), icon: <Users size={18} /> },
-    { id: 'suppliers', label: t('Fornecedores', 'Suppliers'), icon: <Truck size={18} /> },
-    { id: 'hr', label: t('Funcionários', 'Employees'), icon: <UserRound size={18} /> },
-    { id: 'treasury', label: t('Tesouraria', 'Treasury'), icon: <Landmark size={18} />, badge: 'Circle' },
-    { id: 'reports', label: t('Relatórios', 'Reports'), icon: <BarChart3 size={18} /> },
-    { id: 'settings', label: t('Configurações', 'Settings'), icon: <Settings size={18} /> },
-  ]
-}
 
 export function Toggles() {
   const { lang, setLang } = useLang()
@@ -72,86 +38,28 @@ export function Toggles() {
   )
 }
 
-function Brand() {
-  return (
-    <div className="flex items-center gap-3 px-2">
-      <div className="flex size-10 items-center justify-center rounded-xl bg-accent text-accent-ink">
-        <Building2 size={20} />
-      </div>
-      <div className="leading-tight">
-        <div className="display text-base font-semibold">Global Business OS</div>
-        <div className="text-[11px] text-subtle">{t('ERP, finanças e tesouraria', 'ERP, finance and treasury')}</div>
-      </div>
-    </div>
-  )
-}
-
-function NavList({ onPick }: { onPick: () => void }) {
-  const { page, go } = useNav()
-  return (
-    <nav className="mt-6 flex flex-col gap-1" aria-label={t('Principal', 'Main')}>
-      {navItems().map((it) => (
-        <button
-          key={it.id}
-          onClick={() => {
-            go(it.id)
-            onPick()
-          }}
-          aria-current={page === it.id ? 'page' : undefined}
-          className={clsx(
-            'flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition',
-            page === it.id ? 'bg-accent text-accent-ink' : 'text-muted hover:bg-surface-strong hover:text-ink',
-          )}
-        >
-          {it.icon}
-          <span className="flex-1 text-left">{it.label}</span>
-          {it.badge ? (
-            <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-bold', page === it.id ? 'bg-accent-ink/15' : 'bg-accent/15 text-accent')}>
-              {it.badge}
-            </span>
-          ) : null}
-        </button>
-      ))}
-    </nav>
-  )
-}
-
 export function Layout({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
   const { data } = useStore()
   const { go } = useNav()
+  const { mobileOpen } = useSidebar()
+  const width = useSidebarWidth()
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[264px_1fr]">
-      <aside className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-fill/5 p-4 lg:flex">
-        <Brand />
-        <NavList onPick={() => undefined} />
-        <div className="mt-auto pt-6">
-          <div className="rounded-2xl border border-line bg-surface p-3 text-xs text-muted">
-            <div className="label mb-1">{t('Rede', 'Network')}</div>
-            {t('Tesouraria operando em testnet com USDC.', 'Treasury running on testnet with USDC.')}
-          </div>
-        </div>
-      </aside>
+    <div className="min-h-dvh">
+      <Sidebar />
+      <MobileDrawer />
 
-      {open ? (
-        <div className="fixed inset-0 z-40 lg:hidden" onMouseDown={() => setOpen(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <aside className="absolute inset-y-0 left-0 w-72 overflow-y-auto border-r border-line bg-panel p-4" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <Brand />
-              <button aria-label={t('Fechar menu', 'Close menu')} onClick={() => setOpen(false)} className="flex size-10 items-center justify-center rounded-xl text-muted">
-                <X size={18} />
-              </button>
-            </div>
-            <NavList onPick={() => setOpen(false)} />
-          </aside>
-        </div>
-      ) : null}
-
-      <div className="min-w-0">
+      <div className="min-w-0 transition-[padding-left] duration-200 ease-out motion-reduce:transition-none" style={{ paddingLeft: width }}>
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-bg/80 px-4 py-3 backdrop-blur sm:px-6">
-          <button aria-label={t('Abrir menu', 'Open menu')} onClick={() => setOpen(true)} className="flex size-10 items-center justify-center rounded-xl border border-line text-muted lg:hidden">
+          <button
+            type="button"
+            aria-label={t('Abrir menu', 'Open menu')}
+            aria-haspopup="dialog"
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-nav"
+            onClick={() => sidebar.setMobileOpen(true)}
+            className="flex size-10 items-center justify-center rounded-xl border border-line text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 md:hidden"
+          >
             <Menu size={18} />
           </button>
           <div className="min-w-0 flex-1">
