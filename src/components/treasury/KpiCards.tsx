@@ -1,39 +1,11 @@
 import type { ReactNode } from 'react'
 import { Activity, Clock, Database, Wallet } from 'lucide-react'
-import { Hint, Skeleton } from '@/components/ui'
+import { Skeleton } from '@/components/ui'
 import { money, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { GatewayBalances } from '@/lib/gateway'
 import type { Period } from './shared'
-import { TCard } from './TCard'
-
-type Tone = 'ok' | 'violet' | 'warn' | 'sky'
-
-const ICON_TONE: Record<Tone, string> = {
-  ok: 'bg-ok/15 text-ok',
-  violet: 'bg-violet/15 text-violet',
-  warn: 'bg-warn/15 text-warn',
-  sky: 'bg-sky/15 text-sky',
-}
-
-function Kpi({ tone, icon, label, hint, value, unit, sub }: { tone: Tone; icon: ReactNode; label: string; hint?: string; value: ReactNode; unit?: string; sub?: ReactNode }) {
-  return (
-    <TCard tint={tone} className="flex h-full flex-col items-start gap-2.5 p-3.5 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
-      <span className={`flex size-10 shrink-0 items-center justify-center rounded-xl sm:size-11 ${ICON_TONE[tone]}`}>{icon}</span>
-      <div className="min-w-0 sm:flex-1">
-        <div className="text-xs font-semibold text-muted">{label}</div>
-        <div className="display num mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-2xl font-semibold leading-tight">
-          {value}
-          {unit ? <span className="text-sm font-medium text-muted">{unit}</span> : null}
-        </div>
-        <div className="mt-0.5 flex min-h-4 items-center gap-1.5 text-xs text-subtle">
-          {sub}
-          {hint ? <Hint text={hint} /> : null}
-        </div>
-      </div>
-    </TCard>
-  )
-}
+import { KpiTile as Kpi } from '@/components/ds/KpiTile'
 
 interface Props {
   connected: boolean
@@ -62,7 +34,7 @@ export function KpiCards({ connected, loading, failed, onRetry, balances, rate, 
   ) : null
 
   return (
-    <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
       <Kpi
         tone="ok"
         icon={<Wallet size={20} />}

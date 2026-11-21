@@ -8,7 +8,7 @@ import { shortAddr, usdcFmt } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
 import type { TreasuryOp } from '@/lib/types'
 import { sameAddress } from './shared'
-import { PanelTitle, TCard } from './TCard'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
 
 const PAGE = 8
 

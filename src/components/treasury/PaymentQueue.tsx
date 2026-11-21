@@ -1,5 +1,5 @@
 import { Badge, Button, CardTitle } from '@/components/ui'
-import { TCard } from './TCard'
+import { TCard } from '@/components/ds/Panel'
 import { daysUntil, fmtDate, money, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Account } from '@/lib/types'

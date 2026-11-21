@@ -1,7 +1,11 @@
 import { useState } from 'react'
-import { Check, Coins, HandCoins, Pencil, Plus, Receipt, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Check, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge, Button, Card, Empty, Field, Modal, PageHeader, Stat, Tabs, TableWrap, inputCls, td, th } from '@/components/ui'
+import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
+import { KpiTile } from '@/components/ds/KpiTile'
+import { PageTop } from '@/components/ds/PageTop'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
+import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { accountTotals } from '@/lib/selectors'
@@ -105,20 +109,100 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   )
 }
 
+type Tab = 'open' | 'payable' | 'receivable' | 'paid'
+
 export function Finance() {
   const { data, settleAccount, removeAccount } = useStore()
   const { requestPay, requestIntent } = useNav()
-  const [tab, setTab] = useState<'open' | 'payable' | 'receivable' | 'paid'>('open')
+  const [tab, setTab] = useState<Tab>('open')
   const [target, setTarget] = useState<Account | 'new' | null>(null)
+  const [limit, setLimit] = useState(30)
   const totals = accountTotals(data)
+
+  const openAll = data.accounts.filter((a) => a.status === 'open')
+  const openReceivable = openAll.filter((a) => a.kind === 'receivable')
+  const openPayable = openAll.filter((a) => a.kind === 'payable')
+  const overdue = (kind: Account['kind']) => openAll.filter((a) => a.kind === kind && daysUntil(a.dueDate) < 0).length
+  const plural = (n: number) => (n === 1 ? t('conta', 'bill') : t('contas', 'bills'))
 
   const list = data.accounts
     .filter((a) => (tab === 'open' ? a.status === 'open' : tab === 'paid' ? a.status === 'paid' : a.kind === tab && a.status === 'open'))
     .sort((a, b) => (tab === 'paid' ? (b.paidAt ?? '').localeCompare(a.paidAt ?? '') : a.dueDate.localeCompare(b.dueDate)))
+  const shown = list.slice(0, limit)
+
+  const pickTab = (v: Tab) => {
+    setTab(v)
+    setLimit(30)
+  }
+
+  const statusBadge = (a: Account) => {
+    const d = daysUntil(a.dueDate)
+    if (a.status === 'paid') {
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <Badge tone="ok">{a.kind === 'payable' ? t('Paga', 'Paid') : t('Recebida', 'Received')}</Badge>
+          {a.treasuryTx ? (
+            <a className="text-xs text-accent hover:underline" href={a.treasuryTx} target="_blank" rel="noopener noreferrer">
+              {t('tx USDC', 'USDC tx')}
+            </a>
+          ) : null}
+        </span>
+      )
+    }
+    if (d < 0) return <Badge tone="bad">{t(`${-d} dia(s) em atraso`, `${-d} day(s) overdue`)}</Badge>
+    if (d <= 7) return <Badge tone="warn">{d === 0 ? t('Vence hoje', 'Due today') : t(`Vence em ${d} dia(s)`, `Due in ${d} day(s)`)}</Badge>
+    return <Badge>{t('Em dia', 'On time')}</Badge>
+  }
+
+  const rowActions = (a: Account) => (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      {a.status === 'open' && a.kind === 'receivable' ? (
+        <Button small variant="subtle" onClick={() => requestIntent({ kind: 'charge', accountId: a.id })}>
+          <HandCoins size={14} /> {t('Cobrar em USDC', 'Charge in USDC')}
+        </Button>
+      ) : null}
+      {a.status === 'open' && a.kind === 'payable' ? (
+        <Button small variant="subtle" onClick={() => requestPay(a.id)}>
+          <Coins size={14} /> {t('Pagar em USDC', 'Pay in USDC')}
+        </Button>
+      ) : null}
+      {a.status === 'open' ? (
+        <Button
+          small
+          variant="ghost"
+          onClick={() => {
+            settleAccount(a.id)
+            toast.success(a.kind === 'payable' ? t('Pagamento registrado no caixa.', 'Payment recorded in cash.') : t('Recebimento registrado no caixa.', 'Receipt recorded in cash.'))
+          }}
+        >
+          <Check size={14} /> {a.kind === 'payable' ? t('Paguei', 'Mark paid') : t('Recebi', 'Mark received')}
+        </Button>
+      ) : null}
+      {a.status === 'open' ? (
+        <button
+          aria-label={t('Editar conta', 'Edit bill')}
+          onClick={() => setTarget(a)}
+          className="flex size-9 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+        >
+          <Pencil size={15} />
+        </button>
+      ) : null}
+      <button
+        aria-label={t('Remover conta', 'Remove bill')}
+        onClick={() => removeAccount(a.id)}
+        className="flex size-9 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-bad focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+      >
+        <Trash2 size={15} />
+      </button>
+    </div>
+  )
+
+  const countOf = (v: Tab) =>
+    v === 'open' ? openAll.length : v === 'paid' ? data.accounts.length - openAll.length : v === 'payable' ? openPayable.length : openReceivable.length
 
   return (
-    <div>
-      <PageHeader
+    <div className="space-y-4 sm:space-y-5">
+      <PageTop
         title={t('Contas a pagar e receber', 'Payables and receivables')}
         subtitle={t('Direitos de recebimento e obrigações de pagamento. Pague fornecedores e salários em USDC pela tesouraria.', 'Money owed to you and obligations to pay. Pay suppliers and salaries in USDC through the treasury.')}
         actions={
@@ -128,121 +212,109 @@ export function Finance() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={t('A receber', 'Receivable')} value={money(totals.receivable)} tone="ok" />
-        <Stat label={t('A pagar', 'Payable')} value={money(totals.payable)} tone="bad" />
-        <Stat label={t('Recebimentos em atraso', 'Overdue receivables')} value={money(totals.overdueReceivable)} tone={totals.overdueReceivable ? 'bad' : undefined} />
-        <Stat label={t('Pagamentos em atraso', 'Overdue payables')} value={money(totals.overduePayable)} tone={totals.overduePayable ? 'bad' : undefined} />
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
+        <KpiTile tone="ok" icon={<ArrowDownLeft size={20} />} label={t('A receber', 'Receivable')} value={money(totals.receivable)} sub={`${openReceivable.length} ${plural(openReceivable.length)} ${t('em aberto', 'open')}`} />
+        <KpiTile tone="bad" icon={<ArrowUpRight size={20} />} label={t('A pagar', 'Payable')} value={money(totals.payable)} sub={`${openPayable.length} ${plural(openPayable.length)} ${t('em aberto', 'open')}`} />
+        <KpiTile
+          tone="warn"
+          icon={<Clock size={20} />}
+          label={t('Recebimentos em atraso', 'Overdue receivables')}
+          value={money(totals.overdueReceivable)}
+          valueTone={totals.overdueReceivable ? 'bad' : undefined}
+          sub={overdue('receivable') ? `${overdue('receivable')} ${plural(overdue('receivable'))}` : t('Nenhum em atraso', 'None overdue')}
+        />
+        <KpiTile
+          tone="violet"
+          icon={<AlertTriangle size={20} />}
+          label={t('Pagamentos em atraso', 'Overdue payables')}
+          value={money(totals.overduePayable)}
+          valueTone={totals.overduePayable ? 'bad' : undefined}
+          sub={overdue('payable') ? `${overdue('payable')} ${plural(overdue('payable'))}` : t('Nenhum em atraso', 'None overdue')}
+        />
       </div>
 
-      <Card className="!p-0">
-        <div className="border-b border-line p-4">
-          <Tabs
+      <TCard className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:px-5">
+          <PanelTitle
+            icon={<Receipt size={18} />}
+            title={t('Contas', 'Bills')}
+            subtitle={`${list.length} ${plural(list.length)}`}
+          />
+          <PillTabs
+            label={t('Situação', 'Status')}
             value={tab}
-            onChange={setTab}
+            onChange={pickTab}
             items={[
-              { id: 'open', label: t('Em aberto', 'Open') },
-              { id: 'payable', label: t('A pagar', 'Payable') },
-              { id: 'receivable', label: t('A receber', 'Receivable') },
-              { id: 'paid', label: t('Liquidadas', 'Settled') },
+              { id: 'open', label: `${t('Em aberto', 'Open')} (${countOf('open')})` },
+              { id: 'payable', label: `${t('A pagar', 'Payable')} (${countOf('payable')})` },
+              { id: 'receivable', label: `${t('A receber', 'Receivable')} (${countOf('receivable')})` },
+              { id: 'paid', label: `${t('Liquidadas', 'Settled')} (${countOf('paid')})` },
             ]}
           />
         </div>
+
         {list.length === 0 ? (
           <Empty icon={<Receipt size={22} />} title={t('Nenhuma conta aqui', 'No bills here')} text={t('Compras a prazo, vendas a prazo e folha de pagamento geram contas automaticamente.', 'Credit purchases, credit sales and payroll create bills automatically.')} />
         ) : (
-          <TableWrap>
-            <thead>
-              <tr>
-                <th className={th}>{t('Vencimento', 'Due date')}</th>
-                <th className={th}>{t('Descrição', 'Description')}</th>
-                <th className={th}>{t('Parte', 'Party')}</th>
-                <th className={th}>{t('Situação', 'Status')}</th>
-                <th className={`${th} text-right`}>{t('Valor', 'Amount')}</th>
-                <th className={th} />
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((a) => {
-                const d = daysUntil(a.dueDate)
-                return (
-                  <tr key={a.id}>
-                    <td className={td}>{fmtDate(a.dueDate)}</td>
-                    <td className={`${td} max-w-[240px] truncate`}>{a.description}</td>
-                    <td className={td}>{a.contactName}</td>
-                    <td className={td}>
-                      {a.status === 'paid' ? (
-                        <span className="flex items-center gap-2">
-                          <Badge tone="ok">{a.kind === 'payable' ? t('Paga', 'Paid') : t('Recebida', 'Received')}</Badge>
-                          {a.treasuryTx ? (
-                            <a
-                              className="text-xs text-accent hover:underline"
-                              href={a.treasuryTx}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              {t('tx USDC', 'USDC tx')}
-                            </a>
-                          ) : null}
-                        </span>
-                      ) : d < 0 ? (
-                        <Badge tone="bad">{t(`${-d} dia(s) em atraso`, `${-d} day(s) overdue`)}</Badge>
-                      ) : d <= 7 ? (
-                        <Badge tone="warn">{d === 0 ? t('Vence hoje', 'Due today') : t(`Vence em ${d} dia(s)`, `Due in ${d} day(s)`)}</Badge>
-                      ) : (
-                        <Badge>{t('Em dia', 'On time')}</Badge>
-                      )}
-                    </td>
-                    <td className={`${td} num text-right font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</td>
-                    <td className={`${td} text-right`}>
-                      <div className="flex justify-end gap-1">
-                        {a.status === 'open' && a.kind === 'receivable' ? (
-                          <Button small variant="subtle" onClick={() => requestIntent({ kind: 'charge', accountId: a.id })}>
-                            <HandCoins size={14} /> {t('Cobrar em USDC', 'Charge in USDC')}
-                          </Button>
-                        ) : null}
-                        {a.status === 'open' && a.kind === 'payable' ? (
-                          <Button small variant="subtle" onClick={() => requestPay(a.id)}>
-                            <Coins size={14} /> {t('Pagar em USDC', 'Pay in USDC')}
-                          </Button>
-                        ) : null}
-                        {a.status === 'open' ? (
-                          <Button
-                            small
-                            variant="ghost"
-                            onClick={() => {
-                              settleAccount(a.id)
-                              toast.success(a.kind === 'payable' ? t('Pagamento registrado no caixa.', 'Payment recorded in cash.') : t('Recebimento registrado no caixa.', 'Receipt recorded in cash.'))
-                            }}
-                          >
-                            <Check size={14} /> {a.kind === 'payable' ? t('Paguei', 'Mark paid') : t('Recebi', 'Mark received')}
-                          </Button>
-                        ) : null}
-                        {a.status === 'open' ? (
-                          <button
-                            aria-label={t('Editar conta', 'Edit bill')}
-                            onClick={() => setTarget(a)}
-                            className="flex size-9 items-center justify-center rounded-lg text-subtle hover:text-ink"
-                          >
-                            <Pencil size={15} />
-                          </button>
-                        ) : null}
-                        <button
-                          aria-label={t('Remover conta', 'Remove bill')}
-                          onClick={() => removeAccount(a.id)}
-                          className="flex size-9 items-center justify-center rounded-lg text-subtle hover:text-bad"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="hidden md:block">
+              <TableWrap>
+                <thead>
+                  <tr>
+                    <th className={th}>{t('Vencimento', 'Due date')}</th>
+                    <th className={th}>{t('Descrição', 'Description')}</th>
+                    <th className={th}>{t('Situação', 'Status')}</th>
+                    <th className={`${th} text-right`}>{t('Valor', 'Amount')}</th>
+                    <th className={th} />
                   </tr>
-                )
-              })}
-            </tbody>
-          </TableWrap>
+                </thead>
+                <tbody>
+                  {shown.map((a) => (
+                    <tr key={a.id} className="transition hover:bg-fill/5">
+                      <td className={td}>{fmtDate(a.dueDate)}</td>
+                      <td className={`${td} max-w-[260px]`}>
+                        <div className="truncate">{a.description}</div>
+                        <div className="truncate text-xs text-subtle">{a.contactName}</div>
+                      </td>
+                      <td className={td}>{statusBadge(a)}</td>
+                      <td className={`${td} num text-right font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</td>
+                      <td className={`${td} text-right`}>{rowActions(a)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </TableWrap>
+            </div>
+
+            <ul className="divide-y divide-line md:hidden">
+              {shown.map((a) => (
+                <li key={a.id} className="space-y-2.5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{a.description}</p>
+                      <p className="truncate text-xs text-subtle">
+                        {a.contactName} · {fmtDate(a.dueDate)}
+                      </p>
+                    </div>
+                    <div className={`num shrink-0 whitespace-nowrap text-sm font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {statusBadge(a)}
+                    {rowActions(a)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            {list.length > shown.length ? (
+              <div className="border-t border-line p-3 text-center">
+                <Button variant="ghost" small onClick={() => setLimit((l) => l + 30)}>
+                  {t('Ver mais', 'View more')} ({list.length - shown.length})
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
-      </Card>
+      </TCard>
 
       <AccountModal target={target} onClose={() => setTarget(null)} />
     </div>

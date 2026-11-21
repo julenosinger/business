@@ -1,7 +1,11 @@
 import { useState } from 'react'
-import { BarChart3, Download } from 'lucide-react'
+import { BarChart3, Download, FileSpreadsheet, LineChart, PieChart, PiggyBank, Percent, Trophy, TrendingUp, Wallet } from 'lucide-react'
 import { AreaChart, Bar, C, Donut } from '@/components/charts'
-import { Button, Card, CardTitle, Empty, PageHeader, Tabs, TableWrap, td, th } from '@/components/ui'
+import { Button, Empty } from '@/components/ui'
+import { KpiTile } from '@/components/ds/KpiTile'
+import { PageTop } from '@/components/ds/PageTop'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
+import { PillTabs } from '@/components/ds/PillTabs'
 import { periodFor, rangeTabs } from '@/pages/Accounting'
 import { useStore } from '@/lib/store'
 import { expensesByCategory, kpis, monthlySeries, topProducts } from '@/lib/selectors'
@@ -20,45 +24,95 @@ export function Reports() {
   const series = monthlySeries(data, 6)
   const catTotal = cats.reduce((s, c) => s + c.total, 0)
   const margin = k.revenue > 0 ? (k.profit / k.revenue) * 100 : 0
-  const topMax = Math.max(...top.map((t) => t.revenue), 1)
+  const topMax = Math.max(...top.map((p) => p.revenue), 1)
+  const liveSales = data.sales.filter((s) => !s.canceledAt)
+  const records = (n: number) => `${n} ${n === 1 ? t('registro', 'record') : t('registros', 'records')}`
+
+  const exports: { id: string; title: string; sub: string; disabled: boolean; run: () => void }[] = [
+    {
+      id: 'sales',
+      title: t('Vendas', 'Sales'),
+      sub: records(liveSales.length),
+      disabled: liveSales.length === 0,
+      run: () =>
+        downloadCsv('sales.csv', [
+          [t('Data', 'Date'), t('Cliente', 'Customer'), t('Pagamento', 'Payment'), 'Total', t('Custo', 'Cost')],
+          ...liveSales.map((s) => [fmtDate(s.date), s.customerName, s.method, s.total, s.cogs]),
+        ]),
+    },
+    {
+      id: 'inventory',
+      title: t('Estoque', 'Inventory'),
+      sub: records(data.products.length),
+      disabled: data.products.length === 0,
+      run: () =>
+        downloadCsv('inventory.csv', [
+          ['SKU', t('Produto', 'Product'), t('Categoria', 'Category'), t('Estoque', 'Stock'), t('Mínimo', 'Minimum'), t('Custo', 'Cost'), t('Preço', 'Price')],
+          ...data.products.map((p) => [p.sku, p.name, p.category, p.stock, p.minStock, p.cost, p.price]),
+        ]),
+    },
+    {
+      id: 'bills',
+      title: t('Contas', 'Bills'),
+      sub: records(data.accounts.length),
+      disabled: data.accounts.length === 0,
+      run: () =>
+        downloadCsv('bills.csv', [
+          [t('Tipo', 'Type'), t('Descrição', 'Description'), t('Parte', 'Party'), t('Vencimento', 'Due date'), t('Valor', 'Amount'), t('Situação', 'Status')],
+          ...data.accounts.map((a) => [a.kind === 'payable' ? t('A pagar', 'Payable') : t('A receber', 'Receivable'), a.description, a.contactName, fmtDate(a.dueDate), a.amount, a.status === 'paid' ? t('Liquidada', 'Settled') : t('Em aberto', 'Open')]),
+        ]),
+    },
+  ]
 
   return (
-    <div>
-      <PageHeader
+    <div className="space-y-4 sm:space-y-5">
+      <PageTop
         title={t('Relatórios e BI', 'Reports and BI')}
         subtitle={t(`Indicadores de ${period.label}.`, `Indicators for ${period.label}.`)}
-        actions={<Tabs value={range} onChange={setRange} items={rangeTabs()} />}
+        actions={<PillTabs label={t('Período', 'Period')} value={range} onChange={setRange} items={rangeTabs()} />}
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardTitle>{t('Resultado do período', 'Period result')}</CardTitle>
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="label">{t('Receita', 'Revenue')}</dt>
-              <dd className="display num mt-1 text-xl font-semibold">{money(k.revenue)}</dd>
-            </div>
-            <div>
-              <dt className="label">{t('Lucro líquido', 'Net profit')}</dt>
-              <dd className={`display num mt-1 text-xl font-semibold ${k.profit < 0 ? 'text-bad' : 'text-ok'}`}>{money(k.profit)}</dd>
-            </div>
-            <div>
-              <dt className="label">{t('Margem líquida', 'Net margin')}</dt>
-              <dd className="display num mt-1 text-xl font-semibold">{num(margin)}%</dd>
-            </div>
-            <div>
-              <dt className="label">{t('Lucro bruto', 'Gross profit')}</dt>
-              <dd className="display num mt-1 text-xl font-semibold">{money(k.grossProfit)}</dd>
-            </div>
-          </dl>
-        </Card>
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
+        <KpiTile tone="ok" icon={<TrendingUp size={20} />} label={t('Receita', 'Revenue')} value={money(k.revenue)} sub={period.label} />
+        <KpiTile tone="sky" icon={<Wallet size={20} />} label={t('Lucro bruto', 'Gross profit')} value={money(k.grossProfit)} valueTone={k.grossProfit < 0 ? 'bad' : undefined} sub={t('Receita menos custo das mercadorias', 'Revenue minus cost of goods')} />
+        <KpiTile tone="violet" icon={<PiggyBank size={20} />} label={t('Lucro líquido', 'Net profit')} value={money(k.profit)} valueTone={k.profit < 0 ? 'bad' : undefined} sub={k.profit < 0 ? t('Resultado negativo no período', 'Negative result in the period') : t('Após custos e despesas', 'After costs and expenses')} />
+        <KpiTile tone="warn" icon={<Percent size={20} />} label={t('Margem líquida', 'Net margin')} value={`${num(margin)}%`} valueTone={margin < 0 ? 'bad' : undefined} sub={k.revenue > 0 ? t('Lucro líquido sobre a receita', 'Net profit over revenue') : t('Sem receita no período', 'No revenue in this period')} />
+      </div>
 
-        <Card>
-          <CardTitle>{t('Despesas por categoria', 'Expenses by category')}</CardTitle>
+      <div className="grid items-stretch gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <TCard className="flex h-full flex-col p-4 sm:p-5">
+          <PanelTitle
+            icon={<LineChart size={18} />}
+            title={t('Entradas vs. saídas (6 meses)', 'Inflows vs. outflows (6 months)')}
+            subtitle={t('Fluxo de caixa mês a mês', 'Month-by-month cash flow')}
+            action={
+              <span className="flex shrink-0 items-center gap-3 text-xs text-muted">
+                <span className="flex items-center gap-1.5">
+                  <i className="size-2 rounded-full" style={{ background: C.ok }} /> {t('Entradas', 'Inflows')}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <i className="size-2 rounded-full" style={{ background: C.bad }} /> {t('Saídas', 'Outflows')}
+                </span>
+              </span>
+            }
+          />
+          <div className="mt-3 flex flex-1 items-center">
+            <AreaChart
+              labels={series.map((s) => s.label)}
+              series={[
+                { name: 'in', color: C.ok, values: series.map((s) => s.inflow) },
+                { name: 'out', color: C.bad, values: series.map((s) => s.outflow) },
+              ]}
+            />
+          </div>
+        </TCard>
+
+        <TCard className="h-full p-4 sm:p-5">
+          <PanelTitle icon={<PieChart size={18} />} title={t('Despesas por categoria', 'Expenses by category')} subtitle={period.label} />
           {cats.length === 0 ? (
-            <p className="text-sm text-muted">{t('Sem despesas no período.', 'No expenses in this period.')}</p>
+            <p className="mt-8 text-center text-sm text-subtle">{t('Sem despesas no período.', 'No expenses in this period.')}</p>
           ) : (
-            <div className="flex flex-wrap items-center gap-5">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-5">
               <Donut segments={cats.map((c, i) => ({ label: cat(c.category), value: c.total, color: COLORS[i % COLORS.length] ?? C.accent }))} size={150} thickness={20}>
                 <span className="text-[11px] text-subtle">Total</span>
                 <span className="display num text-sm font-semibold">{money(catTotal)}</span>
@@ -66,40 +120,30 @@ export function Reports() {
               <ul className="min-w-[180px] flex-1 space-y-2 text-sm">
                 {cats.map((c, i) => (
                   <li key={c.category} className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2 text-muted">
-                      <i className="size-2 rounded-full" style={{ background: COLORS[i % COLORS.length] }} /> {cat(c.category)}
+                    <span className="flex min-w-0 items-center gap-2 text-muted">
+                      <i className="size-2 shrink-0 rounded-full" style={{ background: COLORS[i % COLORS.length] }} /> <span className="truncate">{cat(c.category)}</span>
                     </span>
-                    <span className="num font-semibold">{money(c.total)}</span>
+                    <span className="num flex shrink-0 items-baseline gap-2">
+                      <span className="font-semibold">{money(c.total)}</span>
+                      <span className="w-9 text-right text-xs text-subtle">{catTotal > 0 ? `${Math.round((c.total / catTotal) * 100)}%` : '—'}</span>
+                    </span>
                   </li>
                 ))}
               </ul>
             </div>
           )}
-        </Card>
+        </TCard>
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardTitle>{t('Entradas vs. saídas (6 meses)', 'Inflows vs. outflows (6 months)')}</CardTitle>
-          <AreaChart
-            labels={series.map((s) => s.label)}
-            series={[
-              { name: 'in', color: C.ok, values: series.map((s) => s.inflow) },
-              { name: 'out', color: C.bad, values: series.map((s) => s.outflow) },
-            ]}
-          />
-        </Card>
-
-        <Card className="!p-0">
-          <div className="flex items-center justify-between border-b border-line p-4">
-            <h3 className="display text-base font-semibold">{t('Produtos mais vendidos', 'Top-selling products')}</h3>
+      <div className="grid items-stretch gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <TCard className="h-full overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:px-5">
+            <PanelTitle icon={<Trophy size={18} />} title={t('Produtos mais vendidos', 'Top-selling products')} subtitle={period.label} />
             <Button
               variant="ghost"
               small
               disabled={top.length === 0}
-              onClick={() =>
-                downloadCsv('top-products.csv', [[t('Produto', 'Product'), t('Qtd', 'Qty'), t('Receita', 'Revenue'), t('Lucro', 'Profit')], ...top.map((t) => [t.name, t.qty, t.revenue, t.profit])])
-              }
+              onClick={() => downloadCsv('top-products.csv', [[t('Produto', 'Product'), t('Qtd', 'Qty'), t('Receita', 'Revenue'), t('Lucro', 'Profit')], ...top.map((p) => [p.name, p.qty, p.revenue, p.profit])])}
             >
               <Download size={14} /> CSV
             </Button>
@@ -107,74 +151,56 @@ export function Reports() {
           {top.length === 0 ? (
             <Empty icon={<BarChart3 size={22} />} title={t('Sem vendas no período', 'No sales in this period')} />
           ) : (
-            <TableWrap>
-              <thead>
-                <tr>
-                  <th className={th}>{t('Produto', 'Product')}</th>
-                  <th className={`${th} text-right`}>{t('Qtd', 'Qty')}</th>
-                  <th className={`${th} text-right`}>{t('Receita', 'Revenue')}</th>
-                  <th className={`${th} text-right`}>{t('Lucro', 'Profit')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {top.map((t) => (
-                  <tr key={t.name}>
-                    <td className={td}>
-                      <div className="mb-1 font-semibold">{t.name}</div>
-                      <Bar value={t.revenue} max={topMax} />
-                    </td>
-                    <td className={`${td} num text-right`}>{num(t.qty)}</td>
-                    <td className={`${td} num text-right`}>{money(t.revenue)}</td>
-                    <td className={`${td} num text-right text-ok`}>{money(t.profit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableWrap>
+            <ol className="divide-y divide-line">
+              {top.map((p, i) => (
+                <li key={p.name} className="flex items-center gap-3 p-4 sm:px-5">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-fill/10 text-xs font-semibold text-muted">{i + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="truncate text-sm font-semibold">{p.name}</span>
+                      <span className="num shrink-0 whitespace-nowrap text-sm font-semibold">{money(p.revenue)}</span>
+                    </div>
+                    <div className="my-1.5">
+                      <Bar value={p.revenue} max={topMax} />
+                    </div>
+                    <div className="flex justify-between gap-3 text-xs text-subtle">
+                      <span className="num">
+                        {num(p.qty)} {t('un.', 'units')}
+                      </span>
+                      <span className={`num ${p.profit < 0 ? 'text-bad' : 'text-ok'}`}>
+                        {t('Lucro', 'Profit')} {money(p.profit)}
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
           )}
-        </Card>
-      </div>
+        </TCard>
 
-      <Card className="mt-6">
-        <CardTitle>{t('Exportar dados', 'Export data')}</CardTitle>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="ghost"
-            disabled={data.sales.every((s) => s.canceledAt)}
-            onClick={() =>
-              downloadCsv('sales.csv', [
-                [t('Data', 'Date'), t('Cliente', 'Customer'), t('Pagamento', 'Payment'), 'Total', t('Custo', 'Cost')],
-                ...data.sales.filter((s) => !s.canceledAt).map((s) => [fmtDate(s.date), s.customerName, s.method, s.total, s.cogs]),
-              ])
-            }
-          >
-            <Download size={14} /> {t('Vendas', 'Sales')}
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={data.products.length === 0}
-            onClick={() =>
-              downloadCsv('inventory.csv', [
-                ['SKU', t('Produto', 'Product'), t('Categoria', 'Category'), t('Estoque', 'Stock'), t('Mínimo', 'Minimum'), t('Custo', 'Cost'), t('Preço', 'Price')],
-                ...data.products.map((p) => [p.sku, p.name, p.category, p.stock, p.minStock, p.cost, p.price]),
-              ])
-            }
-          >
-            <Download size={14} /> {t('Estoque', 'Inventory')}
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={data.accounts.length === 0}
-            onClick={() =>
-              downloadCsv('bills.csv', [
-                [t('Tipo', 'Type'), t('Descrição', 'Description'), t('Parte', 'Party'), t('Vencimento', 'Due date'), t('Valor', 'Amount'), t('Situação', 'Status')],
-                ...data.accounts.map((a) => [a.kind === 'payable' ? t('A pagar', 'Payable') : t('A receber', 'Receivable'), a.description, a.contactName, fmtDate(a.dueDate), a.amount, a.status === 'paid' ? t('Liquidada', 'Settled') : t('Em aberto', 'Open')]),
-              ])
-            }
-          >
-            <Download size={14} /> {t('Contas', 'Bills')}
-          </Button>
-        </div>
-      </Card>
+        <TCard className="h-full p-4 sm:p-5">
+          <PanelTitle icon={<FileSpreadsheet size={18} />} title={t('Exportar dados', 'Export data')} subtitle={t('Arquivos CSV para planilhas e contador', 'CSV files for spreadsheets and your accountant')} />
+          <ul className="mt-4 space-y-2.5">
+            {exports.map((x) => (
+              <li key={x.id}>
+                <button
+                  onClick={x.run}
+                  disabled={x.disabled}
+                  className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border border-line bg-fill/5 px-4 text-left transition hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>
+                    <span className="block text-sm font-semibold">{x.title}</span>
+                    <span className="block text-xs text-subtle">{x.sub}</span>
+                  </span>
+                  <span className="flex size-9 items-center justify-center rounded-lg bg-violet/15 text-violet">
+                    <Download size={16} />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </TCard>
+      </div>
     </div>
   )
 }

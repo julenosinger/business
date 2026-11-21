@@ -1,7 +1,7 @@
 import { ExternalLink, HandCoins, Link2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, CardTitle } from '@/components/ui'
-import { TCard } from './TCard'
+import { TCard } from '@/components/ds/Panel'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey } from '@/lib/gateway'
 import { invoiceLink, requestToInvoice } from '@/lib/invoice'

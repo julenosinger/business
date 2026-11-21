@@ -22,7 +22,7 @@ export function AreaChart({ labels, series, height = 220 }: { labels: string[]; 
   const gid = useId()
   const W = 640
   const H = height
-  const pad = { l: 52, r: 12, t: 12, b: 26 }
+  const pad = { l: 66, r: 12, t: 12, b: 26 }
   const all = series.flatMap((s) => s.values)
   const max = Math.max(1, ...all)
   const min = Math.min(0, ...all)

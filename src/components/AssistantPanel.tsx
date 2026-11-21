@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BarChart3, Boxes, Landmark, Send, Sparkles, Truck } from 'lucide-react'
-import { Card } from '@/components/ui'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { accountTotals, cashBalance, dueSoon, kpis, lowStock, monthPeriod } from '@/lib/selectors'
@@ -79,30 +79,27 @@ export function AssistantPanel() {
   const totals = accountTotals(data)
 
   return (
-    <Card className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h3 className="display flex items-center gap-2 text-base font-semibold">
-          <Sparkles size={18} className="text-accent" /> {t('Assistente financeiro', 'Finance assistant')}
-        </h3>
-      </div>
-      <p className="text-sm text-muted text-pretty">
-        {t('Escolha uma pergunta. As respostas são calculadas com os dados do seu negócio.', 'Pick a question. Answers are calculated from your business data.')}
-      </p>
+    <TCard className="flex h-full flex-col gap-4 p-4 sm:p-5">
+      <PanelTitle
+        icon={<Sparkles size={18} className="text-violet" />}
+        title={t('Assistente financeiro', 'Finance assistant')}
+        subtitle={t('Respostas calculadas com os dados do seu negócio', 'Answers calculated from your business data')}
+      />
       <div className="flex flex-col gap-2">
         {questions().map((q) => (
           <button
             key={q.id}
             onClick={() => ask(q.id, q.label)}
-            className="flex min-h-11 items-center gap-3 rounded-xl border border-line bg-fill/5 px-3 text-left text-sm text-ink transition hover:bg-surface-strong"
+            className="flex min-h-11 items-center gap-3 rounded-xl border border-line bg-fill/5 px-3 text-left text-sm text-ink transition hover:border-violet/40 hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
           >
-            <span className="text-accent">{q.icon}</span>
+            <span className="text-violet">{q.icon}</span>
             <span className="flex-1">{q.label}</span>
             <Send size={14} className="text-subtle" />
           </button>
         ))}
       </div>
       {answer ? (
-        <div className="rounded-xl border border-accent/30 bg-accent/10 p-3 text-sm" aria-live="polite">
+        <div className="rounded-xl border border-violet/30 bg-violet/10 p-3 text-sm" aria-live="polite">
           <div className="label mb-2">{answer.q}</div>
           <ul className="space-y-1 text-ink">
             {answer.lines.map((l) => (
@@ -111,10 +108,10 @@ export function AssistantPanel() {
           </ul>
         </div>
       ) : (
-        <div className="rounded-xl bg-fill/5 p-3 text-xs text-subtle">
+        <div className="mt-auto rounded-xl bg-fill/5 p-3 text-xs text-subtle">
           {t(`Em aberto: ${money(totals.receivable)} a receber e ${money(totals.payable)} a pagar.`, `Open: ${money(totals.receivable)} receivable and ${money(totals.payable)} payable.`)}
         </div>
       )}
-    </Card>
+    </TCard>
   )
 }

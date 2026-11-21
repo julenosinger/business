@@ -7,7 +7,7 @@ import { usdcFmt } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
 import type { PaymentRequest, TreasuryOp } from '@/lib/types'
 import { DAY_MS, PERIODS, inLastDays, sameAddress, type Period } from './shared'
-import { PanelTitle, TCard } from './TCard'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
 
 interface Props {
   ops: TreasuryOp[]

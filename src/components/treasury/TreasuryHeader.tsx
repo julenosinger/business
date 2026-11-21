@@ -3,7 +3,7 @@ import { ConnectKitButton } from 'connectkit'
 import { Copy, MoreHorizontal, RefreshCw, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui'
-import { GlobeBackdrop } from './GlobeBackdrop'
+import { PageTop } from '@/components/ds/PageTop'
 import { t } from '@/lib/i18n'
 
 interface Props {
@@ -34,22 +34,16 @@ export function TreasuryHeader({ isConnected, address, fetching, onRefresh }: Pr
   }, [menu])
 
   return (
-    <header className="relative">
-      <GlobeBackdrop />
-      <div className="relative flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <h1 className="display text-3xl font-semibold text-balance sm:text-4xl">{t('Tesouraria Global', 'Global Treasury')}</h1>
-            <span className="inline-flex items-center gap-2 rounded-full border border-violet/40 bg-violet/15 px-3 py-1 text-xs font-semibold">
-              <span className="size-2 rounded-full bg-sky" aria-hidden="true" /> Circle Gateway · Testnet
-            </span>
-          </div>
-          <p className="mt-2 max-w-lg text-sm text-muted text-pretty">
-            {t('Gestão de liquidez, pagamentos e operações multichain com Circle Gateway.', 'Liquidity management, payments and multichain operations with Circle Gateway.')}
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
+    <PageTop
+      title={t('Tesouraria Global', 'Global Treasury')}
+      subtitle={t('Gestão de liquidez, pagamentos e operações multichain com Circle Gateway.', 'Liquidity management, payments and multichain operations with Circle Gateway.')}
+      badge={
+        <span className="inline-flex items-center gap-2 rounded-full border border-violet/40 bg-violet/15 px-3 py-1 text-xs font-semibold">
+          <span className="size-2 rounded-full bg-sky" aria-hidden="true" /> Circle Gateway · Testnet
+        </span>
+      }
+      actions={
+        <>
           <Button variant="ghost" onClick={onRefresh} disabled={fetching || !isConnected} aria-label={t('Atualizar saldos', 'Refresh balances')} className="!bg-fill/5">
             <RefreshCw size={15} className={fetching ? 'animate-spin motion-reduce:animate-none' : ''} />
             <span className="hidden sm:inline">{t('Atualizar saldos', 'Refresh balances')}</span>
@@ -96,8 +90,8 @@ export function TreasuryHeader({ isConnected, address, fetching, onRefresh }: Pr
               </div>
             ) : null}
           </div>
-        </div>
-      </div>
-    </header>
+        </>
+      }
+    />
   )
 }

@@ -6,7 +6,7 @@ import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, type GatewayBalances } from '@/lib/gateway'
 import { usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
-import { PanelTitle, TCard } from './TCard'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
 
 interface Props {
   connected: boolean

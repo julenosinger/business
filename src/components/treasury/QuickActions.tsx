@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeftRight, HandCoins, Send, Zap } from 'lucide-react'
 import { clsx } from 'clsx'
 import { t } from '@/lib/i18n'
-import { PanelTitle, TCard } from './TCard'
+import { PanelTitle, TCard } from '@/components/ds/Panel'
 
 interface Props {
   enabled: boolean
