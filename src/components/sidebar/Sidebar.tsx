@@ -31,7 +31,7 @@ export function Sidebar() {
       id="app-sidebar"
       aria-label={t('Navegação principal', 'Main navigation')}
       style={{ width }}
-      className="fixed inset-y-0 left-0 z-40 overflow-y-auto overflow-x-hidden border-r border-line bg-panel transition-[width] duration-200 ease-out motion-reduce:transition-none"
+      className="sidebar-scroll fixed inset-y-0 left-0 z-40 overflow-y-auto overflow-x-hidden border-r border-line bg-panel transition-[width] duration-200 ease-out motion-reduce:transition-none"
     >
       <SidebarContent
         collapsed={rail}
@@ -109,7 +109,7 @@ export function MobileDrawer() {
               role="dialog"
               aria-modal="true"
               aria-label={t('Menu de navegação', 'Navigation menu')}
-              className="absolute inset-y-0 left-0 w-[min(20rem,calc(100vw-3rem))] overflow-y-auto border-r border-line bg-panel"
+              className="sidebar-scroll absolute inset-y-0 left-0 w-[min(20rem,calc(100vw-3rem))] overflow-y-auto border-r border-line bg-panel"
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}

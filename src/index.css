@@ -23,6 +23,9 @@
   --line: rgba(255, 255, 255, 0.1);
   --glow: rgba(172, 198, 233, 0.12);
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  /* Barra de rolagem do menu lateral: azul-acinzentado discreto. */
+  --sb-thumb: rgba(132, 156, 192, 0.32);
+  --sb-thumb-hover: rgba(150, 174, 210, 0.6);
   color-scheme: dark;
 }
 
@@ -47,11 +50,42 @@
   --line: rgba(18, 45, 69, 0.13);
   --glow: rgba(16, 97, 166, 0.1);
   --shadow: 0 24px 60px rgba(18, 45, 69, 0.18);
+  --sb-thumb: rgba(71, 85, 105, 0.28);
+  --sb-thumb-hover: rgba(71, 85, 105, 0.5);
   color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Rolagem do menu lateral (desktop e gaveta): fina, arredondada e sem trilho visível.
+   Chrome, Edge e Safari usam ::-webkit-scrollbar (4px). O Chrome recente ignora esse pseudo-elemento quando
+   scrollbar-width está definido, então as propriedades padrão ficam só para quem não suporta ::-webkit-scrollbar (Firefox). */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--sb-thumb);
+  border-radius: 9999px;
+  transition: background-color 0.18s ease;
+}
+.sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: var(--sb-thumb-hover);
+}
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sb-thumb) transparent;
+  }
+  .sidebar-scroll:hover {
+    scrollbar-color: var(--sb-thumb-hover) transparent;
+  }
 }
 
 body {
