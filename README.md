@@ -32,7 +32,11 @@ bun install
 bun run dev
 ```
 
-Other commands: `bun run check` (lint and typecheck).
+Other commands: `bun run build` (production build to `dist/`), `bun run preview`, `bun run check` (lint and typecheck).
+
+### Deploy to Vercel
+
+The repository includes a `vercel.json` (Vite framework, Bun install, single-page fallback). Import the repository in Vercel and deploy. No environment variables are required. Payment-request links use the same page with a query parameter, so they work on the deployed domain.
 
 ### Environment variables
 
