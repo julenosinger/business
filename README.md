@@ -17,6 +17,7 @@ Built with [Arc Studio](https://studio.arc.io)
 - English and Portuguese (switch in the top bar), plus dark and light themes
 - Payment requests in USDC: share a link or WhatsApp message, the customer pays from their wallet, and the bill is settled automatically while the app is open
 - Batch payments (including payroll) with per-payment status and retry, optional safety limit
+- Global Logistics (phase 1): shipments (inbound, outbound, transfer) with validated status workflow, manual tracking timeline with audit history, documents references, KPIs, alerts and upcoming deliveries. Shipments never change stock or finances.
 - Treasury: unified USDC balance across testnets, deposits, and payments to suppliers or employees on any supported network (non-custodial, signed by your wallet)
 
 ## Tech stack
@@ -32,7 +33,7 @@ bun install
 bun run dev
 ```
 
-Other commands: `bun run build` (production build to `dist/`), `bun run preview`, `bun run check` (lint and typecheck).
+Other commands: `bun run build` (production build to `dist/`), `bun run preview`, `bun run check` (lint and typecheck), `bun run test` (unit tests for the logistics rules).
 
 ### Deploy to Vercel
 

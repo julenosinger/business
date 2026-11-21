@@ -12,6 +12,7 @@ import { Finance } from '@/pages/Finance'
 import { Sales } from '@/pages/Sales'
 import { Stock } from '@/pages/Stock'
 import { Purchases } from '@/pages/Purchases'
+import { Logistics } from '@/pages/Logistics'
 import { Contacts } from '@/pages/Contacts'
 import { Employees } from '@/pages/Employees'
 import { Treasury } from '@/pages/Treasury'
@@ -32,6 +33,8 @@ function Router({ page }: { page: PageId }) {
       return <Stock />
     case 'purchases':
       return <Purchases />
+    case 'logistics':
+      return <Logistics />
     case 'customers':
       return <Contacts kind="customer" />
     case 'suppliers':

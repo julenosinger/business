@@ -12,6 +12,7 @@ import {
 } from './types'
 import { addDays, iso, round2, today } from './format'
 import { t } from './i18n'
+import * as logistics from './logistics'
 
 /** Dados de demonstração gerados localmente. Não representam um negócio real. */
 export function buildDemoData(): AppData {
@@ -167,7 +168,126 @@ export function buildDemoData(): AppData {
     employees,
     treasuryOps: [],
     requests: [],
+    shipments: [],
     settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency: 'BRL', usdcRate: null, approvalLimit: null },
   }
-  return base
+  return { ...base, shipments: demoShipments(base, now) }
+}
+
+/**
+ * Remessas de demonstração. Passam pelas mesmas regras do módulo (transições, auditoria), com datas no passado.
+ * Transportadoras e códigos são fictícios; nenhuma integração real existe.
+ */
+function demoShipments(start: AppData, now: Date): AppData['shipments'] {
+  let d = start
+  const stamp = (daysAgo: number, hour: number): string => {
+    const x = new Date(now)
+    x.setDate(x.getDate() - daysAgo)
+    x.setHours(hour, 0, 0, 0)
+    return x.toISOString()
+  }
+  const day = (daysAgo: number): string => iso(new Date(stamp(daysAgo, 12)))
+  const ok = <T,>(r: logistics.Outcome<T>): T => {
+    if (!r.ok) throw new Error(`demo shipment: ${r.errors.join(',')}`)
+    d = r.data
+    return r.value
+  }
+  const carrier = t('Transportadora Exemplo', 'Example Carrier')
+  const customers = d.contacts.filter((c) => c.kind === 'customer')
+  const suppliers = d.contacts.filter((c) => c.kind === 'supplier')
+  const sale = d.sales.find((s) => !s.canceledAt && s.items.length > 0)
+  const p = d.products
+  const line = (i: number, qty: number) => {
+    const x = p[i % Math.max(p.length, 1)]
+    return x ? [{ productId: x.id, name: x.name, sku: x.sku, qty }] : []
+  }
+  const hub = { name: t('Armazém central', 'Central warehouse'), city: 'São Paulo', country: 'BR' }
+  const box = [{ weightKg: 3.2, lengthCm: 40, widthCm: 30, heightCm: 20 }]
+  const make = (over: Partial<logistics.ShipmentInput>, createdAgo: number) =>
+    ok(
+      logistics.createShipment(
+        d,
+        {
+          direction: 'outbound',
+          origin: hub,
+          destination: { name: '', city: 'Rio de Janeiro', country: 'BR' },
+          senderName: d.settings.company,
+          recipientName: customers[0]?.name ?? 'Cliente',
+          carrier,
+          trackingNumber: '',
+          method: t('Padrão', 'Standard'),
+          packages: box,
+          items: line(0, 2),
+          declaredValue: 480,
+          currency: 'BRL',
+          freightCost: 42.9,
+          ...over,
+        },
+        stamp(createdAgo, 9),
+        d.settings.owner,
+      ),
+    ).id
+  const go = (id: string, to: Parameters<typeof logistics.transitionShipment>[2], ago: number, hour: number, note = '', deliveredAt?: string) =>
+    ok(logistics.transitionShipment(d, id, to, { note, deliveredAt }, stamp(ago, hour), day(ago), d.settings.owner))
+  const track = (id: string, ago: number, hour: number, location: string, description: string) =>
+    ok(logistics.addTrackingEvent(d, id, { occurredAt: stamp(ago, hour), location, description }, stamp(ago, hour + 1), d.settings.owner))
+
+  // 1. Entregue no prazo
+  const a = make({ orderRef: sale ? { kind: 'sale', id: sale.id, label: sale.id } : undefined, trackingNumber: 'DEMO100001', estimatedDelivery: day(6) }, 9)
+  go(a, 'ready', 9, 10)
+  go(a, 'dispatched', 8, 9)
+  track(a, 8, 11, hub.name, t('Coletado pela transportadora', 'Picked up by the carrier'))
+  go(a, 'in_transit', 7, 9)
+  go(a, 'out_for_delivery', 6, 8)
+  go(a, 'delivered', 6, 15, '', day(6))
+
+  // 2. Em trânsito
+  const b = make({ trackingNumber: 'DEMO100002', destination: { name: '', city: 'Belo Horizonte', country: 'BR' }, recipientName: customers[1]?.name ?? 'Cliente', items: line(1, 4), estimatedDelivery: addDays(today(), 2), freightCost: 58 }, 4)
+  go(b, 'ready', 4, 10)
+  go(b, 'dispatched', 3, 9)
+  go(b, 'in_transit', 2, 9)
+  track(b, 2, 14, 'Campinas, BR', t('Em trânsito para o centro de distribuição', 'In transit to the distribution center'))
+
+  // 3. Atrasada
+  const c = make({ trackingNumber: 'DEMO100003', destination: { name: '', city: 'Curitiba', country: 'BR' }, items: line(2, 1), estimatedDelivery: addDays(today(), -1), freightCost: 36.5 }, 7)
+  go(c, 'ready', 7, 10)
+  go(c, 'dispatched', 6, 9)
+  go(c, 'in_transit', 5, 9)
+  go(c, 'delayed', 1, 10, t('Atraso informado pela transportadora por chuvas na rota', 'Delay reported by the carrier due to rain on the route'))
+
+  // 4. Entrada de fornecedor despachada
+  const e = make(
+    {
+      direction: 'inbound',
+      orderRef: { kind: 'purchase', label: t('Pedido de compra (referência manual)', 'Purchase order (manual reference)') },
+      origin: { name: suppliers[0]?.name ?? 'Fornecedor', city: 'Shenzhen', country: 'CN' },
+      destination: { ...hub },
+      senderName: suppliers[0]?.name ?? 'Fornecedor',
+      recipientName: d.settings.company,
+      trackingNumber: 'DEMO100004',
+      method: t('Aéreo', 'Air freight'),
+      items: line(3, 40),
+      declaredValue: 3200,
+      currency: 'USD',
+      freightCost: 410,
+      estimatedDelivery: addDays(today(), 5),
+    },
+    3,
+  )
+  go(e, 'ready', 3, 10)
+  go(e, 'dispatched', 2, 11)
+
+  // 5. Transferência pronta e 6. rascunho
+  const f = make({ direction: 'transfer', destination: { name: t('Loja Centro', 'Downtown store'), city: 'São Paulo', country: 'BR' }, recipientName: t('Loja Centro', 'Downtown store'), items: line(4, 12), freightCost: 0, declaredValue: 900 }, 1)
+  go(f, 'ready', 1, 14)
+  make({ destination: { name: '', city: 'Porto Alegre', country: 'BR' }, items: line(5, 3), estimatedDelivery: addDays(today(), 8) }, 0)
+
+  // 7. Exceção
+  const g = make({ trackingNumber: 'DEMO100005', destination: { name: '', city: 'Salvador', country: 'BR' }, items: line(6, 2), estimatedDelivery: addDays(today(), 1), freightCost: 64 }, 5)
+  go(g, 'ready', 5, 10)
+  go(g, 'dispatched', 4, 9)
+  go(g, 'in_transit', 3, 9)
+  go(g, 'exception', 0, 9, t('Endereço de entrega não localizado', 'Delivery address not found'))
+
+  return d.shipments
 }

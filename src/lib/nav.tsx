@@ -7,6 +7,7 @@ export type PageId =
   | 'sales'
   | 'stock'
   | 'purchases'
+  | 'logistics'
   | 'customers'
   | 'suppliers'
   | 'hr'

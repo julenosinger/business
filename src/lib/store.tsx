@@ -14,9 +14,12 @@ import {
   type Product,
   type Sale,
   type Settings,
+  type ShipmentDocumentType,
+  type ShipmentStatus,
   type TreasuryOp,
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
+import * as logistics from './logistics'
 import { buildDemoData } from './demo'
 import { t } from './i18n'
 
@@ -44,6 +47,7 @@ export function emptyData(): AppData {
     employees: [],
     treasuryOps: [],
     requests: [],
+    shipments: [],
     settings: emptySettings(),
   }
 }
@@ -74,6 +78,9 @@ export interface PurchaseInput {
   items: { productId: string; qty: number; cost: number }[]
 }
 
+/** Resultado de uma operação de logística para a interface (sem o estado interno). */
+export type LogisticsResult<T> = { ok: true; value: T } | { ok: false; errors: logistics.ErrorCode[] }
+
 export interface Store {
   data: AppData
   addProduct: (p: Omit<Product, 'id'>) => void
@@ -101,6 +108,12 @@ export interface Store {
   updateRequest: (id: string, patch: Partial<PaymentRequest>) => void
   receiveRequest: (id: string, txHash: string, payer: string, explorerUrl: string) => void
   addTreasuryOp: (op: Omit<TreasuryOp, 'id' | 'date'>) => void
+  createShipment: (input: logistics.ShipmentInput) => LogisticsResult<{ id: string }>
+  updateShipment: (id: string, input: logistics.ShipmentInput) => LogisticsResult<{ changed: string[] }>
+  transitionShipment: (id: string, to: ShipmentStatus, opts?: logistics.TransitionOptions) => LogisticsResult<{ status: ShipmentStatus }>
+  addShipmentEvent: (id: string, input: logistics.TrackingInput) => LogisticsResult<{ eventId: string }>
+  addShipmentDocument: (id: string, input: { type: ShipmentDocumentType; reference: string }) => LogisticsResult<{ documentId: string }>
+  removeShipmentDraft: (id: string) => LogisticsResult<{ id: string }>
   updateSettings: (patch: Partial<Settings>) => void
   importData: (next: AppData) => void
   loadDemo: () => void
@@ -138,6 +151,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         duration: 8000,
         action: { label: t('Desfazer', 'Undo'), onClick: () => setData(snapshot) },
       })
+    }
+
+    const actor = (): string => data.settings.owner || 'user'
+
+    /** Valida no estado atual (para responder à interface) e reaplica no estado mais recente. */
+    const runShipmentOp = <T,>(op: (d: AppData, now: string) => logistics.Outcome<T>): LogisticsResult<T> => {
+      const now = new Date().toISOString()
+      const out = op(data, now)
+      if (!out.ok) return out
+      setData((d) => {
+        const again = op(d, now)
+        return again.ok ? again.data : d
+      })
+      return { ok: true, value: out.value }
     }
 
     const settle = (d: AppData, id: string, treasuryTx?: string): AppData => {
@@ -374,6 +401,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           return next
         }),
+      // Logística: as regras ficam em lib/logistics.ts. Aqui só se valida no estado atual e aplica no próximo.
+      // Remessas não alteram estoque nem financeiro.
+      createShipment: (input) => runShipmentOp((d, now) => logistics.createShipment(d, input, now, actor())),
+      updateShipment: (id, input) => runShipmentOp((d, now) => logistics.updateShipment(d, id, input, now, actor())),
+      transitionShipment: (id, to, opts = {}) => runShipmentOp((d, now) => logistics.transitionShipment(d, id, to, opts, now, today(), actor())),
+      addShipmentEvent: (id, input) => runShipmentOp((d, now) => logistics.addTrackingEvent(d, id, input, now, actor())),
+      addShipmentDocument: (id, input) => runShipmentOp((d, now) => logistics.addDocument(d, id, input, now, actor())),
+      removeShipmentDraft: (id) => {
+        const out = logistics.removeDraft(data, id)
+        if (!out.ok) return out
+        undoable((d) => {
+          const again = logistics.removeDraft(d, id)
+          return again.ok ? again.data : d
+        }, t('Rascunho de remessa removido.', 'Draft shipment removed.'))
+        return { ok: true, value: out.value }
+      },
       addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString() }, ...d.treasuryOps] })),
       updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.')),

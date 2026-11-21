@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { BarChart3, BookOpen, Boxes, Landmark, LayoutDashboard, Receipt, Settings, ShoppingBag, ShoppingCart, Truck, UserRound, Users } from 'lucide-react'
+import { BarChart3, BookOpen, Boxes, Landmark, LayoutDashboard, Package, Receipt, Settings, ShoppingBag, ShoppingCart, Truck, UserRound, Users } from 'lucide-react'
 import type { PageId } from '@/lib/nav'
 import { t } from '@/lib/i18n'
 
@@ -31,6 +31,7 @@ export function navSections(): NavSection[] {
         { id: 'sales', label: t('Vendas e PDV', 'Sales and POS'), icon: icon((p) => <ShoppingCart {...p} />) },
         { id: 'stock', label: t('Estoque', 'Inventory'), icon: icon((p) => <Boxes {...p} />) },
         { id: 'purchases', label: t('Compras', 'Purchases'), icon: icon((p) => <ShoppingBag {...p} />) },
+        { id: 'logistics', label: t('Logística Global', 'Global Logistics'), icon: icon((p) => <Package {...p} />) },
       ],
     },
     {

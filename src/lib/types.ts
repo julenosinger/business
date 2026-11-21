@@ -141,6 +141,116 @@ export interface Settings {
   approvalLimit: number | null
 }
 
+// ---------- Logística (fase 1A: remessas e rastreamento manual) ----------
+
+export type ShipmentDirection = 'inbound' | 'outbound' | 'transfer'
+
+export type ShipmentStatus =
+  | 'draft'
+  | 'ready'
+  | 'dispatched'
+  | 'in_transit'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'returned'
+  | 'delayed'
+  | 'exception'
+
+export interface ShipmentParty {
+  /** Nome do local ou da empresa (ex.: Armazém central). */
+  name: string
+  city: string
+  /** País (nome ou código ISO). Texto livre nesta fase. */
+  country: string
+}
+
+export interface ShipmentPackage {
+  id: string
+  weightKg: number
+  lengthCm: number
+  widthCm: number
+  heightCm: number
+}
+
+export interface ShipmentItem {
+  id: string
+  /** Produto do estoque, quando houver. O estoque NÃO é alterado por remessas nesta fase. */
+  productId?: string
+  name: string
+  sku: string
+  qty: number
+}
+
+export type ShipmentDocumentType = 'invoice' | 'packing_list' | 'bill_of_lading' | 'proof_of_delivery' | 'other'
+
+/** Referência a um documento de apoio (número e tipo). Arquivos ainda não são armazenados. */
+export interface ShipmentDocument {
+  id: string
+  type: ShipmentDocumentType
+  reference: string
+  addedAt: string
+  addedBy: string
+}
+
+export type ShipmentEventKind = 'created' | 'status' | 'tracking' | 'edit' | 'document'
+
+/** Registro de auditoria. Eventos nunca são editados nem apagados. */
+export interface ShipmentEvent {
+  id: string
+  kind: ShipmentEventKind
+  /** Quando o registro foi feito no sistema (ISO). */
+  at: string
+  /** Quando o fato ocorreu, informado pelo usuário (ISO). Usado em eventos de rastreio. */
+  occurredAt?: string
+  fromStatus?: ShipmentStatus
+  toStatus?: ShipmentStatus
+  location?: string
+  description: string
+  /** Campos alterados (kind 'edit') ou tipo do documento (kind 'document'). */
+  fields?: string[]
+  /** Origem da informação. Só 'manual' existe; integrações com transportadoras virão depois. */
+  source: 'manual'
+  actor: string
+}
+
+export interface ShipmentOrderRef {
+  kind: 'sale' | 'purchase'
+  /** Para vendas, o id da venda (validado). Para compras, só uma referência de texto. */
+  id?: string
+  label: string
+}
+
+export interface Shipment {
+  /** Código único e legível (SHP-0001). */
+  id: string
+  /** Referência de organização, preparada para multiempresa. */
+  orgId: string
+  direction: ShipmentDirection
+  status: ShipmentStatus
+  orderRef?: ShipmentOrderRef
+  origin: ShipmentParty
+  destination: ShipmentParty
+  senderName: string
+  recipientName: string
+  carrier: string
+  trackingNumber: string
+  method: string
+  packages: ShipmentPackage[]
+  items: ShipmentItem[]
+  declaredValue: number
+  currency: CurrencyCode
+  freightCost: number
+  /** Data estimada de entrega (YYYY-MM-DD). */
+  estimatedDelivery?: string
+  /** Data real de entrega (YYYY-MM-DD). */
+  deliveredAt?: string
+  documents: ShipmentDocument[]
+  events: ShipmentEvent[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AppData {
   products: Product[]
   moves: StockMove[]
@@ -151,6 +261,7 @@ export interface AppData {
   employees: Employee[]
   treasuryOps: TreasuryOp[]
   requests: PaymentRequest[]
+  shipments: Shipment[]
   settings: Settings
 }
 
