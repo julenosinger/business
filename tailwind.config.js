@@ -18,6 +18,8 @@ export default {
         bad: ch('bad'),
         warn: ch('warn'),
         fill: ch('fill'),
+        violet: ch('violet'),
+        sky: ch('blue'),
         surface: 'var(--surface)',
         'surface-strong': 'var(--surface-strong)',
         muted: 'var(--muted)',

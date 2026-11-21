@@ -197,3 +197,22 @@ export function TableWrap({ children }: { children: ReactNode }) {
     </div>
   )
 }
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden="true" className={clsx('animate-pulse rounded-lg bg-fill/10 motion-reduce:animate-none', className)} />
+}
+
+/** Dica acessível: botão focável com texto no atributo title e no rótulo. */
+export function Hint({ text }: { text: string }) {
+  return (
+    <span
+      tabIndex={0}
+      role="img"
+      aria-label={text}
+      title={text}
+      className="inline-flex size-4 cursor-help items-center justify-center rounded-full border border-line text-[10px] font-bold text-subtle outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+    >
+      i
+    </span>
+  )
+}

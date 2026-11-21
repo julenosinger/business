@@ -13,6 +13,8 @@
   --bad-rgb: 232 109 122;
   --warn-rgb: 240 198 116;
   --fill-rgb: 255 255 255;
+  --violet-rgb: 167 139 250;
+  --blue-rgb: 96 165 250;
 
   --surface: rgba(255, 255, 255, 0.05);
   --surface-strong: rgba(255, 255, 255, 0.09);
@@ -35,6 +37,8 @@
   --bad-rgb: 186 43 76;
   --warn-rgb: 160 98 0;
   --fill-rgb: 18 45 69;
+  --violet-rgb: 109 40 217;
+  --blue-rgb: 29 78 216;
 
   --surface: rgba(255, 255, 255, 0.78);
   --surface-strong: rgba(18, 45, 69, 0.07);
@@ -78,6 +82,24 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--subtle);
+}
+
+/* Painéis da Tesouraria: azul-marinho profundo com borda fina azul-ardósia. */
+.tcard {
+  border-radius: 16px;
+  border: 1px solid rgb(var(--blue-rgb) / 0.16);
+  background: linear-gradient(180deg, rgb(var(--panel-rgb) / 0.92), rgb(var(--panel-rgb) / 0.62));
+}
+[data-theme='light'] .tcard {
+  background: rgb(var(--panel-rgb) / 0.9);
+  border-color: var(--line);
+}
+
+.globe {
+  opacity: 0.9;
+}
+[data-theme='light'] .globe {
+  opacity: 0.35;
 }
 
 ::-webkit-scrollbar {

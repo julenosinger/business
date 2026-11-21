@@ -37,7 +37,10 @@ export const GATEWAY_CHAINS: GatewayChain[] = [
 export const chainByKey = (key: string): GatewayChain | undefined => GATEWAY_CHAINS.find((c) => c.key === key)
 
 export interface GatewayBalances {
+  /** Saldo confirmado (disponível para novas operações). */
   total: number
+  /** Depósitos ainda em confirmação. null quando a consulta de pendentes não está disponível. */
+  pending: number | null
   byChain: { key: string; label: string; amount: number; exact: Amount }[]
 }
 
@@ -55,8 +58,16 @@ export function useGatewayBalances(address: Address | undefined) {
     enabled: Boolean(address),
     refetchInterval: 30_000,
     queryFn: async () => {
-      if (!address) return { total: 0, byChain: [] }
-      const res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType: 'testnet' })
+      if (!address) return { total: 0, pending: 0, byChain: [] }
+      let pending: number | null = null
+      let res: Awaited<ReturnType<typeof appKit.unifiedBalance.getBalances>>
+      try {
+        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType: 'testnet', includePending: true })
+        pending = Number(toAmount(String((res as { totalPendingBalance?: string }).totalPendingBalance ?? '0')).toString())
+      } catch {
+        // Se a consulta de pendentes falhar, mantém o saldo confirmado e marca pendentes como indisponível.
+        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType: 'testnet' })
+      }
       const map = new Map<string, Amount>()
       for (const account of res.breakdown) {
         for (const row of account.breakdown) {
@@ -67,7 +78,7 @@ export function useGatewayBalances(address: Address | undefined) {
       const byChain = [...map.entries()]
         .map(([key, exact]) => ({ key, label: chainByKey(key)?.label ?? key.replace(/_/g, ' '), amount: Number(exact.toString()), exact }))
         .sort((a, b) => b.amount - a.amount)
-      return { total: Number(toAmount(String(res.totalConfirmedBalance)).toString()), byChain }
+      return { total: Number(toAmount(String(res.totalConfirmedBalance)).toString()), pending, byChain }
     },
   })
 }
