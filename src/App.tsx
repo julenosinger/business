@@ -1,0 +1,103 @@
+import { useMemo, useState } from 'react'
+import { Layout } from '@/components/Layout'
+import { NavContext, type Intent, type Nav, type PageId } from '@/lib/nav'
+import { StoreProvider } from '@/lib/store'
+import { I18nProvider } from '@/lib/i18n'
+import { readInvoiceFromLocation } from '@/lib/invoice'
+import { InvalidInvoice, PayPage } from '@/pages/PayPage'
+import { PaymentWatcher } from '@/components/PaymentWatcher'
+import { Dashboard } from '@/pages/Dashboard'
+import { Accounting } from '@/pages/Accounting'
+import { Finance } from '@/pages/Finance'
+import { Sales } from '@/pages/Sales'
+import { Stock } from '@/pages/Stock'
+import { Purchases } from '@/pages/Purchases'
+import { Contacts } from '@/pages/Contacts'
+import { Employees } from '@/pages/Employees'
+import { Treasury } from '@/pages/Treasury'
+import { Reports } from '@/pages/Reports'
+import { SettingsPage } from '@/pages/SettingsPage'
+
+function Router({ page }: { page: PageId }) {
+  switch (page) {
+    case 'dashboard':
+      return <Dashboard />
+    case 'accounting':
+      return <Accounting />
+    case 'finance':
+      return <Finance />
+    case 'sales':
+      return <Sales />
+    case 'stock':
+      return <Stock />
+    case 'purchases':
+      return <Purchases />
+    case 'customers':
+      return <Contacts kind="customer" />
+    case 'suppliers':
+      return <Contacts kind="supplier" />
+    case 'hr':
+      return <Employees />
+    case 'treasury':
+      return <Treasury />
+    case 'reports':
+      return <Reports />
+    case 'settings':
+      return <SettingsPage />
+  }
+}
+
+/** Link público de cobrança: mostra só a página de pagamento do cliente. */
+export default function App() {
+  const [link] = useState(readInvoiceFromLocation)
+  if (link.present) {
+    return <I18nProvider>{link.invoice ? <PayPage invoice={link.invoice} /> : <InvalidInvoice />}</I18nProvider>
+  }
+  return <Workspace />
+}
+
+function Workspace() {
+  const [page, setPage] = useState<PageId>('dashboard')
+  const [payAccountId, setPayAccountId] = useState<string | null>(null)
+  const [intent, setIntent] = useState<Intent | null>(null)
+
+  const nav = useMemo<Nav>(
+    () => ({
+      page,
+      go: (p) => {
+        setPage(p)
+        window.scrollTo({ top: 0 })
+      },
+      payAccountId,
+      intent,
+      requestIntent: (i) => {
+        setIntent(i)
+        if (i) {
+          setPage('treasury')
+          window.scrollTo({ top: 0 })
+        }
+      },
+      requestPay: (id) => {
+        setPayAccountId(id)
+        if (id) {
+          setPage('treasury')
+          window.scrollTo({ top: 0 })
+        }
+      },
+    }),
+    [page, payAccountId, intent],
+  )
+
+  return (
+    <StoreProvider>
+      <PaymentWatcher />
+      <NavContext.Provider value={nav}>
+        <I18nProvider>
+          <Layout>
+            <Router page={page} />
+          </Layout>
+        </I18nProvider>
+      </NavContext.Provider>
+    </StoreProvider>
+  )
+}

@@ -1,0 +1,396 @@
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
+import {
+  CAT_PAYROLL,
+  CAT_PURCHASE,
+  CAT_SALES,
+  type Account,
+  type AppData,
+  type Contact,
+  type Employee,
+  type Entry,
+  type PayMethod,
+  type PaymentRequest,
+  type Product,
+  type Sale,
+  type Settings,
+  type TreasuryOp,
+} from './types'
+import { addDays, round2, setCurrency, today } from './format'
+import { buildDemoData } from './demo'
+import { t } from './i18n'
+
+const STORAGE_KEY = 'gbos:v1'
+
+export const uid = (): string => crypto.randomUUID().slice(0, 12)
+
+export const emptySettings = (): Settings => ({
+  company: t('Minha Empresa', 'My Company'),
+  branch: t('Matriz', 'Headquarters'),
+  owner: t('Empreendedor', 'Entrepreneur'),
+  currency: t('BRL', 'USD') as Settings['currency'],
+  usdcRate: null,
+  approvalLimit: null,
+})
+
+export function emptyData(): AppData {
+  return {
+    products: [],
+    moves: [],
+    contacts: [],
+    entries: [],
+    accounts: [],
+    sales: [],
+    employees: [],
+    treasuryOps: [],
+    requests: [],
+    settings: emptySettings(),
+  }
+}
+
+function load(): AppData {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return emptyData()
+    const parsed = JSON.parse(raw) as Partial<AppData>
+    const base = emptyData()
+    return { ...base, ...parsed, settings: { ...base.settings, ...(parsed.settings ?? {}) } }
+  } catch {
+    return emptyData()
+  }
+}
+
+export interface SaleInput {
+  customerId?: string
+  method: PayMethod
+  dueDate?: string
+  items: { productId: string; qty: number; price: number }[]
+}
+
+export interface PurchaseInput {
+  supplierId?: string
+  paidNow: boolean
+  dueDate: string
+  items: { productId: string; qty: number; cost: number }[]
+}
+
+export interface Store {
+  data: AppData
+  addProduct: (p: Omit<Product, 'id'>) => void
+  updateProduct: (id: string, patch: Partial<Product>) => void
+  removeProduct: (id: string) => void
+  moveStock: (productId: string, kind: 'in' | 'out' | 'adjust', qty: number, note: string) => void
+  addContact: (c: Omit<Contact, 'id'>) => void
+  updateContact: (id: string, patch: Partial<Contact>) => void
+  removeContact: (id: string) => void
+  addEntry: (e: Omit<Entry, 'id'>) => void
+  updateEntry: (id: string, patch: Partial<Entry>) => void
+  removeEntry: (id: string) => void
+  addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
+  updateAccount: (id: string, patch: Partial<Account>) => void
+  settleAccount: (id: string, treasuryTx?: string) => void
+  removeAccount: (id: string) => void
+  recordSale: (input: SaleInput) => void
+  cancelSale: (id: string) => void
+  recordPurchase: (input: PurchaseInput) => void
+  addEmployee: (e: Omit<Employee, 'id'>) => void
+  updateEmployee: (id: string, patch: Partial<Employee>) => void
+  removeEmployee: (id: string) => void
+  runPayroll: (month: string, dueDate: string) => number
+  addRequest: (r: Omit<PaymentRequest, 'id' | 'status' | 'createdAt'>) => string
+  updateRequest: (id: string, patch: Partial<PaymentRequest>) => void
+  receiveRequest: (id: string, txHash: string, payer: string, explorerUrl: string) => void
+  addTreasuryOp: (op: Omit<TreasuryOp, 'id' | 'date'>) => void
+  updateSettings: (patch: Partial<Settings>) => void
+  importData: (next: AppData) => void
+  loadDemo: () => void
+  resetAll: () => void
+}
+
+const StoreContext = createContext<Store | null>(null)
+
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [data, setData] = useState<AppData>(load)
+
+  setCurrency(data.settings.currency)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    } catch {
+      toast.error(t('Não foi possível salvar os dados neste navegador. Exporte um backup agora.', 'Could not save data in this browser. Export a backup now.'))
+    }
+  }, [data])
+
+  // Pede ao navegador para não apagar os dados automaticamente quando faltar espaço.
+  useEffect(() => {
+    void navigator.storage?.persist?.()
+  }, [])
+
+  const store = useMemo<Store>(() => {
+    const set = (fn: (d: AppData) => AppData) => setData(fn)
+
+    /** Aplica uma mudança destrutiva e oferece desfazer por alguns segundos. */
+    const undoable = (fn: (d: AppData) => AppData, message: string) => {
+      const snapshot = data
+      setData(fn)
+      toast(message, {
+        duration: 8000,
+        action: { label: t('Desfazer', 'Undo'), onClick: () => setData(snapshot) },
+      })
+    }
+
+    const settle = (d: AppData, id: string, treasuryTx?: string): AppData => {
+      const acc = d.accounts.find((a) => a.id === id)
+      if (!acc || acc.status === 'paid') return d
+      const date = today()
+      const entry: Entry = {
+        id: uid(),
+        date,
+        type: acc.kind === 'payable' ? 'out' : 'in',
+        category: acc.category,
+        description: acc.description,
+        amount: acc.amount,
+      }
+      return {
+        ...d,
+        entries: [entry, ...d.entries],
+        accounts: d.accounts.map((a) => (a.id === id ? { ...a, status: 'paid', paidAt: date, treasuryTx } : a)),
+      }
+    }
+
+    return {
+      data,
+      addProduct: (p) =>
+        set((d) => {
+          const id = uid()
+          const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock') }] : []
+          return { ...d, products: [{ ...p, id }, ...d.products], moves: [...first, ...d.moves] }
+        }),
+      updateProduct: (id, patch) => set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+      removeProduct: (id) => undoable((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) }), t('Produto removido.', 'Product removed.')),
+      moveStock: (productId, kind, qty, note) =>
+        set((d) => {
+          const delta = kind === 'in' ? qty : kind === 'out' ? -qty : 0
+          return {
+            ...d,
+            products: d.products.map((p) =>
+              p.id === productId ? { ...p, stock: kind === 'adjust' ? qty : Math.max(0, p.stock + delta) } : p,
+            ),
+            moves: [{ id: uid(), productId, kind, qty, date: today(), note }, ...d.moves],
+          }
+        }),
+      addContact: (c) => set((d) => ({ ...d, contacts: [{ ...c, id: uid() }, ...d.contacts] })),
+      updateContact: (id, patch) => set((d) => ({ ...d, contacts: d.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) })),
+      removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
+      addEntry: (e) => set((d) => ({ ...d, entries: [{ ...e, id: uid() }, ...d.entries] })),
+      updateEntry: (id, patch) => set((d) => ({ ...d, entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
+      removeEntry: (id) => undoable((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }), t('Lançamento removido.', 'Entry removed.')),
+      addAccount: (a) => {
+        const id = uid()
+        set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual' }, ...d.accounts] }))
+        return id
+      },
+      updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
+      settleAccount: (id, treasuryTx) => set((d) => settle(d, id, treasuryTx)),
+      removeAccount: (id) => undoable((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== id) }), t('Conta removida.', 'Bill removed.')),
+      cancelSale: (id) =>
+        undoable((d) => {
+          const sale = d.sales.find((s) => s.id === id)
+          if (!sale || sale.canceledAt) return d
+          const date = today()
+          const acc = sale.accountId ? d.accounts.find((a) => a.id === sale.accountId) : undefined
+          const needsRefund = sale.method !== 'prazo' || acc?.status === 'paid'
+          const next: AppData = {
+            ...d,
+            sales: d.sales.map((s) => (s.id === id ? { ...s, canceledAt: date } : s)),
+            products: d.products.map((p) => {
+              const it = sale.items.find((i) => i.productId === p.id)
+              return it ? { ...p, stock: p.stock + it.qty } : p
+            }),
+            moves: [
+              ...sale.items.map((i) => ({
+                id: uid(),
+                productId: i.productId,
+                kind: 'in' as const,
+                qty: i.qty,
+                date,
+                note: t(`Cancelamento da venda ${sale.id}`, `Sale ${sale.id} canceled`),
+              })),
+              ...d.moves,
+            ],
+          }
+          if (acc && acc.status === 'open') next.accounts = d.accounts.filter((a) => a.id !== acc.id)
+          if (needsRefund) {
+            next.entries = [
+              {
+                id: uid(),
+                date,
+                type: 'out',
+                category: CAT_SALES,
+                description: t(`Estorno da venda para ${sale.customerName}`, `Refund of sale to ${sale.customerName}`),
+                amount: sale.total,
+              },
+              ...d.entries,
+            ]
+          }
+          return next
+        }, t('Venda cancelada. Estoque e caixa foram ajustados.', 'Sale canceled. Stock and cash were adjusted.')),
+      recordSale: (input) =>
+        set((d) => {
+          const customer = d.contacts.find((c) => c.id === input.customerId)
+          const date = today()
+          const saleId = uid()
+          const items = input.items.flatMap((it) => {
+            const p = d.products.find((x) => x.id === it.productId)
+            return p ? [{ productId: p.id, name: p.name, qty: it.qty, price: it.price, cost: p.cost }] : []
+          })
+          const total = round2(items.reduce((s, i) => s + i.qty * i.price, 0))
+          const cogs = round2(items.reduce((s, i) => s + i.qty * i.cost, 0))
+          const customerName = customer?.name ?? t('Consumidor final', 'Walk-in customer')
+          const next: AppData = {
+            ...d,
+            products: d.products.map((p) => {
+              const it = items.find((i) => i.productId === p.id)
+              return it ? { ...p, stock: Math.max(0, p.stock - it.qty) } : p
+            }),
+            moves: [
+              ...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`) })),
+              ...d.moves,
+            ],
+          }
+          let accountId: string | undefined
+          if (input.method === 'prazo') {
+            accountId = uid()
+            const acc: Account = {
+              id: accountId,
+              kind: 'receivable',
+              description: t(`Venda a prazo (${items.length} ${items.length === 1 ? 'item' : 'itens'})`, `Credit sale (${items.length} ${items.length === 1 ? 'item' : 'items'})`),
+              contactId: customer?.id,
+              contactName: customerName,
+              amount: total,
+              dueDate: input.dueDate ?? addDays(date, 30),
+              category: CAT_SALES,
+              status: 'open',
+              source: 'sale',
+            }
+            next.accounts = [acc, ...d.accounts]
+          } else {
+            next.entries = [
+              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total },
+              ...d.entries,
+            ]
+          }
+          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId }
+          next.sales = [sale, ...d.sales]
+          return next
+        }),
+      recordPurchase: (input) =>
+        set((d) => {
+          const supplier = d.contacts.find((c) => c.id === input.supplierId)
+          const date = today()
+          const total = round2(input.items.reduce((s, i) => s + i.qty * i.cost, 0))
+          const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
+          const next: AppData = {
+            ...d,
+            products: d.products.map((p) => {
+              const it = input.items.find((i) => i.productId === p.id)
+              return it ? { ...p, stock: p.stock + it.qty, cost: it.cost } : p
+            }),
+            moves: [
+              ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`) })),
+              ...d.moves,
+            ],
+          }
+          const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
+          if (input.paidNow) {
+            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total }, ...d.entries]
+          } else {
+            next.accounts = [
+              {
+                id: uid(),
+                kind: 'payable',
+                description,
+                contactId: supplier?.id,
+                contactName: name,
+                amount: total,
+                dueDate: input.dueDate,
+                category: CAT_PURCHASE,
+                status: 'open',
+                source: 'purchase',
+              },
+              ...d.accounts,
+            ]
+          }
+          return next
+        }),
+      addEmployee: (e) => set((d) => ({ ...d, employees: [{ ...e, id: uid() }, ...d.employees] })),
+      updateEmployee: (id, patch) => set((d) => ({ ...d, employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
+      removeEmployee: (id) => undoable((d) => ({ ...d, employees: d.employees.filter((e) => e.id !== id) }), t('Funcionário removido.', 'Employee removed.')),
+      runPayroll: (month, dueDate) => {
+        const pending = (d: AppData) =>
+          d.employees
+            .filter((e) => e.active)
+            .filter((e) => !d.accounts.some((a) => a.source === 'payroll' && a.employeeId === e.id && a.description.endsWith(month)))
+        const created = pending(data).length
+        setData((d) => {
+          const accs: Account[] = pending(d).map((e) => ({
+            id: uid(),
+            kind: 'payable',
+            description: t(`Salário ${e.name} - ${month}`, `Salary ${e.name} - ${month}`),
+            contactName: e.name,
+            amount: e.salary,
+            dueDate,
+            category: CAT_PAYROLL,
+            status: 'open',
+            source: 'payroll',
+            employeeId: e.id,
+          }))
+          return { ...d, accounts: [...accs, ...d.accounts] }
+        })
+        return created
+      },
+      addRequest: (r) => {
+        const id = uid()
+        set((d) => ({ ...d, requests: [{ ...r, id, status: 'open', createdAt: new Date().toISOString() }, ...d.requests] }))
+        return id
+      },
+      updateRequest: (id, patch) => set((d) => ({ ...d, requests: d.requests.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
+      receiveRequest: (id, txHash, payer, explorerUrl) =>
+        set((d) => {
+          const r = d.requests.find((x) => x.id === id)
+          if (!r || r.status !== 'open') return d
+          let next: AppData = {
+            ...d,
+            requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
+          }
+          if (d.accounts.some((a) => a.id === r.accountId && a.status === 'open')) {
+            next = settle(next, r.accountId, explorerUrl)
+          } else {
+            next = {
+              ...next,
+              entries: [{ id: uid(), date: today(), type: 'in', category: 'Serviços prestados', description: r.description, amount: r.fiatAmount }, ...next.entries],
+            }
+          }
+          return next
+        }),
+      addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString() }, ...d.treasuryOps] })),
+      updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
+      importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.')),
+      loadDemo: () =>
+        undoable(
+          (d) => ({ ...buildDemoData(), settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') } }),
+          t('Dados de demonstração carregados.', 'Demo data loaded.'),
+        ),
+      resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.')),
+    }
+  }, [data])
+
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+}
+
+export function useStore(): Store {
+  const ctx = useContext(StoreContext)
+  if (!ctx) throw new Error('useStore deve ser usado dentro de StoreProvider')
+  return ctx
+}
