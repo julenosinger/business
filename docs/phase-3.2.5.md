@@ -1,6 +1,6 @@
 # Fase 3.2.5: Endurecimento da integridade financeira e consistência de ambiente
 
-**HEAD inicial:** `c06e07a` (Fase 3.2.4) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `c06e07a` (Fase 3.2.4) · **HEAD final:** `3f84a3f`
 
 Resultado: **307 testes passando** (eram 300), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
