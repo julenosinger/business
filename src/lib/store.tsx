@@ -35,7 +35,8 @@ import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
-import { reconcileTreasuryOp, allocationAmount, planAllocation } from './settlement-service'
+import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
+import { fromNumber, toDisplayNumber } from './accounting/money'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -114,6 +115,20 @@ function migrateAccountCurrencies(data: AppData): AppData {
     return { ...a, currency: cur }
   })
   return changed ? { ...data, accounts } : data
+}
+
+/** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
+function accountOutstandingMinor(acc: Account): bigint | null {
+  const currency = acc.currency
+  if (!currency) return null
+  const amountMinor = fromNumber(acc.amount, currency)
+  if (amountMinor === null) return null
+  let paidMinor = 0n
+  for (const s of acc.settlements ?? []) {
+    const m = fromNumber(s.amount, currency)
+    if (m !== null) paidMinor += m
+  }
+  return amountMinor - paidMinor
 }
 
 function load(): AppData {
@@ -335,32 +350,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
      * Aplica a alocação contábil de uma operação JÁ confirmada on-chain (idempotente).
      * - Depósito (sem `accountId`): só marca o crédito confirmado (sem obrigação).
      * - Pagamento (com `accountId`): baixa exatamente o valor verificado (parcial), com moeda/FX da conta.
-     * Nunca reenvia transação; só posta contabilidade.
+     * - Obrigação ausente/já paga: NUNCA fabrica liquidação (revisão). Excesso é preservado como não-alocado.
+     * Nunca reenvia transação; só posta contabilidade. Aritmética em unidades menores (bigint).
      */
     const applyConfirmedAccounting = (d: AppData, opId: string): AppData => {
       const cur = d.treasuryOps.find((o) => o.id === opId)
       if (!cur) return d
-      if (!cur.accountId) {
-        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', settledAt: new Date().toISOString() } : o)) }
-      }
+      const patch = (partial: Partial<TreasuryOp>): AppData => ({
+        ...d,
+        treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString(), ...partial } : o)),
+      })
+      if (!cur.accountId) return patch({}) // depósito: sem obrigação.
       const acc = d.accounts.find((a) => a.id === cur.accountId)
-      if (!acc || acc.status !== 'open') {
-        // Obrigação já liquidada/ausente: só confirma o op (não baixa de novo).
-        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', settledAt: new Date().toISOString(), accountingStatus: 'settled' as const } : o)) }
+      if (!acc) return patch({ accountingStatus: 'requires_review' as const, reviewReason: 'obligation_missing' })
+      const alloc = allocationMinor(d.ledger, acc.currency, cur.amount, cur.date.slice(0, 10))
+      if (!alloc.ok) return patch({ accountingStatus: 'requires_review' as const, reviewReason: alloc.reason })
+      if (acc.status !== 'open') {
+        // Obrigação já paga: o pagamento vira não-alocado explícito (não baixa de novo, não fabrica liquidação).
+        return patch({ accountingStatus: 'requires_review' as const, reviewReason: 'already_settled', unallocatedAmount: toDisplayNumber(alloc.amountMinor, alloc.currency) })
       }
-      const alloc = allocationAmount(d.ledger, acc.currency, cur.amount, cur.date.slice(0, 10))
-      if (!alloc.ok) {
-        // Preserva a confirmação on-chain; alocação contábil fica para revisão.
-        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', accountingStatus: 'requires_review' as const, reviewReason: alloc.reason } : o)) }
-      }
-      const plan = planAllocation(alloc.amount, accountOutstanding(acc))
+      const outstandingMinor = accountOutstandingMinor(acc)
+      if (outstandingMinor === null) return patch({ accountingStatus: 'requires_review' as const, reviewReason: 'unknown_currency' })
+      const plan = planAllocationMinor(alloc.amountMinor, outstandingMinor)
       let next = d
-      if (plan.amount > 0) next = settle(next, cur.accountId, plan.amount, cur.explorerUrl, true)
+      if (plan.amountMinor > 0n) next = settle(next, cur.accountId, toDisplayNumber(plan.amountMinor, alloc.currency), cur.explorerUrl, true)
+      const hasExcess = plan.excessMinor > 0n
       return {
         ...next,
         treasuryOps: next.treasuryOps.map((o) =>
           o.id === opId
-            ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString(), accountingStatus: plan.accountingStatus, allocatedAmount: plan.amount, ...(plan.excess > 0 ? { unallocatedAmount: plan.excess } : {}) }
+            ? {
+                ...o,
+                status: 'confirmed' as const,
+                settledAt: new Date().toISOString(),
+                accountingStatus: hasExcess ? ('requires_review' as const) : plan.accountingStatus,
+                allocatedAmount: toDisplayNumber(plan.amountMinor, alloc.currency),
+                ...(hasExcess ? { unallocatedAmount: toDisplayNumber(plan.excessMinor, alloc.currency), reviewReason: 'excess_unallocated' as const } : {}),
+              }
             : o,
         ),
       }

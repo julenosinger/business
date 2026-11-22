@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canTransition, classifyVerification, isTerminalStatus, PAYMENT_STATUSES } from '../src/lib/accounting/settlement'
 import { isHexHash, matchTransfer, verifyUsdcReceipt } from '../src/lib/accounting/verify'
-import { allocationAmount, gatewayWalletForChain, planAllocation, reconcileTreasuryOp } from '../src/lib/settlement-service'
+import { allocationAmount, allocationMinor, gatewayWalletForChain, planAllocation, planAllocationMinor, reconcileTreasuryOp } from '../src/lib/settlement-service'
 import { backoffDelay, isAutoReconcilable } from '../src/lib/reconciliation'
 import { emptyLedger } from '../src/lib/accounting/engine'
 import { recordFxRate } from '../src/lib/accounting/reviews'
@@ -169,6 +169,23 @@ describe('plano de alocação exata (partial settlement)', () => {
   test('pagamento final completa a obrigação (700 + 300)', () => {
     // Obrigação 1000; já pago 700; saldo em aberto 300; pagamento verificado 300.
     expect(planAllocation(300, 300)).toEqual({ amount: 300, excess: 0, accountingStatus: 'settled' })
+  })
+})
+
+describe('aritmética monetária exata (unidades menores)', () => {
+  test('planAllocationMinor é exato em bigint', () => {
+    expect(planAllocationMinor(300_000_000n, 1_000_000_000n)).toEqual({ amountMinor: 300_000_000n, excessMinor: 0n, accountingStatus: 'partially_settled' })
+    expect(planAllocationMinor(1_300_000_000n, 1_000_000_000n)).toEqual({ amountMinor: 1_000_000_000n, excessMinor: 300_000_000n, accountingStatus: 'settled' })
+  })
+
+  test('allocationMinor USDC é exato (6 casas)', () => {
+    const r = allocationMinor(emptyLedger(), 'USDC', '300.5', '2026-11-22')
+    expect(r.ok && r.amountMinor).toBe(300_500_000n)
+  })
+
+  test('precisão de grandes valores sem perda de float', () => {
+    const r = allocationMinor(emptyLedger(), 'USDC', '123456789.123456', '2026-11-22')
+    expect(r.ok && r.amountMinor).toBe(123_456_789_123_456n)
   })
 })
 

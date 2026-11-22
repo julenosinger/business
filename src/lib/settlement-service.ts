@@ -86,6 +86,32 @@ export function planAllocation(allocated: number, outstanding: number): Allocati
   return { amount, excess, accountingStatus: amount < outstanding ? 'partially_settled' : 'settled' }
 }
 
+export type AllocationMinorResult = { ok: true; amountMinor: bigint; currency: CurrencyCode } | { ok: false; reason: 'fx_required' | 'invalid_amount' | 'unknown_currency' }
+
+/** Alocação em unidades menores (bigint) — aritmética monetária exata, sem float. */
+export function allocationMinor(ledger: LedgerState, currency: CurrencyCode | undefined, usdcAmount: string, date: string): AllocationMinorResult {
+  const minor = parseMinor(usdcAmount.trim(), 'USDC')
+  if (minor === null || minor <= 0n) return { ok: false, reason: 'invalid_amount' }
+  if (!currency) return { ok: false, reason: 'unknown_currency' }
+  if (currency === 'USDC') return { ok: true, amountMinor: minor, currency: 'USDC' }
+  const conv = convertForReporting(ledger, minor, 'USDC', currency, date)
+  if (!conv) return { ok: false, reason: 'fx_required' }
+  return { ok: true, amountMinor: conv.amountMinor, currency }
+}
+
+export interface AllocationMinorPlan {
+  amountMinor: bigint
+  excessMinor: bigint
+  accountingStatus: 'settled' | 'partially_settled'
+}
+
+/** Plano de alocação em unidades menores (bigint): exato, sem arredondamento de float. */
+export function planAllocationMinor(allocatedMinor: bigint, outstandingMinor: bigint): AllocationMinorPlan {
+  const amountMinor = allocatedMinor < outstandingMinor ? allocatedMinor : outstandingMinor
+  const excessMinor = allocatedMinor > outstandingMinor ? allocatedMinor - outstandingMinor : 0n
+  return { amountMinor, excessMinor, accountingStatus: amountMinor < outstandingMinor ? 'partially_settled' : 'settled' }
+}
+
 /**
  * Converte o valor USDC verificado em unidades menores para a moeda da conta.
  * - Moeda USDC: 1:1 (exato).
