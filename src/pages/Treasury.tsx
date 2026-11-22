@@ -18,6 +18,8 @@ import { useStore } from '@/lib/store'
 import { useNav, type Intent } from '@/lib/nav'
 import { useShareBase } from '@/lib/invoice'
 import { useGatewayBalances } from '@/lib/gateway'
+import { useNetwork } from '@/lib/network'
+import { requestsForNetwork, treasuryOpsForNetwork } from '@/lib/treasury-selectors'
 import { t } from '@/lib/i18n'
 import { usdcRateOf } from '@/lib/format'
 
@@ -27,6 +29,10 @@ export function Treasury() {
   const { payAccountId, requestPay, intent, requestIntent } = useNav()
   const shareBase = useShareBase()
   const gw = useGatewayBalances(address)
+  const network = useNetwork()
+  // Histórico isolado por ambiente (rede persistida de cada operação/cobrança, não o estado visual atual).
+  const visibleOps = treasuryOpsForNetwork(data.treasuryOps, network)
+  const visibleRequests = requestsForNetwork(data.requests, network)
   const [mode, setMode] = useState<TreasuryMode | null>(null)
   const [payId, setPayId] = useState<string | null>(null)
   const [batchIds, setBatchIds] = useState<string[] | null>(null)
@@ -72,7 +78,7 @@ export function Treasury() {
   const queue = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open').sort((a, b) => a.dueDate.localeCompare(b.dueDate))
   const rate = usdcRateOf(data.settings)
   const appIsUsdc = data.settings.currency === 'USDC'
-  const activityCount = data.treasuryOps.filter((o) => inLastDays(o.date, period)).length
+  const activityCount = visibleOps.filter((o) => inLastDays(o.date, period)).length
 
   const open = (m: TreasuryMode, id: string | null = null) => {
     setPayId(id)
@@ -113,7 +119,7 @@ export function Treasury() {
 
         <div className="grid items-stretch gap-4 lg:grid-cols-[1.5fr_1fr] sm:gap-5">
           <div className="order-2 min-w-0 lg:order-1">
-            <Analytics ops={data.treasuryOps} requests={data.requests} own={address} period={period} onPeriod={setPeriod} />
+            <Analytics ops={visibleOps} requests={visibleRequests} own={address} period={period} onPeriod={setPeriod} />
           </div>
           <div className="order-1 min-w-0 lg:order-2">
             <QuickActions
@@ -128,7 +134,7 @@ export function Treasury() {
 
         <div className="grid items-stretch gap-4 lg:grid-cols-[1fr_1.45fr] sm:gap-5">
           <NetworkBalances connected={isConnected} loading={gw.isLoading} failed={gw.isError} onRetry={refresh} balances={gw.data} />
-          <ActivityTable ops={data.treasuryOps} own={address} />
+          <ActivityTable ops={visibleOps} own={address} />
         </div>
 
         <div className="grid items-stretch gap-4 lg:grid-cols-2 sm:gap-5">

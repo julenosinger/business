@@ -73,6 +73,26 @@ const GATEWAY_KEY_CHAIN_IDS: Record<string, number> = {
 
 export const gatewayChainIdOf = (key: string): number | undefined => GATEWAY_KEY_CHAIN_IDS[key]
 
+/** Ambiente de uma chave de rede do Gateway (persistida nas operações). `undefined` = legado/desconhecido. */
+const GATEWAY_KEY_ENVS: Record<string, 'live' | 'test'> = {
+  Arc: 'live',
+  Ethereum: 'live',
+  Base: 'live',
+  Arbitrum: 'live',
+  Optimism: 'live',
+  Avalanche: 'live',
+  Polygon: 'live',
+  Arc_Testnet: 'test',
+  Base_Sepolia: 'test',
+  Ethereum_Sepolia: 'test',
+  Arbitrum_Sepolia: 'test',
+  Optimism_Sepolia: 'test',
+  Avalanche_Fuji: 'test',
+  Polygon_Amoy_Testnet: 'test',
+}
+
+export const gatewayChainEnv = (key: string): 'live' | 'test' | undefined => GATEWAY_KEY_ENVS[key]
+
 /** Troca a rede (ação explícita). Persiste e notifica assinantes. */
 export function setNetwork(id: NetworkId): void {
   if (!isValidNetwork(id) || id === current) return
