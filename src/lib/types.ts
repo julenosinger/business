@@ -40,6 +40,9 @@ export interface Entry {
 
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'
 
+/** Ambiente financeiro de ORIGEM de uma obrigação. `unassigned` = legado sem classificação. */
+export type AccountEnvironment = NetworkId | 'unassigned'
+
 /** Liquidação parcial (ou total) de uma conta. Várias liquidações por conta são permitidas. */
 export interface AccountSettlement {
   id: string
@@ -67,6 +70,8 @@ export interface Account {
   source: AccountSource
   /** Moeda da obrigação. Ausente em registros legados (tratada como desconhecida, nunca adivinhada). */
   currency?: CurrencyCode
+  /** Ambiente financeiro de ORIGEM da obrigação (mainnet/testnet/unassigned). */
+  environment?: AccountEnvironment
   /** Ambiente escolhido EXPLICITAMENTE para pagar esta obrigação. Ausente = não preparada. */
   paymentNetwork?: NetworkId
   /** Cancelamento lógico (auditável). A obrigação deixa de ser executável sem ser apagada. */

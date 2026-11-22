@@ -10,7 +10,8 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotals } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment } from '@/lib/selectors'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
@@ -154,21 +155,23 @@ function PartialPaymentModal({ account, onClose }: { account: Account | null; on
 type Tab = 'open' | 'payable' | 'receivable' | 'paid'
 
 export function Finance() {
-  const { data, settleAccount, removeAccount } = useStore()
+  const { data, settleAccount, cancelAccount } = useStore()
   const { requestPay, requestIntent } = useNav()
+  const network = useNetwork()
   const [tab, setTab] = useState<Tab>('open')
   const [target, setTarget] = useState<Account | 'new' | null>(null)
   const [partial, setPartial] = useState<Account | null>(null)
   const [limit, setLimit] = useState(30)
-  const totals = accountTotals(data)
+  const totals = accountTotalsForEnvironment(data, network)
 
-  const openAll = data.accounts.filter((a) => a.status === 'open' && !a.canceledAt)
+  const scoped = data.accounts.filter((a) => a.environment === network)
+  const openAll = scoped.filter((a) => a.status === 'open' && !a.canceledAt)
   const openReceivable = openAll.filter((a) => a.kind === 'receivable')
   const openPayable = openAll.filter((a) => a.kind === 'payable')
   const overdue = (kind: Account['kind']) => openAll.filter((a) => a.kind === kind && daysUntil(a.dueDate) < 0).length
   const plural = (n: number) => (n === 1 ? t('conta', 'bill') : t('contas', 'bills'))
 
-  const list = data.accounts
+  const list = scoped
     .filter((a) => (tab === 'open' ? a.status === 'open' && !a.canceledAt : tab === 'paid' ? a.status === 'paid' : a.kind === tab && a.status === 'open' && !a.canceledAt))
     .sort((a, b) => (tab === 'paid' ? (b.paidAt ?? '').localeCompare(a.paidAt ?? '') : a.dueDate.localeCompare(b.dueDate)))
   const shown = list.slice(0, limit)
@@ -244,8 +247,8 @@ export function Finance() {
         </button>
       ) : null}
       <button
-        aria-label={t('Remover conta', 'Remove bill')}
-        onClick={() => removeAccount(a.id)}
+        aria-label={t('Cancelar conta', 'Cancel bill')}
+        onClick={() => cancelAccount(a.id)}
         className="flex size-9 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-bad focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
       >
         <Trash2 size={15} />
@@ -254,7 +257,7 @@ export function Finance() {
   )
 
   const countOf = (v: Tab) =>
-    v === 'open' ? openAll.length : v === 'paid' ? data.accounts.length - openAll.length : v === 'payable' ? openPayable.length : openReceivable.length
+    v === 'open' ? openAll.length : v === 'paid' ? scoped.filter((a) => a.status === 'paid').length : v === 'payable' ? openPayable.length : openReceivable.length
 
   return (
     <div className="space-y-4 sm:space-y-5">

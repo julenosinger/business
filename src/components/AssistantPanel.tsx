@@ -3,9 +3,10 @@ import { BarChart3, Boxes, Landmark, Send, Sparkles, Truck } from 'lucide-react'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { accountTotals, cashBalance, dueSoon, kpis, lowStock, monthPeriod } from '@/lib/selectors'
+import { accountTotalsForEnvironment, cashBalance, dueSoonForEnvironment, kpis, lowStock, monthPeriod } from '@/lib/selectors'
 import { money, num } from '@/lib/format'
 import { t } from '@/lib/i18n'
+import { useNetwork } from '@/lib/network'
 import { CAT_PURCHASE } from '@/lib/types'
 
 type QuestionId = 'profit' | 'restock' | 'suppliers' | 'gateway'
@@ -22,6 +23,7 @@ function questions(): { id: QuestionId; label: string; icon: React.ReactNode }[]
 export function AssistantPanel() {
   const { data } = useStore()
   const { requestPay, go } = useNav()
+  const network = useNetwork()
   const [answer, setAnswer] = useState<{ q: string; lines: string[] } | null>(null)
 
   const ask = (id: QuestionId, label: string) => {
@@ -47,7 +49,7 @@ export function AssistantPanel() {
           : [t('Nenhum produto abaixo do estoque mínimo.', 'No product is below its minimum stock.')],
       })
     } else if (id === 'suppliers') {
-      const due = dueSoon(data, 'payable', 7).filter((a) => a.category === CAT_PURCHASE)
+      const due = dueSoonForEnvironment(data, network, 'payable', 7).filter((a) => a.category === CAT_PURCHASE)
       const total = due.reduce((s, a) => s + a.amount, 0)
       const cash = cashBalance(data)
       setAnswer({
@@ -66,7 +68,7 @@ export function AssistantPanel() {
           : [t('Não há pagamentos a fornecedores vencendo nos próximos 7 dias.', 'No supplier payments fall due in the next 7 days.')],
       })
     } else {
-      const next = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open').sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]
+      const next = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open' && !a.canceledAt && a.environment === network).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]
       if (next) {
         requestPay(next.id)
       } else {
@@ -76,7 +78,7 @@ export function AssistantPanel() {
     }
   }
 
-  const totals = accountTotals(data)
+  const totals = accountTotalsForEnvironment(data, network)
 
   return (
     <TCard className="flex h-full flex-col gap-4 p-4 sm:p-5">

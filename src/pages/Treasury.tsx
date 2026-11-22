@@ -75,7 +75,7 @@ export function Treasury() {
     ? (data.contacts.find((c) => c.id === account.contactId)?.wallet ?? data.employees.find((e) => e.id === account.employeeId)?.wallet ?? '')
     : ''
 
-  const openPayables = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open' && !a.canceledAt)
+  const openPayables = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   // Fila executável: somente obrigações PREPARADAS para o ambiente atual (escolha explícita persistida).
   // Obrigações não preparadas ficam fora da fila executável (acessíveis em Contas a pagar/receber).
   const preparedQueue = openPayables.filter((a) => a.paymentNetwork === network).sort((a, b) => a.dueDate.localeCompare(b.dueDate))

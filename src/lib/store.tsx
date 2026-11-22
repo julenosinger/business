@@ -5,6 +5,7 @@ import {
   CAT_PURCHASE,
   CAT_SALES,
   type Account,
+  type AccountEnvironment,
   type AppData,
   type Contact,
   type Employee,
@@ -38,7 +39,7 @@ import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accou
 import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
 import { fromNumber, toDisplayNumber } from './accounting/money'
 import { canCancel, inFlightIntentEnv } from './treasury-selectors'
-import type { NetworkId } from './network'
+import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -119,6 +120,29 @@ function migrateAccountCurrencies(data: AppData): AppData {
   return changed ? { ...data, accounts } : data
 }
 
+/**
+ * Migração versionada/idempotente do ambiente financeiro de origem (fase 3.2.4).
+ * - Usa `paymentNetwork` (se já preparado) ou a rede de uma operação vinculada; senão `unassigned`.
+ * - Nunca atribui Mainnet/Testnet pela rede atualmente selecionada; nunca duplica obrigações.
+ * Exportada para testes de migração (pura e idempotente).
+ */
+export function migrateAccountEnvironments(data: AppData): AppData {
+  const opEnv = new Map<string, NetworkId>()
+  for (const o of data.treasuryOps) {
+    if (!o.accountId) continue
+    const env = gatewayChainEnv(o.chain)
+    if (env) opEnv.set(o.accountId, env === 'live' ? 'mainnet' : 'testnet')
+  }
+  let changed = false
+  const accounts = data.accounts.map((a) => {
+    if (a.environment) return a
+    const env: AccountEnvironment = a.paymentNetwork ?? opEnv.get(a.id) ?? 'unassigned'
+    changed = true
+    return { ...a, environment: env }
+  })
+  return changed ? { ...data, accounts } : data
+}
+
 /** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
 function accountOutstandingMinor(acc: Account): bigint | null {
   const currency = acc.currency
@@ -153,7 +177,7 @@ function load(): AppData {
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
     const data: AppData = { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
-    return migrateAccountCurrencies(data)
+    return migrateAccountEnvironments(migrateAccountCurrencies(data))
   } catch {
     return emptyData()
   }
@@ -504,7 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addAccount: (a) => {
         const id = uid()
-        set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual', currency: a.currency ?? d.settings.currency }, ...d.accounts] }))
+        set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual', currency: a.currency ?? d.settings.currency, environment: getNetwork() }, ...d.accounts] }))
         return id
       },
       updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
@@ -533,6 +557,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Bloqueia mudança de ambiente quando há intenção ativa (pendente/ambígua/revisão) em QUALQUER rede.
         if (inFlightIntentEnv(id, data.treasuryOps) !== null) {
           toast.error(t('Há um pagamento em processamento para esta obrigação. Acompanhe na reconciliação antes de trocar a rede.', 'There is a payment in progress for this obligation. Track it in reconciliation before changing the network.'))
+          return
+        }
+        // A preparação respeita o ambiente de ORIGEM: uma obrigação Mainnet não pode ser preparada para Testnet
+        // (e vice-versa) apenas alterando paymentNetwork. Obrigações sem ambiente definido não podem ser pagas.
+        if (acc.environment && acc.environment !== 'unassigned' && acc.environment !== network) {
+          toast.error(t('Esta obrigação pertence a outro ambiente financeiro e não pode ser preparada aqui.', 'This obligation belongs to another financial environment and cannot be prepared here.'))
+          return
+        }
+        if (!acc.environment || acc.environment === 'unassigned') {
+          toast.error(t('Esta obrigação ainda não tem ambiente financeiro definido. Revise a classificação antes de pagar.', 'This obligation has no financial environment defined yet. Review its classification before paying.'))
           return
         }
         set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, paymentNetwork: network } : a)) }))
@@ -645,6 +679,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               status: 'open',
               source: 'sale',
               currency: d.settings.currency,
+              environment: getNetwork(),
             }
             next.accounts = [acc, ...d.accounts]
           } else {
@@ -713,6 +748,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 status: 'open',
                 source: 'purchase',
                 currency: d.settings.currency,
+                environment: getNetwork(),
               },
               ...d.accounts,
             ]
@@ -740,6 +776,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status: 'open',
             source: 'payroll',
             currency: d.settings.currency,
+            environment: getNetwork(),
             employeeId: e.id,
           }))
           return { ...d, accounts: [...accs, ...d.accounts] }
@@ -862,13 +899,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.'), false),
       loadDemo: () =>
         undoable(
-          (d) => ({
-            ...buildDemoData(d.settings.currency),
-            // Mantém a configuração do razão (plano de contas, flags, regras fiscais); os lançamentos antigos
-            // pertencem aos dados substituídos e saem junto com eles (o Desfazer restaura tudo).
-            ledger: { ...emptyLedger(d.ledger.orgId), flags: d.ledger.flags, chart: d.ledger.chart, categoryMap: d.ledger.categoryMap, taxRules: d.ledger.taxRules, fxRates: d.ledger.fxRates },
-            settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') },
-          }),
+          (d) => {
+            const demo = buildDemoData(d.settings.currency)
+            // Dados de demonstração pertencem ao ambiente financeiro atualmente selecionado.
+            const env = getNetwork()
+            return {
+              ...demo,
+              accounts: demo.accounts.map((a) => ({ ...a, environment: env })),
+              // Mantém a configuração do razão (plano de contas, flags, regras fiscais); os lançamentos antigos
+              // pertencem aos dados substituídos e saem junto com eles (o Desfazer restaura tudo).
+              ledger: { ...emptyLedger(d.ledger.orgId), flags: d.ledger.flags, chart: d.ledger.chart, categoryMap: d.ledger.categoryMap, taxRules: d.ledger.taxRules, fxRates: d.ledger.fxRates },
+              settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') },
+            }
+          },
           t('Dados de demonstração carregados.', 'Demo data loaded.'),
           false,
         ),

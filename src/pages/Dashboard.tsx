@@ -1,6 +1,6 @@
 import { useAccount } from 'wagmi'
 import { useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, Banknote, Boxes, CalendarClock, Database, DownloadCloud, Landmark, LineChart, PieChart, Receipt, TrendingUp, Wallet } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Banknote, Boxes, CalendarClock, Database, DownloadCloud, Landmark, LineChart, PieChart, Receipt, Trash2, TrendingUp, Wallet } from 'lucide-react'
 import { Bar, AreaChart, C, Donut } from '@/components/charts'
 import { AssistantPanel } from '@/components/AssistantPanel'
 import { Badge, Button, Empty, Skeleton } from '@/components/ui'
@@ -10,7 +10,8 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useGatewayBalances } from '@/lib/gateway'
-import { accountTotals, cashBalance, delta, kpis, monthPeriod, monthlySeries, stockValue, upcoming } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { accountTotalsForEnvironment, cashBalance, delta, kpis, monthPeriod, monthlySeries, stockValue, upcomingForEnvironment } from '@/lib/selectors'
 import { fmtDate, daysUntil, money, moneyCompact, pct, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { daysSinceBackup, exportBackup } from '@/lib/backup'
@@ -26,8 +27,9 @@ function Delta({ value }: { value: number | null }) {
 }
 
 export function Dashboard() {
-  const { data, loadDemo } = useStore()
+  const { data, loadDemo, cancelAccount } = useStore()
   const { go, requestPay } = useNav()
+  const network = useNetwork()
   const [sinceBackup, setSinceBackup] = useState<number | null>(daysSinceBackup())
   const { address } = useAccount()
   const gw = useGatewayBalances(address)
@@ -37,8 +39,8 @@ export function Dashboard() {
   const cur = kpis(data, now)
   const old = kpis(data, prev)
   const series = monthlySeries(data, 6)
-  const totals = accountTotals(data)
-  const next = upcoming(data, 5)
+  const totals = accountTotalsForEnvironment(data, network)
+  const next = upcomingForEnvironment(data, network, 5)
   const hasData = data.sales.length + data.entries.length + data.products.length + data.accounts.length > 0
   const maxAcc = Math.max(totals.receivable, totals.payable, 1)
   const gwConfirmed = gw.data?.total ?? 0
@@ -287,11 +289,23 @@ export function Dashboard() {
                     </div>
                     <div className="text-right">
                       <div className={`num text-sm font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</div>
-                      {a.kind === 'payable' ? (
-                        <button onClick={() => requestPay(a.id)} className="text-xs font-semibold text-sky hover:underline">
-                          {t('Pagar via USDC', 'Pay with USDC')}
+                      <div className="mt-0.5 flex items-center justify-end gap-2">
+                        {a.kind === 'payable' ? (
+                          <button onClick={() => requestPay(a.id)} className="text-xs font-semibold text-sky hover:underline">
+                            {t('Pagar via USDC', 'Pay with USDC')}
+                          </button>
+                        ) : null}
+                        <button
+                          onClick={() => {
+                            if (window.confirm(t(`Cancelar a obrigação "${a.description}"?`, `Cancel the "${a.description}" obligation?`))) cancelAccount(a.id)
+                          }}
+                          aria-label={t('Cancelar obrigação', 'Cancel obligation')}
+                          title={t('Cancelar obrigação', 'Cancel obligation')}
+                          className="text-subtle transition-colors hover:text-bad"
+                        >
+                          <Trash2 size={14} />
                         </button>
-                      ) : null}
+                      </div>
                     </div>
                   </li>
                 )

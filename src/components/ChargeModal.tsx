@@ -39,7 +39,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const { data, addAccount, addRequest } = useStore()
   const base = useShareBase()
   const network = useNetwork()
-  const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open')
+  const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   const rate = usdcRateOf(data.settings)
 
   const [selected, setSelected] = useState('')

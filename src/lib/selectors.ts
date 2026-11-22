@@ -1,6 +1,7 @@
 import { CAT_PURCHASE, CAT_SALES, type Account, type AppData } from './types'
 import { addDays, daysUntil, iso, monthKey, monthLabel, round2, today } from './format'
 import { locale } from './i18n'
+import type { NetworkId } from './network'
 
 export interface Period {
   from: string
@@ -101,8 +102,13 @@ export function accountIsPartial(a: Account): boolean {
   return a.status === 'open' && (a.settlements?.length ?? 0) > 0
 }
 
+/** Obrigações pertencentes ao ambiente financeiro de origem (exclui `unassigned`). */
+export function accountsForEnvironment(accounts: Account[], network: NetworkId): Account[] {
+  return accounts.filter((a) => a.environment === network)
+}
+
 export function accountTotals(data: AppData): Totals {
-  const open = data.accounts.filter((a) => a.status === 'open')
+  const open = data.accounts.filter((a) => a.status === 'open' && !a.canceledAt)
   const sum = (list: Account[]) => round2(list.reduce((s, a) => s + accountOutstanding(a), 0))
   const rec = open.filter((a) => a.kind === 'receivable')
   const pay = open.filter((a) => a.kind === 'payable')
@@ -114,16 +120,31 @@ export function accountTotals(data: AppData): Totals {
   }
 }
 
+/** Totais isolados por ambiente (usado por Dashboard, Finance e assistente). */
+export function accountTotalsForEnvironment(data: AppData, network: NetworkId): Totals {
+  return accountTotals({ ...data, accounts: accountsForEnvironment(data.accounts, network) })
+}
+
 export function upcoming(data: AppData, limit = 5): Account[] {
   return data.accounts
-    .filter((a) => a.status === 'open')
+    .filter((a) => a.status === 'open' && !a.canceledAt)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, limit)
 }
 
+/** Próximas obrigações isoladas por ambiente. */
+export function upcomingForEnvironment(data: AppData, network: NetworkId, limit = 5): Account[] {
+  return upcoming({ ...data, accounts: accountsForEnvironment(data.accounts, network) }, limit)
+}
+
 export function dueSoon(data: AppData, kind: Account['kind'], days: number): Account[] {
   const limit = addDays(today(), days)
-  return data.accounts.filter((a) => a.kind === kind && a.status === 'open' && a.dueDate <= limit)
+  return data.accounts.filter((a) => a.kind === kind && a.status === 'open' && !a.canceledAt && a.dueDate <= limit)
+}
+
+/** Obrigações a vencer em breve, isoladas por ambiente. */
+export function dueSoonForEnvironment(data: AppData, network: NetworkId, kind: Account['kind'], days: number): Account[] {
+  return dueSoon({ ...data, accounts: accountsForEnvironment(data.accounts, network) }, kind, days)
 }
 
 export interface Ranked {
