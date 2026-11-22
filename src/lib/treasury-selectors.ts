@@ -40,3 +40,15 @@ export function requestsForNetwork(requests: PaymentRequest[], network: NetworkI
   const wanted = network === 'mainnet' ? 'live' : 'test'
   return requests.filter((r) => requestEnv(r) === wanted)
 }
+
+/**
+ * Ambiente da intenção de pagamento EM PROCESSAMENTO de uma obrigação (pendente/ambígua/revisão).
+ * `null` quando não há intenção ativa (obrigação não preparada). Usado para impedir pagamento
+ * concorrente da mesma obrigação em ambientes diferentes.
+ */
+export function inFlightIntentEnv(accountId: string, ops: TreasuryOp[]): OpEnv | null {
+  const op = ops.find(
+    (o) => o.accountId === accountId && o.kind === 'spend' && (o.status === 'pending' || o.status === 'ambiguous' || o.status === 'requires_review'),
+  )
+  return op ? treasuryOpEnv(op) : null
+}

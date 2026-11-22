@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
+import { inFlightIntentEnv, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
 import type { PaymentRequest, TreasuryOp } from '../src/lib/types'
 
 const op = (chain: string, over: Partial<TreasuryOp> = {}): TreasuryOp => ({ id: 'op', date: '2026-11-22', kind: 'spend', chain, amount: '1', note: '', ...over })
@@ -65,5 +65,30 @@ describe('isolamento de histórico da tesouraria', () => {
     expect(requestsForNetwork(rs, 'testnet').map((r) => r.chainKey)).toEqual(['Arc_Testnet'])
     expect(requestEnv(req('Arc'))).toBe('live')
     expect(requestEnv(req('Unknown'))).toBe('unknown')
+  })
+})
+
+describe('intenção de pagamento em processamento', () => {
+  const spendOp = (accountId: string, chain: string, status: TreasuryOp['status']): TreasuryOp => ({
+    id: 'op',
+    date: '2026-11-22',
+    kind: 'spend',
+    chain,
+    amount: '1',
+    note: '',
+    accountId,
+    status,
+  })
+
+  test('intenção pendente na Mainnet/Testnet → in-flight live/test', () => {
+    expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'pending')])).toBe('live')
+    expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc_Testnet', 'pending')])).toBe('test')
+    expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'requires_review')])).toBe('live')
+  })
+
+  test('sem intenção, falha ou confirmada → null (não preparada/liberada)', () => {
+    expect(inFlightIntentEnv('a1', [])).toBeNull()
+    expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'failed')])).toBeNull()
+    expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'confirmed')])).toBeNull()
   })
 })

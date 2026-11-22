@@ -6,6 +6,8 @@ import type { Account } from '@/lib/types'
 
 interface Props {
   queue: Account[]
+  /** Contas com pagamento em processamento no ambiente atual (não selecionáveis em lote). */
+  inFlight?: Set<string>
   picked: string[]
   setPicked: (ids: string[] | ((prev: string[]) => string[])) => void
   isConnected: boolean
@@ -14,7 +16,7 @@ interface Props {
   onBatch: (ids: string[]) => void
 }
 
-export function PaymentQueue({ queue, picked, setPicked, isConnected, rate, onPay, onBatch }: Props) {
+export function PaymentQueue({ queue, inFlight, picked, setPicked, isConnected, rate, onPay, onBatch }: Props) {
   return (
     <TCard className="h-full p-4 sm:p-5">
       <CardTitle
@@ -42,6 +44,7 @@ export function PaymentQueue({ queue, picked, setPicked, isConnected, rate, onPa
         <ul className="space-y-2">
           {queue.slice(0, 20).map((a) => {
             const d = daysUntil(a.dueDate)
+            const busy = inFlight?.has(a.id) ?? false
             return (
               <li key={a.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-fill/5 p-3">
                 {queue.length > 1 ? (
@@ -49,6 +52,7 @@ export function PaymentQueue({ queue, picked, setPicked, isConnected, rate, onPa
                     type="checkbox"
                     aria-label={t('Selecionar conta', 'Select bill')}
                     className="size-4"
+                    disabled={busy}
                     checked={picked.includes(a.id)}
                     onChange={(e) => setPicked((p) => (e.target.checked ? [...p, a.id] : p.filter((x) => x !== a.id)))}
                   />
@@ -57,6 +61,7 @@ export function PaymentQueue({ queue, picked, setPicked, isConnected, rate, onPa
                   <div className="truncate text-sm font-semibold">{a.description}</div>
                   <div className="text-xs text-subtle">
                     {a.contactName} · {fmtDate(a.dueDate)} {d < 0 ? <Badge tone="bad">{t('em atraso', 'overdue')}</Badge> : null}
+                    {busy ? <Badge tone="warn">{t('em processamento', 'processing')}</Badge> : null}
                   </div>
                 </div>
                 <div className="text-right">

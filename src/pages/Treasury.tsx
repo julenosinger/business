@@ -19,7 +19,7 @@ import { useNav, type Intent } from '@/lib/nav'
 import { useShareBase } from '@/lib/invoice'
 import { useGatewayBalances } from '@/lib/gateway'
 import { useNetwork } from '@/lib/network'
-import { requestsForNetwork, treasuryOpsForNetwork } from '@/lib/treasury-selectors'
+import { requestsForNetwork, inFlightIntentEnv, treasuryOpsForNetwork } from '@/lib/treasury-selectors'
 import { t } from '@/lib/i18n'
 import { usdcRateOf } from '@/lib/format'
 
@@ -75,7 +75,17 @@ export function Treasury() {
     ? (data.contacts.find((c) => c.id === account.contactId)?.wallet ?? data.employees.find((e) => e.id === account.employeeId)?.wallet ?? '')
     : ''
 
-  const queue = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open').sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+  const openPayables = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open')
+  // Fila executável: obrigações sem intenção ativa, ou com intenção em processamento NO ambiente atual.
+  // Intenções em processamento no OUTRO ambiente são ocultas aqui (impede pagamento concorrente da mesma obrigação).
+  const wantedEnv = network === 'mainnet' ? 'live' : 'test'
+  const queue = openPayables
+    .filter((a) => {
+      const env = inFlightIntentEnv(a.id, data.treasuryOps)
+      return env === null || env === wantedEnv
+    })
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+  const inFlightIds = new Set(openPayables.filter((a) => inFlightIntentEnv(a.id, data.treasuryOps) === wantedEnv).map((a) => a.id))
   const rate = usdcRateOf(data.settings)
   const appIsUsdc = data.settings.currency === 'USDC'
   const activityCount = visibleOps.filter((o) => inLastDays(o.date, period)).length
@@ -138,7 +148,7 @@ export function Treasury() {
         </div>
 
         <div className="grid items-stretch gap-4 lg:grid-cols-2 sm:gap-5">
-          <PaymentQueue queue={queue} picked={picked} setPicked={setPicked} isConnected={isConnected} rate={rate} onPay={(id) => open('spend', id)} onBatch={setBatchIds} />
+          <PaymentQueue queue={queue} inFlight={inFlightIds} picked={picked} setPicked={setPicked} isConnected={isConnected} rate={rate} onPay={(id) => open('spend', id)} onBatch={setBatchIds} />
           <RequestsCard
             requests={visibleRequests}
             company={data.settings.company}
