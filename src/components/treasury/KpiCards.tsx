@@ -14,11 +14,13 @@ interface Props {
   onRetry: () => void
   balances?: GatewayBalances
   rate: number | null
+  /** A moeda do app já é USDC: não há equivalente em moeda local para mostrar. */
+  appIsUsdc?: boolean
   activityCount: number
   period: Period
 }
 
-export function KpiCards({ connected, loading, failed, onRetry, balances, rate, activityCount, period }: Props) {
+export function KpiCards({ connected, loading, failed, onRetry, balances, rate, appIsUsdc, activityCount, period }: Props) {
   const confirmed = balances?.total ?? 0
   const pending = balances?.pending ?? null
   const unified = confirmed + (pending ?? 0)
@@ -43,7 +45,7 @@ export function KpiCards({ connected, loading, failed, onRetry, balances, rate, 
         value={pick(usdcFmt(unified))}
         unit={ready ? 'USDC' : undefined}
         sub={
-          status ?? (ready ? (rate ? `≈ ${money(unified * rate)}` : t('Defina a cotação', 'Set the rate')) : undefined)
+          status ?? (ready && !appIsUsdc ? (rate ? `≈ ${money(unified * rate)}` : t('Defina a cotação', 'Set the rate')) : undefined)
         }
       />
       <Kpi

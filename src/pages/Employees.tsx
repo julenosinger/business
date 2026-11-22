@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { CalendarCheck, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
+import { DateField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { Bar, C } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -44,7 +46,7 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
           </Field>
         </div>
         <Field label={t('Admissão', 'Hire date')}>
-          <input type="date" className={inputCls} value={form.admission} onChange={set('admission')} />
+          <DateField value={form.admission} onChange={(v) => setForm((f) => ({ ...f, admission: v }))} />
         </Field>
         <Field label={t('Carteira para receber em USDC (opcional)', 'Wallet to receive USDC (optional)')} hint={walletOk ? undefined : t('Endereço inválido.', 'Invalid address.')}>
           <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
@@ -54,7 +56,7 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
             {t('Cancelar', 'Cancel')}
           </Button>
           <Button
-            disabled={!form.name.trim() || !(salary > 0) || !walletOk}
+            disabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission)}
             onClick={() => {
               const payload = { name: form.name.trim(), role: form.role.trim(), salary, wallet: form.wallet.trim(), admission: form.admission }
               if (editing) updateEmployee(editing.id, payload)

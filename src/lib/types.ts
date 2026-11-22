@@ -105,7 +105,8 @@ export interface TreasuryOp {
   note: string
 }
 
-export type CurrencyCode = 'BRL' | 'USD' | 'EUR'
+/** USDC é uma moeda do app como as outras: nunca é tratado como equivalente de USD (não há conversão automática). */
+export type CurrencyCode = 'USDC' | 'BRL' | 'USD' | 'EUR'
 
 export interface PaymentRequest {
   id: string

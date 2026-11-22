@@ -36,8 +36,8 @@ interface Form {
 
 let seq = 1
 const csv = (s: string): string[] => s.split(',').map((x) => x.trim()).filter(Boolean)
-const empty = (): Form => ({ name: '', countries: '', methods: '', contactName: '', email: '', phone: '', trackingUrlTemplate: '', levels: [], costOn: false, currency: 'BRL', baseFee: '', perKg: '', active: true })
-const fromCarrier = (c: Carrier): Form => ({
+const empty = (currency: CurrencyCode): Form => ({ name: '', countries: '', methods: '', contactName: '', email: '', phone: '', trackingUrlTemplate: '', levels: [], costOn: false, currency, baseFee: '', perKg: '', active: true })
+const fromCarrier = (c: Carrier, fallback: CurrencyCode): Form => ({
   name: c.name,
   countries: c.countries.join(', '),
   methods: c.methods.join(', '),
@@ -47,14 +47,14 @@ const fromCarrier = (c: Carrier): Form => ({
   trackingUrlTemplate: c.trackingUrlTemplate,
   levels: c.serviceLevels.map((s) => ({ key: seq++, name: s.name, minDays: String(s.minDays), maxDays: String(s.maxDays) })),
   costOn: !!c.cost,
-  currency: c.cost?.currency ?? 'BRL',
+  currency: c.cost?.currency ?? fallback,
   baseFee: c.cost ? String(c.cost.baseFee) : '',
   perKg: c.cost ? String(c.cost.perKg) : '',
   active: c.active,
 })
 
 function CarrierModal({ target, onClose }: { target: Carrier | 'new' | null; onClose: () => void }) {
-  const { createCarrier, updateCarrier } = useStore()
+  const { data, createCarrier, updateCarrier } = useStore()
   const editing = target && target !== 'new' ? target : null
   const key = target === null ? null : editing ? editing.id : 'new'
   const [loaded, setLoaded] = useState<string | null>(null)
@@ -63,7 +63,7 @@ function CarrierModal({ target, onClose }: { target: Carrier | 'new' | null; onC
   if (key !== loaded) {
     setLoaded(key)
     setError('')
-    setForm(target === null ? null : editing ? fromCarrier(editing) : empty())
+    setForm(target === null ? null : editing ? fromCarrier(editing, data.settings.currency) : empty(data.settings.currency))
   }
   if (!form) return <Modal open={false} title="" onClose={onClose}>{null}</Modal>
 

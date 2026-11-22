@@ -1,8 +1,9 @@
 import { clsx } from 'clsx'
 import { Badge } from '@/components/ui'
+import { formatCurrency } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
 import type { ErrorCode } from '@/lib/logistics'
-import type { Shipment, ShipmentDirection, ShipmentDocumentType, ShipmentEvent, ShipmentStatus } from '@/lib/types'
+import type { CurrencyCode, Shipment, ShipmentDirection, ShipmentDocumentType, ShipmentEvent, ShipmentStatus } from '@/lib/types'
 
 export const statusLabel = (s: ShipmentStatus): string =>
   ({
@@ -192,11 +193,7 @@ export function explain(errors: readonly ErrorCode[]): string {
 
 /** Valor monetário em qualquer moeda (a moeda da remessa pode diferir da moeda de exibição). */
 export function formatAmount(n: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(locale(), { style: 'currency', currency }).format(n)
-  } catch {
-    return `${n.toFixed(2)} ${currency}`
-  }
+  return formatCurrency(n, currency as CurrencyCode)
 }
 
 export const routeText = (s: Shipment): string => `${s.origin.city || s.origin.name || '—'} → ${s.destination.city || s.destination.name || '—'}`

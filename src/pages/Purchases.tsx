@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, inputCls } from '@/components/ui'
+import { DateField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -33,7 +35,7 @@ export function Purchases() {
 
   const patch = (key: number, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)))
   const parsed = lines.map((l) => ({ ...l, q: parseNum(l.qty), c: parseNum(l.cost) }))
-  const valid = parsed.length > 0 && parsed.every((l) => l.productId && l.q > 0 && l.c >= 0 && !Number.isNaN(l.c))
+  const valid = (paidNow || isValidIso(dueDate)) && parsed.length > 0 && parsed.every((l) => l.productId && l.q > 0 && l.c >= 0 && !Number.isNaN(l.c))
   const total = parsed.reduce((s, l) => s + (l.q > 0 && l.c >= 0 ? l.q * l.c : 0), 0)
 
   const submit = () => {
@@ -161,7 +163,7 @@ export function Purchases() {
                 </div>
                 {!paidNow ? (
                   <Field label={t('Vencimento', 'Due date')}>
-                    <input type="date" className={inputCls} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                    <DateField value={dueDate} onChange={setDueDate} />
                   </Field>
                 ) : null}
 

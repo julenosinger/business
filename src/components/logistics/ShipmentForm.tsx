@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
+import { DateField } from '@/components/DateField'
 import { useStore } from '@/lib/store'
 import { CURRENCIES, DIRECTIONS, type ShipmentInput } from '@/lib/logistics'
 import { money, parseNum } from '@/lib/format'
@@ -74,11 +75,13 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
   const [loaded, setLoaded] = useState<string | null>(null)
   const [form, setForm] = useState<Form | null>(null)
   const [error, setError] = useState('')
+  const [etaInvalid, setEtaInvalid] = useState(false)
 
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
     setLoaded(key)
     setError('')
+    setEtaInvalid(false)
     if (!target) setForm(null)
     else if (editing)
       setForm({
@@ -188,6 +191,10 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
   const patchItem = (key: number, p: Partial<ItemRow>) => set('items', form.items.map((x) => (x.key === key ? { ...x, ...p } : x)))
 
   const submit = () => {
+    if (etaInvalid) {
+      setError(t('Corrija a data prevista de entrega antes de salvar.', 'Fix the estimated delivery date before saving.'))
+      return
+    }
     const input: ShipmentInput = {
       direction: form.direction,
       orderRef:
@@ -442,7 +449,7 @@ export function ShipmentForm({ target, onClose, onSaved }: Props) {
               <input {...text('freightCost')} inputMode="decimal" placeholder="0,00" />
             </Field>
             <Field label={t('Entrega prevista', 'Estimated delivery')}>
-              <input type="date" className={inputCls} value={form.estimatedDelivery} onChange={(e) => set('estimatedDelivery', e.target.value)} />
+              <DateField value={form.estimatedDelivery} onChange={(v) => set('estimatedDelivery', v)} onInvalidChange={setEtaInvalid} />
             </Field>
           </div>
         </section>

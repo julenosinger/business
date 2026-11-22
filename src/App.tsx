@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Layout } from '@/components/Layout'
 import { NavContext, type Intent, type Nav, type PageId } from '@/lib/nav'
 import { StoreProvider } from '@/lib/store'
-import { I18nProvider } from '@/lib/i18n'
+import { I18nProvider, useLang } from '@/lib/i18n'
 import { readInvoiceFromLocation } from '@/lib/invoice'
 import { InvalidInvoice, PayPage } from '@/pages/PayPage'
 import { PaymentWatcher } from '@/components/PaymentWatcher'
@@ -52,6 +52,8 @@ function Router({ page }: { page: PageId }) {
 
 /** Link público de cobrança: mostra só a página de pagamento do cliente. */
 export default function App() {
+  // Inscreve o app inteiro no idioma: ao trocar PT/EN, tudo é redesenhado sem remontar (formulários mantêm o que foi digitado).
+  useLang()
   const [link] = useState(readInvoiceFromLocation)
   if (link.present) {
     return <I18nProvider>{link.invoice ? <PayPage invoice={link.invoice} /> : <InvalidInvoice />}</I18nProvider>

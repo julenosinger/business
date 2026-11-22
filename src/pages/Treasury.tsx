@@ -19,6 +19,7 @@ import { useNav, type Intent } from '@/lib/nav'
 import { useShareBase } from '@/lib/invoice'
 import { useGatewayBalances } from '@/lib/gateway'
 import { t } from '@/lib/i18n'
+import { usdcRateOf } from '@/lib/format'
 
 export function Treasury() {
   const { address, isConnected } = useAccount()
@@ -69,7 +70,8 @@ export function Treasury() {
     : ''
 
   const queue = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open').sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-  const rate = data.settings.usdcRate
+  const rate = usdcRateOf(data.settings)
+  const appIsUsdc = data.settings.currency === 'USDC'
   const activityCount = data.treasuryOps.filter((o) => inLastDays(o.date, period)).length
 
   const open = (m: TreasuryMode, id: string | null = null) => {
@@ -104,6 +106,7 @@ export function Treasury() {
           onRetry={refresh}
           balances={gw.data}
           rate={rate}
+          appIsUsdc={appIsUsdc}
           activityCount={activityCount}
           period={period}
         />

@@ -37,7 +37,8 @@ export const emptySettings = (): Settings => ({
   company: t('Minha Empresa', 'My Company'),
   branch: t('Matriz', 'Headquarters'),
   owner: t('Empreendedor', 'Entrepreneur'),
-  currency: t('BRL', 'USD') as Settings['currency'],
+  // Instalações novas começam em USDC. Quem já escolheu outra moeda mantém a sua (o que está salvo prevalece).
+  currency: 'USDC',
   usdcRate: null,
   approvalLimit: null,
 })
@@ -497,7 +498,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.')),
       loadDemo: () =>
         undoable(
-          (d) => ({ ...buildDemoData(), settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') } }),
+          (d) => ({ ...buildDemoData(d.settings.currency), settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') } }),
           t('Dados de demonstração carregados.', 'Demo data loaded.'),
         ),
       resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.')),

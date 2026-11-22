@@ -9,7 +9,7 @@ import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, chainByKey, explainError } from '@/lib/gateway'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
-import { money, parseNum, today, usdcFmt } from '@/lib/format'
+import { money, parseNum, toUsdc, today, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { Amount } from '@/onchain-money'
 import { USDC_DECIMALS } from '@/onchain-facts'
@@ -38,7 +38,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const { data, addAccount, addRequest } = useStore()
   const base = useShareBase()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open')
-  const rate = data.settings.usdcRate
+  const rate = usdcRateOf(data.settings)
 
   const [selected, setSelected] = useState('')
   const [desc, setDesc] = useState('')
@@ -60,7 +60,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     setFiat('')
     const acc = accountId ? receivables.find((a) => a.id === accountId) : undefined
     setSelected(acc ? acc.id : receivables[0] ? receivables[0].id : NEW)
-    setUsdcText(acc && rate ? (Math.ceil((acc.amount / rate) * 100) / 100).toFixed(2) : '')
+    setUsdcText(acc && rate ? toUsdc(acc.amount, rate).toFixed(2) : '')
   }
 
   const account = receivables.find((a) => a.id === selected)
@@ -69,13 +69,13 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const pickAccount = (id: string) => {
     setSelected(id)
     const acc = receivables.find((a) => a.id === id)
-    if (acc && rate) setUsdcText((Math.ceil((acc.amount / rate) * 100) / 100).toFixed(2))
+    if (acc && rate) setUsdcText(toUsdc(acc.amount, rate).toFixed(2))
   }
 
   const onFiat = (v: string) => {
     setFiat(v)
     const n = parseNum(v)
-    if (rate && n > 0) setUsdcText((Math.ceil((n / rate) * 100) / 100).toFixed(2))
+    if (rate && n > 0) setUsdcText(toUsdc(n, rate).toFixed(2))
   }
 
   let baseAmount: Amount | null = null

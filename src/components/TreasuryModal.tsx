@@ -9,7 +9,7 @@ import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type 
 import { useStore } from '@/lib/store'
 import { Amount, parseAmount } from '@/onchain-money'
 import { USDC_DECIMALS, getUsdc } from '@/onchain-facts'
-import { money, usdcFmt } from '@/lib/format'
+import { money, toUsdc, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Account } from '@/lib/types'
 
@@ -74,8 +74,8 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
     setPhase({ kind: 'idle' })
     setConfirmed(false)
     setSaveWallet(true)
-    const rate = data.settings.usdcRate
-    setAmountText(account && rate && rate > 0 ? (Math.ceil((account.amount / rate) * 100) / 100).toFixed(2) : '')
+    const rate = usdcRateOf(data.settings)
+    setAmountText(account && rate && rate > 0 ? toUsdc(account.amount, rate).toFixed(2) : '')
     setRecipient(defaultRecipient)
     const best = balances?.byChain[0]?.key
     setChainKey(mode === 'spend' && best ? best : 'Arc_Testnet')
@@ -183,7 +183,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
               <div className="font-semibold">{account.description}</div>
               <div className="text-xs text-subtle">
                 {account.contactName} · {money(account.amount)}
-                {data.settings.usdcRate ? '' : t(' · defina a cotação em Configurações para converter automaticamente', ' · set the rate in Settings to convert automatically')}
+                {usdcRateOf(data.settings) ? '' : t(' · defina a cotação em Configurações para converter automaticamente', ' · set the rate in Settings to convert automatically')}
               </div>
             </div>
           ) : null}

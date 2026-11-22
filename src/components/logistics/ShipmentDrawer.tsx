@@ -3,6 +3,8 @@ import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import { AlertTriangle, CheckCircle2, FilePlus2, FileText, PackageCheck, PackageOpen, Pencil, PlusCircle, Receipt, RefreshCw, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Field, inputCls } from '@/components/ui'
+import { DateField, DateTimeField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { useStore } from '@/lib/store'
 import { DOCUMENT_TYPES, isLocked, isOverdue, lastTrackingEvent, nextStatuses } from '@/lib/logistics'
 import { fmtDate, num, today } from '@/lib/format'
@@ -138,6 +140,11 @@ export function ShipmentDrawer({ shipment, onClose, onEdit, onRequestReturn }: P
   const s = shipment
   const confirmTransition = () => {
     if (!s || !pending) return
+    // Data de entrega digitada errada nunca vira "hoje" em silêncio.
+    if (pending === 'delivered' && !isValidIso(deliveredAt)) {
+      setError(explain(['invalid_date']))
+      return
+    }
     const res = transitionShipment(s.id, pending, { note, deliveredAt: pending === 'delivered' ? deliveredAt : undefined })
     if (!res.ok) {
       setError(explain(res.errors))
@@ -255,7 +262,7 @@ export function ShipmentDrawer({ shipment, onClose, onEdit, onRequestReturn }: P
                       </p>
                       {pending === 'delivered' ? (
                         <Field label={t('Data real de entrega', 'Actual delivery date')}>
-                          <input type="date" className={inputCls} value={deliveredAt} max={today()} onChange={(e) => setDeliveredAt(e.target.value)} />
+                          <DateField value={deliveredAt} min={s.createdAt.slice(0, 10)} max={today()} onChange={setDeliveredAt} />
                         </Field>
                       ) : null}
                       <Field label={NOTE_REQUIRED.includes(pending) ? t('Motivo (obrigatório)', 'Reason (required)') : t('Observação (opcional)', 'Note (optional)')}>
@@ -368,7 +375,7 @@ export function ShipmentDrawer({ shipment, onClose, onEdit, onRequestReturn }: P
                     <div className="space-y-3 rounded-xl border border-line p-3">
                       <div className="grid gap-3 sm:grid-cols-2">
                         <Field label={t('Quando ocorreu', 'When it happened')}>
-                          <input type="datetime-local" className={inputCls} value={trk.occurredAt} max={localDateTime()} onChange={(e) => { setTrk({ ...trk, occurredAt: e.target.value }); setTrkError('') }} />
+                          <DateTimeField value={trk.occurredAt} max={localDateTime()} onChange={(v) => { setTrk({ ...trk, occurredAt: v }); setTrkError('') }} />
                         </Field>
                         <Field label={t('Local (opcional)', 'Location (optional)')}>
                           <input className={inputCls} value={trk.location} maxLength={80} onChange={(e) => { setTrk({ ...trk, location: e.target.value }); setTrkError('') }} />

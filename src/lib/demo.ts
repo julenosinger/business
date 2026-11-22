@@ -5,6 +5,7 @@ import {
   type Account,
   type AppData,
   type Contact,
+  type CurrencyCode,
   type Employee,
   type Entry,
   type Product,
@@ -22,7 +23,8 @@ import * as international from './international'
 import * as returns from './returns'
 
 /** Dados de demonstração gerados localmente. Não representam um negócio real. */
-export function buildDemoData(): AppData {
+/** Dados de demonstração. As moedas das remessas e das transportadoras seguem a moeda do app (`currency`). */
+export function buildDemoData(currency: CurrencyCode = 'USDC'): AppData {
   let seed = 7
   const rnd = () => {
     seed = (seed * 16807) % 2147483647
@@ -180,7 +182,7 @@ export function buildDemoData(): AppData {
     returns: [],
     purchases: [],
     receipts: [],
-    settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency: 'BRL', usdcRate: null, approvalLimit: null },
+    settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency, usdcRate: null, approvalLimit: null },
   }
   return { ...base, ...demoShipments(base, now) }
 }
@@ -220,7 +222,7 @@ function demoShipments(start: AppData, now: Date): Pick<AppData, 'shipments' | '
           { name: t('Padrão', 'Standard'), minDays: 3, maxDays: 5 },
           { name: t('Expresso', 'Express'), minDays: 1, maxDays: 2 },
         ],
-        cost: { currency: 'BRL', baseFee: 20, perKg: 6 },
+        cost: { currency: start.settings.currency, baseFee: 20, perKg: 6 },
         active: true,
       },
       stamp(30, 9),
@@ -266,7 +268,7 @@ function demoShipments(start: AppData, now: Date): Pick<AppData, 'shipments' | '
           packages: box,
           items: line(0, 2),
           declaredValue: 480,
-          currency: 'BRL',
+          currency: start.settings.currency,
           freightCost: 42.9,
           ...over,
         },

@@ -153,22 +153,22 @@ export function Dashboard() {
               ]}
             >
               <span className="text-[11px] text-subtle">{t('Saldo de caixa', 'Cash balance')}</span>
-              <span className="display num text-lg font-semibold">{moneyCompact(cashBalance(data))}</span>
+              <span className="display num text-sm font-semibold">{moneyCompact(cashBalance(data))}</span>
             </Donut>
             <dl className="min-w-[140px] flex-1 space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                 <dt className="flex items-center gap-2 text-muted">
                   <i className="size-2 rounded-full bg-ok" /> {t('Entradas', 'Inflows')}
                 </dt>
                 <dd className="num whitespace-nowrap font-semibold">{money(cur.inflow)}</dd>
               </div>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                 <dt className="flex items-center gap-2 text-muted">
                   <i className="size-2 rounded-full bg-bad" /> {t('Saídas', 'Outflows')}
                 </dt>
                 <dd className="num whitespace-nowrap font-semibold">{money(cur.outflow)}</dd>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-line pt-3">
                 <dt className="text-muted">{t('Resultado', 'Net')}</dt>
                 <dd className={`num whitespace-nowrap font-semibold ${net < 0 ? 'text-bad' : 'text-ok'}`}>{money(net)}</dd>
               </div>

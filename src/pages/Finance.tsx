@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Check, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
+import { DateField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -84,7 +86,7 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
             <input className={inputCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
           </Field>
           <Field label={t('Vencimento', 'Due date')}>
-            <input type="date" className={inputCls} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <DateField value={dueDate} onChange={setDueDate} />
           </Field>
         </div>
         <div className="flex justify-end gap-2 pt-2">
@@ -92,7 +94,7 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
             {t('Cancelar', 'Cancel')}
           </Button>
           <Button
-            disabled={!(value > 0) || !description.trim()}
+            disabled={!(value > 0) || !description.trim() || !isValidIso(dueDate)}
             onClick={() => {
               const c = data.contacts.find((x) => x.id === contactId)
               const payload = { description: description.trim(), contactId: c?.id, contactName: c?.name ?? t('Não informado', 'Not specified'), amount: value, dueDate, category }

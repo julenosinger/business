@@ -7,7 +7,7 @@ import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type GatewayBalances } from '@/lib/gateway'
 import { useStore } from '@/lib/store'
-import { money, shortAddr, usdcFmt } from '@/lib/format'
+import { money, shortAddr, toUsdc, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { Amount } from '@/onchain-money'
 import { USDC_DECIMALS } from '@/onchain-facts'
@@ -46,7 +46,7 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
   const [confirmed, setConfirmed] = useState(false)
   const [running, setRunning] = useState(false)
   const [seed, setSeed] = useState<string | null>(null)
-  const rate = data.settings.usdcRate
+  const rate = usdcRateOf(data.settings)
 
   const seedKey = ids ? ids.join(',') : null
   if (seedKey !== seed) {
@@ -67,7 +67,7 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
             party: a.contactName,
             fiat: a.amount,
             wallet,
-            amountText: rate ? (Math.ceil((a.amount / rate) * 100) / 100).toFixed(2) : '',
+            amountText: rate ? toUsdc(a.amount, rate).toFixed(2) : '',
             status: 'idle' as const,
           },
         ]

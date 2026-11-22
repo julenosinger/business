@@ -20,7 +20,7 @@ import { checkOrderCoverage, checkOutboundStock, allPicked, needsFulfillment } f
 export const DEFAULT_ORG = 'local'
 
 export const DIRECTIONS: readonly ShipmentDirection[] = ['inbound', 'outbound', 'transfer']
-export const CURRENCIES: readonly CurrencyCode[] = ['BRL', 'USD', 'EUR']
+export const CURRENCIES: readonly CurrencyCode[] = ['USDC', 'BRL', 'USD', 'EUR']
 export const DOCUMENT_TYPES: readonly ShipmentDocumentType[] = ['invoice', 'packing_list', 'bill_of_lading', 'proof_of_delivery', 'other']
 
 export const ALL_STATUSES: readonly ShipmentStatus[] = [

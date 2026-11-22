@@ -72,13 +72,13 @@ export function SettingsPage() {
       <PageTop title={t('Configurações', 'Settings')} subtitle={t('Dados da empresa, moeda e parâmetros da tesouraria.', 'Company details, currency and treasury parameters.')} />
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
-        <KpiTile tone="sky" icon={<Building2 size={20} />} label={t('Moeda de exibição', 'Display currency')} value={s.currency} sub={s.company || '—'} />
+        <KpiTile tone="sky" icon={<Building2 size={20} />} label={t('Moeda do app', 'App currency')} value={s.currency} sub={s.company || '—'} />
         <KpiTile
           tone="violet"
           icon={<Coins size={20} />}
           label={t('Cotação do USDC', 'USDC rate')}
-          value={s.usdcRate ? `${num(s.usdcRate)} ${s.currency}` : '—'}
-          sub={s.usdcRate ? t('por 1 USDC', 'per 1 USDC') : t('Não definida', 'Not set')}
+          value={s.currency === 'USDC' ? '1 USDC' : s.usdcRate ? `${num(s.usdcRate)} ${s.currency}` : '—'}
+          sub={s.currency === 'USDC' ? t('A moeda do app já é USDC', 'The app currency is already USDC') : s.usdcRate ? t('por 1 USDC', 'per 1 USDC') : t('Não definida', 'Not set')}
         />
         <KpiTile
           tone="warn"
@@ -113,19 +113,32 @@ export function SettingsPage() {
                   <input className={inputCls} value={s.owner} onChange={(e) => updateSettings({ owner: e.target.value })} />
                 </Field>
               </div>
-              <Field label={t('Moeda de exibição', 'Display currency')} hint={t('Troca apenas o símbolo. Os valores não são convertidos.', 'Only changes the symbol. Amounts are not converted.')}>
+              <Field label={t('Moeda contábil e de exibição', 'Accounting and display currency')} hint={t('Troca o símbolo e a moeda padrão de novos registros. Os valores já lançados não são convertidos e registros antigos mantêm a moeda em que foram feitos.', 'Changes the symbol and the default currency of new records. Existing amounts are not converted and old records keep the currency they were made in.')}>
                 <select className={inputCls} value={s.currency} onChange={(e) => updateSettings({ currency: e.target.value as CurrencyCode })}>
+                  <option value="USDC">{t('USDC (Circle)', 'USDC (Circle)')}</option>
                   <option value="BRL">{t('Real (BRL)', 'Brazilian real (BRL)')}</option>
                   <option value="USD">{t('Dólar (USD)', 'US dollar (USD)')}</option>
                   <option value="EUR">Euro (EUR)</option>
                 </select>
               </Field>
+              <ul className="space-y-1 rounded-xl border border-line bg-fill/5 p-3 text-xs text-muted">
+                <li>
+                  <b className="text-ink">{t('Moeda contábil e de exibição', 'Accounting and display currency')}:</b> {s.currency}
+                </li>
+                <li>
+                  <b className="text-ink">{t('Ativo de liquidação da tesouraria', 'Treasury settlement asset')}:</b> USDC ({t('Circle Gateway', 'Circle Gateway')})
+                </li>
+                <li>{t('USD e USDC são moedas diferentes: nunca são tratadas como iguais nem convertidas automaticamente.', 'USD and USDC are different currencies: they are never treated as equal or converted automatically.')}</li>
+              </ul>
             </div>
           </TCard>
 
           <TCard className="p-4 sm:p-5">
             <PanelTitle icon={<Landmark size={18} />} title={t('Tesouraria', 'Treasury')} subtitle={t('Parâmetros dos pagamentos em USDC', 'Parameters for USDC payments')} />
             <div className="mt-4 space-y-4">
+              {s.currency === 'USDC' ? (
+                <p className="rounded-xl border border-line bg-fill/5 p-3 text-sm text-muted">{t('A moeda do app já é USDC, então não há cotação a definir: os valores em USDC seguem 1 para 1 com o app.', 'The app currency is already USDC, so there is no rate to set: USDC amounts map 1 to 1 with the app.')}</p>
+              ) : (
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -142,6 +155,7 @@ export function SettingsPage() {
                   </div>
                 </Field>
               </form>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault()

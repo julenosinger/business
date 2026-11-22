@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus, Receipt, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Field, inputCls } from '@/components/ui'
+import { DateField } from '@/components/DateField'
 import { useStore } from '@/lib/store'
 import { estimateFreight } from '@/lib/carriers'
 import { freightTotal, freightVariance } from '@/lib/freight'
@@ -130,7 +131,7 @@ export function FreightPanel({ s }: { s: Shipment }) {
               <>
                 <label className="block">
                   <span className="label mb-1 block">{t('Vencimento', 'Due date')}</span>
-                  <input type="date" className={`${inputCls} !h-9 !w-40`} value={due} onChange={(e) => setDue(e.target.value)} />
+                  <DateField wrapperClassName="w-44" className="!min-h-9" value={due} onChange={setDue} />
                 </label>
                 <Button small onClick={post}>
                   {t('Lançar em contas a pagar', 'Post to payables')}

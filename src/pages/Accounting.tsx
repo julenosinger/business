@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { ArrowLeftRight, BookOpen, Download, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp } from 'lucide-react'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
+import { DateField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { Bar, C } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -82,7 +84,7 @@ function EntryModal({ target, onClose }: { target: Entry | 'new' | null; onClose
             <input className={inputCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
           </Field>
           <Field label={t('Data', 'Date')}>
-            <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
+            <DateField value={date} onChange={setDate} />
           </Field>
         </div>
         <div className="flex justify-end gap-2 pt-2">
@@ -90,7 +92,7 @@ function EntryModal({ target, onClose }: { target: Entry | 'new' | null; onClose
             {t('Cancelar', 'Cancel')}
           </Button>
           <Button
-            disabled={!(value > 0) || !description.trim()}
+            disabled={!(value > 0) || !description.trim() || !isValidIso(date)}
             onClick={() => {
               const payload = { type, category, description: description.trim(), amount: value, date }
               if (editing) updateEntry(editing.id, payload)

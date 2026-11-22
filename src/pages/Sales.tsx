@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { BarChart3, CalendarDays, Check, Coins, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, TableWrap, inputCls, td, th } from '@/components/ui'
+import { DateField } from '@/components/DateField'
+import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -205,7 +207,7 @@ export function Sales() {
             </div>
             {method === 'prazo' ? (
               <Field label={t('Vencimento', 'Due date')}>
-                <input type="date" className={inputCls} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                <DateField value={dueDate} onChange={setDueDate} />
               </Field>
             ) : null}
           </div>
@@ -214,7 +216,7 @@ export function Sales() {
             <span className="text-sm text-muted">Total</span>
             <span className="display num text-2xl font-semibold">{money(total)}</span>
           </div>
-          <Button className="mt-3 w-full" disabled={lines.length === 0 || overStock} onClick={finish}>
+          <Button className="mt-3 w-full" disabled={lines.length === 0 || overStock || (method === 'prazo' && !isValidIso(dueDate))} onClick={finish}>
             <Check size={16} /> {t('Finalizar venda', 'Complete sale')}
           </Button>
         </TCard>

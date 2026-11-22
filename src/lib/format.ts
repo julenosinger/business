@@ -1,7 +1,15 @@
 import type { CurrencyCode } from './types'
 import { getLang, locale } from './i18n'
 
-let currency: CurrencyCode = 'BRL'
+/**
+ * Três coisas diferentes (não confundir):
+ *  - Moeda contábil e de exibição: `Settings.currency` (aqui, `currency`). Padrão: USDC para instalações novas.
+ *  - Ativo de liquidação da tesouraria: sempre USDC (Circle Gateway), independente da moeda contábil.
+ *  - Cotação: só existe quando a moeda contábil não é USDC. USD e USDC nunca são tratados como iguais.
+ */
+export const SETTLEMENT_ASSET = 'USDC' as const
+
+let currency: CurrencyCode = 'USDC'
 
 export function setCurrency(code: CurrencyCode): void {
   currency = code
@@ -11,14 +19,38 @@ export function currencyCode(): CurrencyCode {
   return currency
 }
 
+/**
+ * Valor em qualquer moeda. USDC não é um código ISO 4217, então é escrito como número + "USDC", com 2 a 6 casas:
+ * centavos ficam com 2 casas e um valor com mais precisão (até 6, a precisão do USDC) aparece inteiro, sem arredondar.
+ */
+export function formatCurrency(value: number, code: CurrencyCode): string {
+  const v = Number.isFinite(value) ? value : 0
+  if (code === 'USDC') return `${new Intl.NumberFormat(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(v)} USDC`
+  try {
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency: code }).format(v)
+  } catch {
+    return `${v.toFixed(2)} ${code}`
+  }
+}
+
 export function money(value: number): string {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency }).format(Number.isFinite(value) ? value : 0)
+  return formatCurrency(value, currency)
 }
 
 export function moneyCompact(value: number): string {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(
-    Number.isFinite(value) ? value : 0,
-  )
+  const v = Number.isFinite(value) ? value : 0
+  if (currency === 'USDC') return `${new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(v)} USDC`
+  return new Intl.NumberFormat(locale(), { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(v)
+}
+
+/** Valor de 1 USDC na moeda do app. Só é 1 quando a moeda do app é o próprio USDC; USD nunca vira 1. */
+export function usdcRateOf(s: { currency: CurrencyCode; usdcRate: number | null }): number | null {
+  return s.currency === 'USDC' ? 1 : s.usdcRate
+}
+
+/** Converte um valor da moeda do app para USDC (arredonda para cima ao centavo). Com taxa 1 o valor é mantido exato. */
+export function toUsdc(amount: number, rate: number): number {
+  return rate === 1 ? amount : Math.ceil((amount / rate) * 100 - 1e-9) / 100
 }
 
 export function usdcFmt(value: number | string): string {
