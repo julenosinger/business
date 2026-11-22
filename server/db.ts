@@ -1,56 +1,80 @@
 /**
- * Camada de banco transacional do backend (fase 2.9).
+ * Camada de banco transacional do backend (fases 2.9 → 3.0).
  *
- * Usa `bun:sqlite` (embutido no Bun, sem dependências extras nem custo de infra).
- * O estado autoritativo do razão fica em `orgs.ledger_json`; as tabelas `events`,
- * `settlements` e `audit` impõem idempotência durável (constraints UNIQUE) e trilha imutável.
+ * Usa `bun:sqlite` (embutido no Bun, sem infra extra). O estado autoritativo do razão fica em `orgs.ledger_json`;
+ * as tabelas `events` (UNIQUE org+idempotency_key), `settlements` (UNIQUE org+op_id) e `audit` (append-only)
+ * impõem idempotência durável e trilha imutável. Todas as mutações financeiras rodam em transações SQLite.
  *
- * Finanças são mutadas APENAS em transações SQLite (atômico: tudo ou nada).
+ * Resiliência (P1.2): `busy_timeout` para contenção entre processos, `journal_mode=WAL` para durabilidade,
+ * e migrações SQL versionadas e repetíveis (`schema_migrations`).
  */
 import { Database } from 'bun:sqlite'
 import type { AuditRecord, FinancialEvent, LedgerState } from '../src/lib/accounting/types'
 
+const MIGRATIONS: string[] = [
+  // v1
+  `
+  CREATE TABLE orgs (
+    org_id TEXT PRIMARY KEY,
+    ledger_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE events (
+    org_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, idempotency_key)
+  );
+  CREATE TABLE settlements (
+    org_id TEXT NOT NULL,
+    op_id TEXT NOT NULL,
+    settlement_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, op_id)
+  );
+  CREATE TABLE audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    action TEXT NOT NULL,
+    detail TEXT NOT NULL
+  );
+  `,
+]
+
 export class LedgerDb {
   readonly db: Database
+  readonly path: string
 
   constructor(path = ':memory:') {
+    this.path = path
     this.db = new Database(path)
     this.db.exec('PRAGMA foreign_keys = ON')
+    // Contenção entre processos/abas: espera até 5s por lock antes de falhar.
+    this.db.exec('PRAGMA busy_timeout = 5000')
+    if (path !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL')
     this.migrate()
   }
 
   private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS orgs (
-        org_id TEXT PRIMARY KEY,
-        ledger_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS events (
-        org_id TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (org_id, idempotency_key)
-      );
-      CREATE TABLE IF NOT EXISTS settlements (
-        org_id TEXT NOT NULL,
-        settlement_id TEXT NOT NULL,
-        op_id TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (org_id, settlement_id)
-      );
-      CREATE TABLE IF NOT EXISTS audit (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        org_id TEXT NOT NULL,
-        at TEXT NOT NULL,
-        action TEXT NOT NULL,
-        detail TEXT NOT NULL
-      );
-    `)
+    this.db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)')
+    const applied = new Set(
+      (this.db.query('SELECT version FROM schema_migrations').all() as { version: number }[]).map((r) => r.version),
+    )
+    const insert = this.db.query('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+    const tx = this.db.transaction(() => {
+      MIGRATIONS.forEach((sql, i) => {
+        const version = i + 1
+        if (applied.has(version)) return
+        this.db.exec(sql)
+        insert.run(version, new Date().toISOString())
+      })
+    })
+    tx()
   }
 
   loadLedger(orgId: string): LedgerState | null {
@@ -83,16 +107,20 @@ export class LedgerDb {
     for (const r of records) stmt.run(orgId, r.at, r.action, r.detail)
   }
 
-  /** Registra uma liquidação com constraint UNIQUE (org, settlement_id). Lança em caso de duplicata. */
-  insertSettlement(orgId: string, settlementId: string, opId: string, payload: string, now: string): void {
+  /** Registra uma liquidação com constraint UNIQUE (org, op_id): uma operação = uma liquidação. */
+  insertSettlement(orgId: string, opId: string, settlementId: string, payload: string, now: string): void {
     this.db
-      .query('INSERT INTO settlements (org_id, settlement_id, op_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(orgId, settlementId, opId, payload, now)
+      .query('INSERT INTO settlements (org_id, op_id, settlement_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(orgId, opId, settlementId, payload, now)
   }
 
-  hasSettlement(orgId: string, settlementId: string): boolean {
-    const row = this.db.query('SELECT 1 FROM settlements WHERE org_id = ? AND settlement_id = ?').get(orgId, settlementId)
-    return row !== null
+  hasSettlementByOp(orgId: string, opId: string): boolean {
+    return this.db.query('SELECT 1 FROM settlements WHERE org_id = ? AND op_id = ?').get(orgId, opId) !== null
+  }
+
+  getSettlement(orgId: string, opId: string): { settlementId: string; payload: string } | null {
+    const row = this.db.query('SELECT settlement_id, payload_json FROM settlements WHERE org_id = ? AND op_id = ?').get(orgId, opId) as { settlement_id: string; payload_json: string } | undefined
+    return row ? { settlementId: row.settlement_id, payload: row.payload_json } : null
   }
 
   close(): void {

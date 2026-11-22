@@ -14,15 +14,20 @@ import { LedgerDb } from './db'
 
 const token = process.env.GBOS_API_TOKEN
 const orgId = process.env.GBOS_ORG_ID ?? 'local'
-const dbPath = process.env.GBOS_DB_PATH ?? ':memory:'
+const dbPath = process.env.GBOS_DB_PATH
+const allowMemory = process.env.GBOS_ALLOW_MEMORY === '1'
 const port = Number(process.env.PORT ?? 8787)
 
 if (!token) {
   console.error('GBOS_API_TOKEN is required (single-owner auth secret). Refusing to start without authentication.')
   process.exit(1)
 }
+if (!dbPath && !allowMemory) {
+  console.error('GBOS_DB_PATH is required for a persistent backend (e.g. /data/gbos.sqlite). Set GBOS_ALLOW_MEMORY=1 only for development/tests.')
+  process.exit(1)
+}
 
-const db = new LedgerDb(dbPath)
+const db = new LedgerDb(dbPath ?? ':memory:')
 const api = createApi(db, { token, orgId })
 
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -35,7 +40,7 @@ Bun.serve({
     try {
       if (req.method === 'GET' && url.pathname === '/api/ledger') return json(api.getLedger(auth))
       if (req.method === 'POST' && url.pathname === '/api/ledger/events') return json(api.postEvent(auth, (await req.json()) as never))
-      if (req.method === 'POST' && url.pathname === '/api/ledger/settlements') return json(api.recordSettlement(auth, (await req.json()) as never))
+      if (req.method === 'POST' && url.pathname === '/api/ledger/settle') return json(await api.settle(auth, (await req.json()) as never))
       return json({ error: 'not_found' }, 404)
     } catch (err) {
       if (err instanceof UnauthorizedError) return json({ error: 'unauthorized' }, 401)
@@ -44,4 +49,4 @@ Bun.serve({
   },
 })
 
-console.log(`Global Business OS backend listening on :${port} (org ${orgId})`)
+console.log(`Global Business OS backend listening on :${port} (org ${orgId}, db ${dbPath ?? ':memory:'})`)

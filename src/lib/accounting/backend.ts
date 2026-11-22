@@ -24,6 +24,23 @@ import type { PostResult } from './engine'
 
 const API_EVENTS_PATH = '/api/ledger/events'
 const API_LEDGER_PATH = '/api/ledger'
+const API_SETTLE_PATH = '/api/ledger/settle'
+
+export interface SettleRequest {
+  opId: string
+  accountId: string
+  txHash: string
+  chainKey: string
+  destChainKey?: string
+  recipient?: string
+  /** Valor USDC (decimal string). */
+  amount: string
+  fxDate: string
+}
+
+export type SettleResponse =
+  | { ok: true; duplicate: boolean; entryId: string | null; allocatedMinor: string; excessMinor: string }
+  | { ok: false; error: string }
 
 export interface BackendConfig {
   /** URL do backend (ex.: https://api.exemplo.com). Vazio = backend remoto desabilitado. */
@@ -40,6 +57,8 @@ export type RemoteLedgerBackend =
       readonly available: true
       /** Posta um evento no servidor com idempotência (atomicidade + isolamento por organização). */
       postEvent(draft: EventDraft, actor: Actor): Promise<PostResult>
+      /** Liquidação atômica + idempotente por operação, com verificação on-chain server-side. */
+      settle(input: SettleRequest): Promise<SettleResponse>
       /** Consulta o estado do razão (somente leitura, cópia profunda). */
       fetch(): Promise<LedgerState>
     }
@@ -87,6 +106,13 @@ export function createRemoteBackend(cfg: Required<BackendConfig>): RemoteLedgerB
         method: 'POST',
         headers,
         body: JSON.stringify({ orgId: cfg.orgId, draft, actor }),
+      })
+    },
+    async settle(input) {
+      return requestJson<SettleResponse>(`${base}${API_SETTLE_PATH}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
       })
     },
     async fetch() {
