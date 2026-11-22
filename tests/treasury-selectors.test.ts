@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { canCancel, inFlightIntentEnv, payEligibility, paymentQueueState, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
+import { canCancel, canClassifyEnvironment, inFlightIntentEnv, payEligibility, paymentQueueState, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
 import type { Account, PaymentRequest, TreasuryOp } from '../src/lib/types'
 
 const op = (chain: string, over: Partial<TreasuryOp> = {}): TreasuryOp => ({ id: 'op', date: '2026-11-22', kind: 'spend', chain, amount: '1', note: '', ...over })
@@ -130,5 +130,55 @@ describe('elegibilidade e cancelamento (puros)', () => {
     expect(canCancel(acc({ settlements: [{ id: 's', sequence: 1, amount: 10, date: '2026-11-22' }] }), [])).toEqual({ ok: false, reason: 'settled' })
     expect(canCancel(acc(), [pendingOp])).toEqual({ ok: false, reason: 'active_intent' })
     expect(canCancel(undefined, [])).toEqual({ ok: false, reason: 'not_found' })
+  })
+})
+
+describe('reclassificação manual do ambiente (legado unassigned)', () => {
+  const acc = (over: Partial<Account> = {}): Account => ({
+    id: 'a1',
+    kind: 'payable',
+    description: 'd',
+    contactName: 'c',
+    amount: 100,
+    dueDate: '2026-12-01',
+    category: 'Aluguel',
+    status: 'open',
+    source: 'manual',
+    ...over,
+  })
+  const op = (accountId: string, chain: string, status: TreasuryOp['status']): TreasuryOp => ({ id: 'op', date: '2026-11-22', kind: 'spend', chain, amount: '1', note: '', accountId, status })
+
+  test('obrigação unassigned pode ser classificada em Mainnet ou Testnet', () => {
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [], 'mainnet')).toEqual({ ok: true })
+    expect(canClassifyEnvironment(acc({ environment: undefined }), [], 'testnet')).toEqual({ ok: true })
+  })
+
+  test('obrigação já classificada não é reclassificável', () => {
+    expect(canClassifyEnvironment(acc({ environment: 'mainnet' }), [], 'testnet')).toEqual({ ok: false, reason: 'already_classified' })
+    expect(canClassifyEnvironment(acc({ environment: 'testnet' }), [], 'mainnet')).toEqual({ ok: false, reason: 'already_classified' })
+  })
+
+  test('obrigação liquidada (paga ou parcial) não é reclassificável', () => {
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned', status: 'paid' }), [], 'mainnet')).toEqual({ ok: false, reason: 'settled' })
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned', settlements: [{ id: 's', sequence: 1, amount: 10, date: '2026-11-22' }] }), [], 'mainnet')).toEqual({ ok: false, reason: 'settled' })
+  })
+
+  test('obrigação com intenção ativa não é reclassificável', () => {
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [op('a1', 'Arc', 'pending')], 'mainnet')).toEqual({ ok: false, reason: 'active_intent' })
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [op('a1', 'Arc_Testnet', 'requires_review')], 'testnet')).toEqual({ ok: false, reason: 'active_intent' })
+  })
+
+  test('evidência on-chain de outro ambiente bloqueia a reclassificação', () => {
+    // Operação em rede testnet impede classificar como mainnet.
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [op('a1', 'Arc_Testnet', 'failed')], 'mainnet')).toEqual({ ok: false, reason: 'conflicting_evidence' })
+    // Operação em rede mainnet permite classificar como mainnet (evidência compatível), mas não como testnet.
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [op('a1', 'Arc', 'failed')], 'mainnet')).toEqual({ ok: true })
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [op('a1', 'Arc', 'failed')], 'testnet')).toEqual({ ok: false, reason: 'conflicting_evidence' })
+    // Origem/destino de ambientes diferentes → conflito.
+    expect(canClassifyEnvironment(acc({ environment: 'unassigned' }), [{ ...op('a1', 'Arc', 'failed'), destChain: 'Arc_Testnet' }], 'mainnet')).toEqual({ ok: false, reason: 'conflicting_evidence' })
+  })
+
+  test('obrigação inexistente não é classificável', () => {
+    expect(canClassifyEnvironment(undefined, [], 'mainnet')).toEqual({ ok: false, reason: 'not_found' })
   })
 })

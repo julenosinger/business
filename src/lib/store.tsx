@@ -30,7 +30,7 @@ import * as freight from './freight'
 import * as international from './international'
 import * as returns from './returns'
 import { buildDemoData } from './demo'
-import { emptyLedger, normalizeLedger, setAdapterFlag, closePeriod, reopenPeriod, setPeriodReview, isDateClosed, type AdapterFlagName, type Ctx, type OpResult } from './accounting/engine'
+import { emptyLedger, normalizeLedger, setAdapterFlag, closePeriod, reopenPeriod, setPeriodReview, isDateClosed, withAudit, type AdapterFlagName, type Ctx, type OpResult } from './accounting/engine'
 import { autoPost } from './accounting/autopost'
 import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
@@ -38,7 +38,7 @@ import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
 import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
 import { fromNumber, toDisplayNumber } from './accounting/money'
-import { canCancel, inFlightIntentEnv } from './treasury-selectors'
+import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury-selectors'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
@@ -170,6 +170,21 @@ function cancelReasonText(reason: string): string {
   }
 }
 
+function classifyReasonText(reason: string): string {
+  switch (reason) {
+    case 'already_classified':
+      return t('Esta obrigação já tem ambiente definido e não pode ser reclassificada aqui.', 'This obligation already has an environment and cannot be reclassified here.')
+    case 'settled':
+      return t('Obrigação já liquidada não pode ser reclassificada.', 'A settled obligation cannot be reclassified.')
+    case 'active_intent':
+      return t('Há um pagamento em processamento para esta obrigação.', 'There is a payment in progress for this obligation.')
+    case 'conflicting_evidence':
+      return t('Há evidência on-chain de outro ambiente para esta obrigação.', 'There is on-chain evidence of another environment for this obligation.')
+    default:
+      return t('Não foi possível classificar a obrigação.', 'Could not classify the obligation.')
+  }
+}
+
 function load(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -191,6 +206,7 @@ export type AccountingOutcome = { ok: true; status: AccountingStatus } | { ok: f
 
 export type CancelResult = { ok: true } | { ok: false; reason: string }
 export type BatchCancelResult = { canceled: string[]; refused: { id: string; reason: string }[] }
+export type ClassifyResult = { ok: true } | { ok: false; reason: string }
 
 export interface SaleInput {
   customerId?: string
@@ -242,6 +258,8 @@ export interface Store {
   removeEntry: (id: string) => void
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
   updateAccount: (id: string, patch: Partial<Account>) => void
+  /** Reclassifica manualmente o ambiente de uma obrigação legada (`unassigned`), com auditoria. */
+  setAccountEnvironment: (id: string, environment: NetworkId) => ClassifyResult
   settleAccount: (id: string, treasuryTx?: string) => void
   /** Liquidação parcial: reduz o saldo em aberto sem fechar a conta. Recusa valor acima do saldo. */
   settleAccountPartial: (id: string, amount: number, treasuryTx?: string) => void
@@ -532,6 +550,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return id
       },
       updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
+      setAccountEnvironment: (id, environment) => {
+        const decision = canClassifyEnvironment(data.accounts.find((a) => a.id === id), data.treasuryOps, environment)
+        if (!decision.ok) {
+          toast.error(classifyReasonText(decision.reason))
+          return { ok: false, reason: decision.reason }
+        }
+        // Revalida no estado mais recente e registra a decisão na trilha de auditoria do razão.
+        set((d) => {
+          const recheck = canClassifyEnvironment(d.accounts.find((a) => a.id === id), d.treasuryOps, environment)
+          if (!recheck.ok) return d
+          return {
+            ...d,
+            ledger: withAudit(d.ledger, ledgerCtx(d), 'account.classified', `account ${id} classified as ${environment}`),
+            accounts: d.accounts.map((a) => (a.id === id ? { ...a, environment } : a)),
+          }
+        })
+        return { ok: true }
+      },
       settleAccount: (id, treasuryTx) => {
         const acc = data.accounts.find((a) => a.id === id)
         if (!acc || acc.status === 'paid') return

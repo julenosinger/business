@@ -148,6 +148,7 @@ export type AuditAction =
   | 'period.closed'
   | 'period.reopened'
   | 'period.adjusted'
+  | 'account.classified'
 
 export interface AuditRecord {
   id: string

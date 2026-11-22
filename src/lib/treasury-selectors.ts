@@ -90,3 +90,25 @@ export function canCancel(account: Account | undefined, ops: TreasuryOp[]): Canc
   if (ops.some((o) => o.accountId === account.id && o.status !== 'failed')) return { ok: false, reason: 'active_intent' }
   return { ok: true }
 }
+
+export type ClassifyDecision = { ok: true } | { ok: false; reason: 'not_found' | 'already_classified' | 'settled' | 'active_intent' | 'conflicting_evidence' }
+
+/**
+ * Validação de reclassificação MANUAL do ambiente de uma obrigação legada (`unassigned`).
+ * - Só reclassifica obrigações ainda sem ambiente (idempotente; nunca reclassifica uma já classificada).
+ * - Bloqueia liquidadas, com intenção ativa ou com evidência on-chain em ambiente incompatível.
+ */
+export function canClassifyEnvironment(account: Account | undefined, ops: TreasuryOp[], target: NetworkId): ClassifyDecision {
+  if (!account) return { ok: false, reason: 'not_found' }
+  if (account.environment && account.environment !== 'unassigned') return { ok: false, reason: 'already_classified' }
+  if (account.status === 'paid' || (account.settlements?.length ?? 0) > 0) return { ok: false, reason: 'settled' }
+  if (ops.some((o) => o.accountId === account.id && o.status !== 'failed')) return { ok: false, reason: 'active_intent' }
+  const wanted = target === 'mainnet' ? 'live' : 'test'
+  for (const o of ops) {
+    if (o.accountId !== account.id) continue
+    const env = treasuryOpEnv(o)
+    if (env === 'invalid_environment') return { ok: false, reason: 'conflicting_evidence' }
+    if (env !== 'unknown' && env !== wanted) return { ok: false, reason: 'conflicting_evidence' }
+  }
+  return { ok: true }
+}

@@ -71,6 +71,19 @@ describe('isolamento financeiro por ambiente (seletores)', () => {
     ])
     expect(dueSoonForEnvironment(d, 'mainnet', 'payable', 7).map((a) => a.id)).toEqual(['m'])
   })
+
+  test('alternância repetida Mainnet↔Testnet não contamina os totais (seletores puros)', () => {
+    const d = data([
+      acc({ id: 'm', environment: 'mainnet', kind: 'payable', amount: 100 }),
+      acc({ id: 't', environment: 'testnet', kind: 'payable', amount: 200 }),
+    ])
+    for (let i = 0; i < 5; i++) {
+      expect(accountTotalsForEnvironment(d, 'mainnet').payable).toBe(100)
+      expect(accountTotalsForEnvironment(d, 'testnet').payable).toBe(200)
+    }
+    // Os dados de entrada não são mutados pelos seletores.
+    expect(d.accounts).toHaveLength(2)
+  })
 })
 
 describe('migração do ambiente financeiro (legado)', () => {

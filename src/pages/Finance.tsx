@@ -12,6 +12,7 @@ import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment } from '@/lib/selectors'
+import { AccountEnvironmentReview } from '@/components/AccountEnvironmentReview'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
@@ -270,6 +271,8 @@ export function Finance() {
           </Button>
         }
       />
+
+      <AccountEnvironmentReview />
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="ok" icon={<ArrowDownLeft size={20} />} label={t('A receber', 'Receivable')} value={money(totals.receivable)} sub={`${openReceivable.length} ${plural(openReceivable.length)} ${t('em aberto', 'open')}`} />
