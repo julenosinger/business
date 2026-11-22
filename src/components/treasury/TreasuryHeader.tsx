@@ -4,6 +4,7 @@ import { Copy, MoreHorizontal, RefreshCw, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui'
 import { PageTop } from '@/components/ds/PageTop'
+import { useNetwork } from '@/lib/network'
 import { t } from '@/lib/i18n'
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
 export function TreasuryHeader({ isConnected, address, fetching, onRefresh }: Props) {
   const [menu, setMenu] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const network = useNetwork()
+  const envLabel = network === 'mainnet' ? t('Mainnet', 'Mainnet') : t('Testnet', 'Testnet')
 
   useEffect(() => {
     if (!menu) return
@@ -39,7 +42,7 @@ export function TreasuryHeader({ isConnected, address, fetching, onRefresh }: Pr
       subtitle={t('Gestão de liquidez, pagamentos e operações multichain com Circle Gateway.', 'Liquidity management, payments and multichain operations with Circle Gateway.')}
       badge={
         <span className="inline-flex items-center gap-2 rounded-full border border-violet/40 bg-violet/15 px-3 py-1 text-xs font-semibold">
-          <span className="size-2 rounded-full bg-sky" aria-hidden="true" /> Circle Gateway · Testnet
+          <span className="size-2 rounded-full bg-sky" aria-hidden="true" /> Circle Gateway · {envLabel}
         </span>
       }
       actions={

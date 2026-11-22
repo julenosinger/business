@@ -5,7 +5,7 @@ import { createViemAdapterFromProvider } from '@circle-fin/adapter-viem-v2'
 import { AlertTriangle, ArrowRight, CheckCircle2, Circle, ExternalLink, Loader2, XCircle } from 'lucide-react'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
-import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type GatewayBalances } from '@/lib/gateway'
+import { appKit, chainByKey, explainError, gatewayChainsFor, isValidAddress, type GatewayBalances } from '@/lib/gateway'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { useStore } from '@/lib/store'
 import { money, shortAddr, toUsdc, usdcFmt, usdcRateOf } from '@/lib/format'
@@ -163,7 +163,7 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
                     <ChainIcon chainKey={originKey} size={20} />
                   </span>
                   <select className={`${inputCls} pl-10`} value={originKey} onChange={(e) => setOriginKey(e.target.value)} disabled={running}>
-                    {(spendChains.length ? spendChains : GATEWAY_CHAINS).map((c) => (
+                    {(spendChains.length ? spendChains : gatewayChainsFor(network)).map((c) => (
                       <option key={c.key} value={c.key}>
                         {c.label}
                       </option>
@@ -177,7 +177,7 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
                     <ChainIcon chainKey={destKey} size={20} />
                   </span>
                   <select className={`${inputCls} pl-10`} value={destKey} onChange={(e) => setDestKey(e.target.value)} disabled={running}>
-                    {GATEWAY_CHAINS.map((c) => (
+                    {gatewayChainsFor(network).map((c) => (
                       <option key={c.key} value={c.key}>
                         {c.label}
                       </option>

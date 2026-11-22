@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
-import { GATEWAY_CHAINS, chainByKey, explainError } from '@/lib/gateway'
+import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
@@ -236,7 +236,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
                 <ChainIcon chainKey={chainKey} size={20} />
               </span>
               <select className={`${inputCls} pl-10`} value={chainKey} onChange={(e) => setChainKey(e.target.value)}>
-                {GATEWAY_CHAINS.map((c) => (
+                {gatewayChainsFor(network).map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.label}
                   </option>

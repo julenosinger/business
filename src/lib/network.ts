@@ -56,6 +56,12 @@ export const arcGatewayKeyOf = (id: NetworkId = current): 'Arc' | 'Arc_Testnet' 
 /** Chain ID por chave de rede do Gateway (valores estáveis do registro on-chain). */
 const GATEWAY_KEY_CHAIN_IDS: Record<string, number> = {
   Arc: 5042,
+  Ethereum: 1,
+  Base: 8453,
+  Arbitrum: 42161,
+  Optimism: 10,
+  Avalanche: 43114,
+  Polygon: 137,
   Arc_Testnet: 5042002,
   Base_Sepolia: 84532,
   Ethereum_Sepolia: 11155111,

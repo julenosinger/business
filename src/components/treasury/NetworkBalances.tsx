@@ -3,7 +3,8 @@ import { AlertCircle, ChevronDown, Layers } from 'lucide-react'
 import { Skeleton } from '@/components/ui'
 import { Bar } from '@/components/charts'
 import { ChainIcon } from '@/components/ChainIcon'
-import { GATEWAY_CHAINS, type GatewayBalances } from '@/lib/gateway'
+import { gatewayChainsFor, type GatewayBalances } from '@/lib/gateway'
+import { useNetwork } from '@/lib/network'
 import { usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -26,13 +27,15 @@ const INITIAL = 5
 
 export function NetworkBalances({ connected, loading, failed, onRetry, balances }: Props) {
   const [expanded, setExpanded] = useState(false)
+  const network = useNetwork()
   const total = balances?.total ?? 0
 
-  // Todas as redes suportadas aparecem; saldo zero quando o Gateway não retorna saldo para a rede.
+  // Somente redes do ambiente ativo (isolamento estrito Mainnet/Testnet); saldo zero quando o Gateway não retorna.
+  const chains = gatewayChainsFor(network)
   const known = new Map((balances?.byChain ?? []).map((b) => [b.key, b.amount]))
   const rows: Row[] = [
-    ...GATEWAY_CHAINS.map((c) => ({ key: c.key, label: c.label, amount: known.get(c.key) ?? 0 })),
-    ...(balances?.byChain ?? []).filter((b) => !GATEWAY_CHAINS.some((c) => c.key === b.key)).map((b) => ({ key: b.key, label: b.label, amount: b.amount })),
+    ...chains.map((c) => ({ key: c.key, label: c.label, amount: known.get(c.key) ?? 0 })),
+    ...(balances?.byChain ?? []).filter((b) => !chains.some((c) => c.key === b.key)).map((b) => ({ key: b.key, label: b.label, amount: b.amount })),
   ]
   const positive = rows.filter((r) => r.amount > 0).sort((a, b) => b.amount - a.amount)
   const zero = rows.filter((r) => r.amount <= 0)

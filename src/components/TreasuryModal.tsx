@@ -5,7 +5,7 @@ import { createViemAdapterFromProvider } from '@circle-fin/adapter-viem-v2'
 import { ArrowRight, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
-import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type GatewayBalances, type GatewayChainId } from '@/lib/gateway'
+import { GATEWAY_CHAINS, appKit, chainByKey, explainError, gatewayChainsFor, isValidAddress, type GatewayBalances, type GatewayChainId } from '@/lib/gateway'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { useStore } from '@/lib/store'
 import { Amount, parseAmount } from '@/onchain-money'
@@ -201,7 +201,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
           ) : null}
 
           {mode === 'deposit' ? (
-            <ChainSelect label={t('Rede de origem', 'Source network')} value={chainKey} onChange={setChainKey} options={GATEWAY_CHAINS} />
+            <ChainSelect label={t('Rede de origem', 'Source network')} value={chainKey} onChange={setChainKey} options={gatewayChainsFor(network)} />
           ) : spendChains.length ? (
             <ChainSelect label={t('Debitar saldo da rede', 'Debit balance from network')} value={chainKey} onChange={setChainKey} options={spendChains} />
           ) : (
@@ -210,7 +210,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
 
           {mode === 'spend' ? (
             <>
-              <ChainSelect label={t('Rede de destino', 'Destination network')} value={destKey} onChange={setDestKey} options={GATEWAY_CHAINS} />
+              <ChainSelect label={t('Rede de destino', 'Destination network')} value={destKey} onChange={setDestKey} options={gatewayChainsFor(network)} />
               <Field label={t('Carteira do destinatário', 'Recipient wallet')} hint={recipient && !recipientOk ? t('Endereço inválido.', 'Invalid address.') : undefined}>
                 <input className={`${inputCls} mono`} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x..." />
               </Field>

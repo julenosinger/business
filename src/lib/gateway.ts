@@ -4,13 +4,34 @@ import { isAddress, type Address } from 'viem'
 import { Amount } from '@/onchain-money'
 import { t } from './i18n'
 import { USDC_DECIMALS } from '@/onchain-facts'
-import { arc, arcTestnet, arbitrumSepolia, avalancheFuji, baseSepolia, optimismSepolia, polygonAmoy, sepolia } from 'viem/chains'
-import { useNetwork } from './network'
+import {
+  arc,
+  arcTestnet,
+  arbitrum,
+  arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
+  base,
+  baseSepolia,
+  mainnet,
+  optimism,
+  optimismSepolia,
+  polygon,
+  polygonAmoy,
+  sepolia,
+} from 'viem/chains'
+import { useNetwork, type NetworkId } from './network'
 
 export const appKit = new AppKit()
 
 export type GatewayChainId =
   | typeof arc.id
+  | typeof mainnet.id
+  | typeof base.id
+  | typeof arbitrum.id
+  | typeof optimism.id
+  | typeof avalanche.id
+  | typeof polygon.id
   | typeof arcTestnet.id
   | typeof baseSepolia.id
   | typeof sepolia.id
@@ -21,18 +42,44 @@ export type GatewayChainId =
 
 export interface GatewayChain {
   /** Identificador usado pelo SDK da Circle. */
-  key: 'Arc' | 'Arc_Testnet' | 'Base_Sepolia' | 'Ethereum_Sepolia' | 'Arbitrum_Sepolia' | 'Optimism_Sepolia' | 'Avalanche_Fuji' | 'Polygon_Amoy_Testnet'
+  key:
+    | 'Arc'
+    | 'Ethereum'
+    | 'Base'
+    | 'Arbitrum'
+    | 'Optimism'
+    | 'Avalanche'
+    | 'Polygon'
+    | 'Arc_Testnet'
+    | 'Base_Sepolia'
+    | 'Ethereum_Sepolia'
+    | 'Arbitrum_Sepolia'
+    | 'Optimism_Sepolia'
+    | 'Avalanche_Fuji'
+    | 'Polygon_Amoy_Testnet'
   chainId: GatewayChainId
   label: string
   /** `live` = rede real (Mainnet), `test` = ambiente de teste. */
   env: 'live' | 'test'
 }
 
+/**
+ * Redes oficialmente suportadas pelo Circle Gateway (enum `UnifiedBalanceChain` do SDK instalado).
+ * Arc é a rede principal e aparece primeiro. Endereços/tokens vêm de `onchain-facts`/viem — nada é inventado.
+ */
 export const GATEWAY_CHAINS: GatewayChain[] = [
+  // Mainnet (env 'live')
   { key: 'Arc', chainId: arc.id, label: 'Arc Mainnet', env: 'live' },
+  { key: 'Ethereum', chainId: mainnet.id, label: 'Ethereum', env: 'live' },
+  { key: 'Base', chainId: base.id, label: 'Base', env: 'live' },
+  { key: 'Arbitrum', chainId: arbitrum.id, label: 'Arbitrum One', env: 'live' },
+  { key: 'Optimism', chainId: optimism.id, label: 'OP Mainnet', env: 'live' },
+  { key: 'Avalanche', chainId: avalanche.id, label: 'Avalanche', env: 'live' },
+  { key: 'Polygon', chainId: polygon.id, label: 'Polygon PoS', env: 'live' },
+  // Testnet (env 'test')
   { key: 'Arc_Testnet', chainId: arcTestnet.id, label: 'Arc Testnet', env: 'test' },
-  { key: 'Base_Sepolia', chainId: baseSepolia.id, label: 'Base Sepolia', env: 'test' },
   { key: 'Ethereum_Sepolia', chainId: sepolia.id, label: 'Ethereum Sepolia', env: 'test' },
+  { key: 'Base_Sepolia', chainId: baseSepolia.id, label: 'Base Sepolia', env: 'test' },
   { key: 'Arbitrum_Sepolia', chainId: arbitrumSepolia.id, label: 'Arbitrum Sepolia', env: 'test' },
   { key: 'Optimism_Sepolia', chainId: optimismSepolia.id, label: 'OP Sepolia', env: 'test' },
   { key: 'Avalanche_Fuji', chainId: avalancheFuji.id, label: 'Avalanche Fuji', env: 'test' },
@@ -40,6 +87,9 @@ export const GATEWAY_CHAINS: GatewayChain[] = [
 ]
 
 export const chainByKey = (key: string): GatewayChain | undefined => GATEWAY_CHAINS.find((c) => c.key === key)
+
+/** Redes válidas para o ambiente ativo: Mainnet só 'live', Testnet só 'test' (isolamento estrito). */
+export const gatewayChainsFor = (network: NetworkId): GatewayChain[] => GATEWAY_CHAINS.filter((c) => c.env === (network === 'mainnet' ? 'live' : 'test'))
 
 export interface GatewayBalances {
   /** Saldo confirmado (disponível para novas operações). */
