@@ -17,6 +17,13 @@ export type PaymentStatus = 'created' | 'awaiting_signature' | 'submitted' | 'pe
 /** Status persistido em `TreasuryOp.status` (subconjunto dos estados relevantes pós-submissão). */
 export type TreasuryOpStatus = 'pending' | 'confirmed' | 'failed' | 'ambiguous' | 'requires_review'
 
+/**
+ * Estado CONTÁBIL, separado do estado on-chain/Gateway. A confirmação on-chain e a baixa contábil
+ * são coisas distintas: um pagamento pode estar confirmado on-chain mas com a alocação contábil
+ * pendente de revisão (ex.: FX ausente).
+ */
+export type AccountingStatus = 'unallocated' | 'pending' | 'partially_settled' | 'settled' | 'posting_failed' | 'requires_review'
+
 const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
   created: ['awaiting_signature'],
   awaiting_signature: ['submitted', 'failed'],

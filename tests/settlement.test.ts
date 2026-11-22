@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canTransition, classifyVerification, isTerminalStatus, PAYMENT_STATUSES } from '../src/lib/accounting/settlement'
 import { isHexHash, matchTransfer, verifyUsdcReceipt } from '../src/lib/accounting/verify'
-import { allocationAmount, reconcileTreasuryOp } from '../src/lib/settlement-service'
+import { allocationAmount, gatewayWalletForChain, reconcileTreasuryOp } from '../src/lib/settlement-service'
 import { backoffDelay, isAutoReconcilable } from '../src/lib/reconciliation'
 import { emptyLedger } from '../src/lib/accounting/engine'
 import { recordFxRate } from '../src/lib/accounting/reviews'
@@ -131,6 +131,25 @@ describe('alocação exata do valor verificado (partial settlement)', () => {
   test('valor inválido → invalid_amount', () => {
     const r = allocationAmount(emptyLedger(), 'USDC', 'abc', '2026-11-22')
     expect(r).toEqual({ ok: false, reason: 'invalid_amount' })
+  })
+
+  test('moeda desconhecida (legado) → unknown_currency, nunca adivinhada', () => {
+    const r = allocationAmount(emptyLedger(), undefined, '300', '2026-11-22')
+    expect(r).toEqual({ ok: false, reason: 'unknown_currency' })
+  })
+})
+
+describe('verificação de crédito no Gateway (depósito)', () => {
+  test('gatewayWalletForChain resolve o contrato pela rede (mainnet ≠ testnet)', () => {
+    const mainnet = gatewayWalletForChain(5042)
+    const testnet = gatewayWalletForChain(5042002)
+    expect(mainnet).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect(testnet).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect(mainnet).not.toBe(testnet)
+  })
+
+  test('chain desconhecida não resolve GatewayWallet', () => {
+    expect(gatewayWalletForChain(99999999)).toBeUndefined()
   })
 })
 

@@ -38,10 +38,14 @@ const whenDate = (iso: string) => new Date(iso).toLocaleDateString(locale())
 const whenTime = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 const when = (iso: string) => new Date(iso).toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })
 
-/** Status real da liquidação (submissão ≠ liquidação). */
+/** Status real da liquidação (submissão ≠ liquidação; estado on-chain ≠ estado contábil). */
 function StatusBadge({ op }: { op: TreasuryOp }) {
   const status = op.status ?? 'pending'
-  if (status === 'confirmed') return <Badge tone="ok">{t('Confirmada', 'Confirmed')}</Badge>
+  if (status === 'confirmed') {
+    if (op.accountingStatus === 'requires_review') return <Badge tone="warn">{t('Confirmada · revisão contábil', 'Confirmed · accounting review')}</Badge>
+    if (op.accountingStatus === 'partially_settled') return <Badge tone="ok">{t('Confirmada · parcial', 'Confirmed · partial')}</Badge>
+    return <Badge tone="ok">{t('Confirmada', 'Confirmed')}</Badge>
+  }
   if (status === 'failed') return <Badge tone="bad">{t('Falhou', 'Failed')}</Badge>
   if (status === 'requires_review') return <Badge tone="warn">{t('Requer revisão', 'Requires review')}</Badge>
   if (status === 'ambiguous') return <Badge tone="warn">{t('Ambígua', 'Ambiguous')}</Badge>
@@ -51,7 +55,7 @@ function StatusBadge({ op }: { op: TreasuryOp }) {
 function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp) => void | Promise<void> }) {
   return (
     <span className="flex items-center gap-0.5">
-      {op.txHash && (op.status ?? 'pending') === 'pending' && onVerify ? (
+      {op.txHash && (op.status ?? 'pending') !== 'confirmed' && (op.status ?? 'pending') !== 'failed' && onVerify ? (
         <button
           onClick={() => void onVerify(op)}
           className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-strong"

@@ -17,6 +17,7 @@ import {
   type ShipmentDocumentType,
   type ShipmentStatus,
   type TreasuryOp,
+  type CurrencyCode,
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
 import { accountOutstanding } from './selectors'
@@ -35,7 +36,7 @@ import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
 import { reconcileTreasuryOp, allocationAmount } from './settlement-service'
-import type { TreasuryOpStatus } from './accounting/settlement'
+import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
 import { t } from './i18n'
@@ -92,13 +93,37 @@ export function emptyData(): AppData {
   }
 }
 
+/**
+ * Migração auditável: para contas legadas sem `currency`, infere a moeda a partir do evento de obrigação
+ * correspondente no razão (`payable.created`/`receivable.created`), que registrou a moeda na criação.
+ * Sem evento, permanece desconhecida (nunca adivinhada); exige resolução do dono na alocação.
+ */
+function migrateAccountCurrencies(data: AppData): AppData {
+  const obligationCurrency = new Map<string, CurrencyCode>()
+  for (const e of data.ledger.events) {
+    if ((e.type === 'payable.created' || e.type === 'receivable.created') && typeof e.payload.accountId === 'string') {
+      obligationCurrency.set(e.payload.accountId, e.currency)
+    }
+  }
+  let changed = false
+  const accounts = data.accounts.map((a) => {
+    if (a.currency) return a
+    const cur = obligationCurrency.get(a.id)
+    if (!cur) return a
+    changed = true
+    return { ...a, currency: cur }
+  })
+  return changed ? { ...data, accounts } : data
+}
+
 function load(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return emptyData()
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
-    return { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
+    const data: AppData = { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
+    return migrateAccountCurrencies(data)
   } catch {
     return emptyData()
   }
@@ -390,7 +415,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addAccount: (a) => {
         const id = uid()
-        set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual' }, ...d.accounts] }))
+        set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual', currency: a.currency ?? d.settings.currency }, ...d.accounts] }))
         return id
       },
       updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
@@ -492,6 +517,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               category: CAT_SALES,
               status: 'open',
               source: 'sale',
+              currency: d.settings.currency,
             }
             next.accounts = [acc, ...d.accounts]
           } else {
@@ -559,6 +585,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 category: CAT_PURCHASE,
                 status: 'open',
                 source: 'purchase',
+                currency: d.settings.currency,
               },
               ...d.accounts,
             ]
@@ -585,6 +612,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             category: CAT_PAYROLL,
             status: 'open',
             source: 'payroll',
+            currency: d.settings.currency,
             employeeId: e.id,
           }))
           return { ...d, accounts: [...accs, ...d.accounts] }
@@ -665,30 +693,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inflight.add(opId)
         try {
           const { status } = await reconcileTreasuryOp(op)
-          // Alocação contábil (valor exato, nunca o saldo inteiro). Moeda não-USDC exige FX registrado.
-          const alloc = status === 'confirmed' ? allocationAmount(data.ledger, data.settings.currency, op.amount, op.date.slice(0, 10)) : null
-          const finalStatus: TreasuryOpStatus = status === 'confirmed' ? (alloc && alloc.ok ? 'confirmed' : 'requires_review') : status
+          const finalStatus: TreasuryOpStatus = status
           setData((d) => {
             const cur = d.treasuryOps.find((o) => o.id === opId)
             if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
             if (finalStatus !== 'confirmed') {
-              const reviewReason = finalStatus === 'requires_review' ? (alloc && !alloc.ok ? alloc.reason : cur.reviewReason) : undefined
-              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: finalStatus, ...(reviewReason ? { reviewReason } : {}) } : o)) }
+              // Blockchain pendente/ambígua/falhou: sem alocação contábil.
+              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: finalStatus, accountingStatus: 'unallocated' as const } : o)) }
             }
-            // Confirmado on-chain: baixa EXATAMENTE o valor verificado (parcial), nunca o saldo inteiro.
-            const fresh = allocationAmount(d.ledger, d.settings.currency, cur.amount, cur.date.slice(0, 10))
+            // Blockchain confirmado. A alocação contábil depende da MOEDA DA CONTA (não da configuração global).
+            const accCurrency = cur.accountId ? d.accounts.find((a) => a.id === cur.accountId)?.currency : undefined
+            const fresh = allocationAmount(d.ledger, accCurrency, cur.amount, cur.date.slice(0, 10))
             if (!fresh.ok) {
-              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'requires_review' as const, reviewReason: fresh.reason } : o)) }
+              // Preserva a confirmação on-chain; alocação contábil fica para revisão (ex.: FX ausente, moeda desconhecida).
+              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, accountingStatus: 'requires_review' as const, reviewReason: fresh.reason } : o)) }
             }
             let next: AppData = { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString() } : o)) }
+            let accountingStatus: AccountingStatus = 'settled'
             if (cur.accountId) {
               const acc = next.accounts.find((a) => a.id === cur.accountId)
               if (acc && acc.status === 'open') {
-                const amount = Math.min(fresh.amount, accountOutstanding(acc))
+                const outstanding = accountOutstanding(acc)
+                const amount = Math.min(fresh.amount, outstanding)
                 if (amount > 0) next = settle(next, cur.accountId, amount, cur.explorerUrl, true)
+                accountingStatus = amount < outstanding ? 'partially_settled' : 'settled'
               }
             }
-            return next
+            return { ...next, treasuryOps: next.treasuryOps.map((o) => (o.id === opId ? { ...o, accountingStatus } : o)) }
           })
           return { ok: true, status: finalStatus }
         } finally {

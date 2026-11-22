@@ -49,9 +49,13 @@ export function ReconciliationCoordinator() {
       if (state.cancelled) return
       if (state.timer) clearTimeout(state.timer)
       state.timer = setTimeout(() => {
-        void pass()
-        state.attempt += 1
-        schedule(backoffDelay(state.attempt, BASE_MS, MAX_MS))
+        // Aguarda o ciclo terminar antes de agendar o próximo (nunca sobrepõe nem dispara em rajada).
+        void (async () => {
+          await pass()
+          if (state.cancelled) return
+          state.attempt += 1
+          schedule(backoffDelay(state.attempt, BASE_MS, MAX_MS))
+        })()
       }, delay)
     }
 

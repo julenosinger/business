@@ -65,6 +65,8 @@ export interface Account {
   status: 'open' | 'paid'
   paidAt?: string
   source: AccountSource
+  /** Moeda da obrigação. Ausente em registros legados (tratada como desconhecida, nunca adivinhada). */
+  currency?: CurrencyCode
   /** Link do explorer da transação em USDC que liquidou a conta. */
   treasuryTx?: string
   employeeId?: string
@@ -124,6 +126,8 @@ export interface TreasuryOp {
   transferId?: string
   /** Estado de liquidação. Ausente (registros antigos) = legado/desconhecido (tratar como pendente). */
   status?: TreasuryOpStatus
+  /** Estado contábil (separado do on-chain): settled / partially_settled / requires_review / unallocated. */
+  accountingStatus?: AccountingStatus
   /** Quando a liquidação foi confirmada (verificada on-chain). */
   settledAt?: string
   /** Id da liquidação (AccountSettlement) criada ao confirmar. */
@@ -474,7 +478,7 @@ export interface Shipment {
 }
 
 import type { LedgerState } from './accounting/types'
-import type { TreasuryOpStatus } from './accounting/settlement'
+import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 
 export interface AppData {
   products: Product[]
