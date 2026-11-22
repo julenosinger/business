@@ -13,6 +13,8 @@ export type PageId =
   | 'hr'
   | 'treasury'
   | 'reports'
+  | 'agents'
+  | 'chatbot'
   | 'settings'
 
 export type Intent = { kind: 'batch'; ids: string[] } | { kind: 'charge'; accountId: string | null }

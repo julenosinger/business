@@ -18,6 +18,8 @@ import { Contacts } from '@/pages/Contacts'
 import { Employees } from '@/pages/Employees'
 import { Treasury } from '@/pages/Treasury'
 import { Reports } from '@/pages/Reports'
+import { Agents } from '@/pages/Agents'
+import { Chatbot } from '@/pages/Chatbot'
 import { SettingsPage } from '@/pages/SettingsPage'
 
 function Router({ page }: { page: PageId }) {
@@ -46,6 +48,10 @@ function Router({ page }: { page: PageId }) {
       return <Treasury />
     case 'reports':
       return <Reports />
+    case 'agents':
+      return <Agents />
+    case 'chatbot':
+      return <Chatbot />
     case 'settings':
       return <SettingsPage />
   }

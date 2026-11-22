@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { BarChart3, BookOpen, Boxes, Landmark, LayoutDashboard, Package, Receipt, Settings, ShoppingBag, ShoppingCart, Truck, UserRound, Users } from 'lucide-react'
+import { BarChart3, BookOpen, Bot, Boxes, Landmark, LayoutDashboard, MessageSquareText, Package, Receipt, Settings, ShoppingBag, ShoppingCart, Truck, UserRound, Users } from 'lucide-react'
 import type { PageId } from '@/lib/nav'
 import { t } from '@/lib/i18n'
 
@@ -49,6 +49,14 @@ export function navSections(): NavSection[] {
       items: [
         { id: 'treasury', label: t('Tesouraria', 'Treasury'), icon: icon((p) => <Landmark {...p} />), badge: 'Circle' },
         { id: 'reports', label: t('Relatórios', 'Reports'), icon: icon((p) => <BarChart3 {...p} />) },
+      ],
+    },
+    {
+      id: 'ai',
+      label: t('Inteligência artificial', 'Artificial intelligence'),
+      items: [
+        { id: 'agents', label: t('Agents', 'Agents'), icon: icon((p) => <Bot {...p} />) },
+        { id: 'chatbot', label: t('Chatbot', 'Chatbot'), icon: icon((p) => <MessageSquareText {...p} />) },
       ],
     },
     {
