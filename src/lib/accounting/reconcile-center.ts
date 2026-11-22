@@ -32,6 +32,8 @@ export type ReconReason =
   | 'pending_confirmation'
   | 'no_evidence'
   | 'needs_classification'
+  | 'partial_payment'
+  | 'outstanding_balance'
   | 'fee_estimated'
   | 'unbalanced'
   | 'event_rejected'
@@ -152,27 +154,47 @@ export function buildReconciliation(data: AppData): ReconItem[] {
   for (const a of data.accounts) {
     const enabled = a.source === 'payroll' ? flags.payroll : flags.payables
     if (!enabled) continue
-    const base = { key: `account:${a.id}`, group: 'obligations' as const, label: a.description, date: a.paidAt ?? a.dueDate, amount: a.amount, refs: { accountId: a.id } }
+    const paid = (a.settlements ?? []).reduce((s, x) => s + x.amount, 0)
+    const outstanding = Math.round((a.amount - paid) * 100) / 100
+    const base = { key: `account:${a.id}`, group: 'obligations' as const, label: a.description, date: a.paidAt ?? a.dueDate, amount: outstanding, refs: { accountId: a.id } }
     if (!hasActiveObligation(ledger, a.id)) {
       add({ ...base, state: 'review', reason: 'obligation_missing' })
       continue
     }
     const creation = ledger.events.find((e) => e.status === 'posted' && e.payload.accountId === a.id && !!e.journalEntryId && !isReversed(ledger, e.journalEntryId))
     const currency = creation?.currency
-    if (creation && a.status === 'open' && BigInt(creation.amountMinor) !== (fromNumber(a.amount, creation.currency) ?? -1n)) {
+    if (creation && BigInt(creation.amountMinor) !== (fromNumber(a.amount, creation.currency) ?? -1n)) {
       add({ ...base, ...(currency ? { currency } : {}), state: 'mismatch', reason: 'amount_mismatch' })
       continue
     }
-    if (a.status === 'open') {
-      add({ ...base, ...(currency ? { currency } : {}), state: 'matched', reason: 'ok' })
+    const settlements = a.settlements ?? []
+    const evidence = a.treasuryTx ? { explorerUrl: a.treasuryTx } : {}
+    if (settlements.length === 0) {
+      if (a.status === 'open') {
+        add({ ...base, ...(currency ? { currency } : {}), state: 'matched', reason: 'ok' })
+        continue
+      }
+      // Liquidação legada (sem lista de liquidações): mantém a verificação antiga da sequência 1.
+      const settle = eventFor(ledger.events, `account:${a.id}:settle:1`)
+      if (!settle) add({ ...base, ...(currency ? { currency } : {}), state: 'review', reason: 'settlement_missing' })
+      else if (settle.status === 'pending') add({ ...base, key: `${EVENT_ITEM_PREFIX}${settle.idempotencyKey}`, ...(currency ? { currency } : {}), refs: { ...base.refs, eventKey: settle.idempotencyKey, ...evidence }, state: 'pending', reason: 'pending_confirmation' })
+      else if (settle.status === 'posted') add({ ...base, ...(currency ? { currency } : {}), refs: { ...base.refs, journalId: settle.journalEntryId, ...evidence }, state: 'matched', reason: 'ok' })
+      else add({ ...base, ...(currency ? { currency } : {}), state: 'review', reason: 'event_rejected' })
       continue
     }
-    const settle = eventFor(ledger.events, `account:${a.id}:settle:1`)
-    const evidence = a.treasuryTx ? { explorerUrl: a.treasuryTx } : {}
-    if (!settle) add({ ...base, ...(currency ? { currency } : {}), state: 'review', reason: 'settlement_missing' })
-    else if (settle.status === 'pending') add({ ...base, key: `${EVENT_ITEM_PREFIX}${settle.idempotencyKey}`, ...(currency ? { currency } : {}), refs: { ...base.refs, eventKey: settle.idempotencyKey, ...evidence }, state: 'pending', reason: 'pending_confirmation' })
-    else if (settle.status === 'posted') add({ ...base, ...(currency ? { currency } : {}), refs: { ...base.refs, journalId: settle.journalEntryId, ...evidence }, state: 'matched', reason: 'ok' })
-    else add({ ...base, ...(currency ? { currency } : {}), state: 'review', reason: 'event_rejected' })
+    // Liquidações (parciais ou totais): cada uma deve ter um evento correspondente.
+    let missing = 0
+    let pending = 0
+    const firstPending = settlements.map((s) => eventFor(ledger.events, `account:${a.id}:settle:${s.sequence}`)).find((e) => e?.status === 'pending')
+    for (const s of settlements) {
+      const ev = eventFor(ledger.events, `account:${a.id}:settle:${s.sequence}`)
+      if (!ev) missing += 1
+      else if (ev.status === 'pending') pending += 1
+    }
+    if (missing > 0) add({ ...base, ...(currency ? { currency } : {}), state: 'review', reason: 'settlement_missing' })
+    else if (pending > 0 && firstPending) add({ ...base, key: `${EVENT_ITEM_PREFIX}${firstPending.idempotencyKey}`, ...(currency ? { currency } : {}), refs: { ...base.refs, eventKey: firstPending.idempotencyKey, ...evidence }, state: 'pending', reason: 'pending_confirmation' })
+    else if (a.status === 'open') add({ ...base, ...(currency ? { currency } : {}), state: 'pending', reason: 'partial_payment' })
+    else add({ ...base, ...(currency ? { currency } : {}), state: 'matched', reason: 'ok' })
   }
 
   // ----- Tesouraria (Circle Gateway) -----------------------------------------------------------------------------------

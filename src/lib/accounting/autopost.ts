@@ -183,25 +183,36 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       }
       continue
     }
-    if (old.status === 'open' && a.status === 'paid' && enabledFor(a) && hasActiveObligation(ledger, a.id)) {
-      const amountMinor = minor(a.amount)
-      if (!amountMinor || !a.paidAt) continue
-      const cashEntryId = claim((e) => e.type === (a.kind === 'payable' ? 'out' : 'in') && e.category === a.category && e.description === a.description && e.amount === a.amount)
-      const viaTreasury = !!a.treasuryTx
+    if (!enabledFor(a)) continue
+    // Liquidações parciais e totais: cada NOVA liquidação vira um evento, com sequência única e idempotente.
+    const prevSettlements = new Set((old.settlements ?? []).map((s) => s.id))
+    const newSettlements = (a.settlements ?? []).filter((s) => !prevSettlements.has(s.id))
+    const postSettlement = (amount: number, date: string, sequence: number, treasuryTx: string | undefined, settlementId?: string): void => {
+      if (!hasActiveObligation(ledger, a.id)) return
+      const amountMinor = minor(amount)
+      if (!amountMinor) return
+      const cashEntryId = claim((e) => e.type === (a.kind === 'payable' ? 'out' : 'in') && e.category === a.category && e.description === a.description && e.amount === amount)
+      const viaTreasury = !!treasuryTx
       const type: EventType = a.source === 'payroll' ? 'payroll.paid' : a.kind === 'payable' ? 'payable.settled' : 'receivable.settled'
       post(
         baseDraft(ledger, {
-          idempotencyKey: `account:${a.id}:settle:1`,
+          idempotencyKey: `account:${a.id}:settle:${sequence}`,
           type,
           source: { module: a.source === 'payroll' ? 'payroll' : a.kind === 'payable' ? 'payables' : 'receivables', recordId: a.id },
-          accountingDate: a.paidAt,
+          accountingDate: date,
           currency,
           amountMinor,
           // Pagamento via USDC/Gateway só vira liquidação confirmada depois da revisão humana com evidência.
-          payload: { accountId: a.id, settleIn: viaTreasury && currency === 'USDC' ? 'usdc_gateway' : 'cash', cashEntryId: str(cashEntryId), txRef: str(a.treasuryTx) },
+          payload: { accountId: a.id, settleIn: viaTreasury && currency === 'USDC' ? 'usdc_gateway' : 'cash', cashEntryId: str(cashEntryId), txRef: str(treasuryTx), ...(settlementId ? { settlementId } : {}) },
           confirmation: viaTreasury ? 'pending' : 'confirmed',
         }, opts.now),
       )
+    }
+    if (newSettlements.length > 0) {
+      for (const s of newSettlements) postSettlement(s.amount, s.date, s.sequence, s.treasuryTx, s.id)
+    } else if (old.status === 'open' && a.status === 'paid') {
+      // Liquidação legada (sem lista de liquidações): baixa total no valor da conta.
+      postSettlement(a.amount, a.paidAt ?? opts.today, 1, a.treasuryTx)
     }
   }
   for (const old of prev.accounts) {

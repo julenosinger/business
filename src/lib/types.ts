@@ -40,6 +40,17 @@ export interface Entry {
 
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'
 
+/** Liquidação parcial (ou total) de uma conta. Várias liquidações por conta são permitidas. */
+export interface AccountSettlement {
+  id: string
+  /** Sequência da liquidação na conta (1, 2, ...): garante idempotência no razão. */
+  sequence: number
+  amount: number
+  date: string
+  /** Link do explorer da transação em USDC que liquidou (quando via tesouraria). */
+  treasuryTx?: string
+}
+
 export interface Account {
   id: string
   kind: 'payable' | 'receivable'
@@ -55,6 +66,8 @@ export interface Account {
   /** Link do explorer da transação em USDC que liquidou a conta. */
   treasuryTx?: string
   employeeId?: string
+  /** Liquidações parciais. Vazio/ausente = nada pago (comportamento legado preservado). */
+  settlements?: AccountSettlement[]
 }
 
 export type PayMethod = 'dinheiro' | 'pix' | 'cartao' | 'usdc' | 'prazo'

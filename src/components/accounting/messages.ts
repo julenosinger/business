@@ -53,6 +53,8 @@ export function reasonText(reason: ReconReason): string {
     pending_confirmation: t('Aguardando confirmação humana com evidência: não é liquidação confirmada.', 'Awaiting human confirmation with evidence: not a confirmed settlement.'),
     no_evidence: t('Sem hash de transação: não há evidência para lançar.', 'No transaction hash: there is no evidence to post.'),
     needs_classification: t('Envio sem conta vinculada: é preciso classificar (pagamento, transferência própria).', 'Send without a linked account: classify it (payment or own transfer).'),
+    partial_payment: t('Conta parcialmente liquidada: resta saldo em aberto.', 'Partially settled account: an outstanding balance remains.'),
+    outstanding_balance: t('Há saldo em aberto com o fornecedor.', 'There is an outstanding balance with the supplier.'),
     fee_estimated: t('Taxa estimada: ainda não confirmada.', 'Estimated fee: not confirmed yet.'),
     unbalanced: t('Lançamento desbalanceado (débitos ≠ créditos).', 'Unbalanced entry (debits ≠ credits).'),
     event_rejected: t('Evento rejeitado ou falho.', 'Rejected or failed event.'),

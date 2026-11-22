@@ -19,6 +19,7 @@ import {
   type TreasuryOp,
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
+import { accountOutstanding } from './selectors'
 import * as logistics from './logistics'
 import * as fulfillment from './fulfillment'
 import * as receiving from './receiving'
@@ -148,6 +149,8 @@ export interface Store {
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
   updateAccount: (id: string, patch: Partial<Account>) => void
   settleAccount: (id: string, treasuryTx?: string) => void
+  /** Liquidação parcial: reduz o saldo em aberto sem fechar a conta. Recusa valor acima do saldo. */
+  settleAccountPartial: (id: string, amount: number, treasuryTx?: string) => void
   removeAccount: (id: string) => void
   recordSale: (input: SaleInput) => void
   cancelSale: (id: string) => void
@@ -263,22 +266,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ok: true, value: out.value }
     }
 
-    const settle = (d: AppData, id: string, treasuryTx?: string): AppData => {
+    const settle = (d: AppData, id: string, amount: number, treasuryTx?: string): AppData => {
       const acc = d.accounts.find((a) => a.id === id)
       if (!acc || acc.status === 'paid') return d
       const date = today()
+      const seq = (acc.settlements?.length ?? 0) + 1
+      const settlement = { id: uid(), sequence: seq, amount: round2(amount), date, ...(treasuryTx ? { treasuryTx } : {}) }
+      const settlements = [...(acc.settlements ?? []), settlement]
+      const paid = round2(settlements.reduce((s, x) => s + x.amount, 0))
+      const fullyPaid = paid >= acc.amount - 1e-9
       const entry: Entry = {
         id: uid(),
         date,
         type: acc.kind === 'payable' ? 'out' : 'in',
         category: acc.category,
         description: acc.description,
-        amount: acc.amount,
+        amount: round2(amount),
       }
       return {
         ...d,
         entries: [entry, ...d.entries],
-        accounts: d.accounts.map((a) => (a.id === id ? { ...a, status: 'paid', paidAt: date, treasuryTx } : a)),
+        accounts: d.accounts.map((a) => (a.id === id ? { ...a, settlements, status: fullyPaid ? 'paid' : 'open', paidAt: fullyPaid ? date : undefined, treasuryTx: treasuryTx ?? a.treasuryTx } : a)),
       }
     }
 
@@ -363,7 +371,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return id
       },
       updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
-      settleAccount: (id, treasuryTx) => set((d) => settle(d, id, treasuryTx)),
+      settleAccount: (id, treasuryTx) => {
+        const acc = data.accounts.find((a) => a.id === id)
+        if (!acc || acc.status === 'paid') return
+        set((d) => settle(d, id, accountOutstanding(acc), treasuryTx))
+      },
+      settleAccountPartial: (id, amount, treasuryTx) => {
+        const acc = data.accounts.find((a) => a.id === id)
+        if (!acc || acc.status === 'paid') return
+        if (!(amount > 0)) {
+          toast.error(t('Informe um valor positivo.', 'Enter a positive amount.'))
+          return
+        }
+        if (amount > accountOutstanding(acc)) {
+          toast.error(t('Valor acima do saldo em aberto. Pagamento recusado.', 'Amount exceeds the outstanding balance. Payment rejected.'))
+          return
+        }
+        set((d) => settle(d, id, amount, treasuryTx))
+      },
       removeAccount: (id) => undoable((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== id) }), t('Conta removida.', 'Bill removed.')),
       cancelSale: (id) =>
         undoable((d) => {
@@ -558,7 +583,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
           }
           if (d.accounts.some((a) => a.id === r.accountId && a.status === 'open')) {
-            next = settle(next, r.accountId, explorerUrl)
+            const acc = d.accounts.find((a) => a.id === r.accountId && a.status === 'open')
+            if (acc) next = settle(next, r.accountId, accountOutstanding(acc), explorerUrl)
           } else {
             next = {
               ...next,

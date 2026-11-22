@@ -10,7 +10,7 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { accountTotals } from '@/lib/selectors'
+import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotals } from '@/lib/selectors'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
@@ -111,6 +111,46 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   )
 }
 
+function PartialPaymentModal({ account, onClose }: { account: Account | null; onClose: () => void }) {
+  const { settleAccountPartial } = useStore()
+  const [amount, setAmount] = useState('')
+  const [loaded, setLoaded] = useState<string | null>(null)
+  const value = parseNum(amount)
+  const outstanding = account ? accountOutstanding(account) : 0
+  if (loaded !== (account?.id ?? null)) {
+    setLoaded(account?.id ?? null)
+    setAmount('')
+  }
+  const over = value > outstanding
+  const submit = () => {
+    if (!account || !(value > 0) || over) return
+    settleAccountPartial(account.id, value)
+    toast.success(account.kind === 'payable' ? t('Pagamento parcial registrado.', 'Partial payment recorded.') : t('Recebimento parcial registrado.', 'Partial receipt recorded.'))
+    onClose()
+  }
+  return (
+    <Modal open={account !== null} onClose={onClose} title={account?.kind === 'payable' ? t('Pagar parcialmente', 'Partial payment') : t('Receber parcialmente', 'Partial receipt')}>
+      {account ? (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-line bg-fill/5 p-3 text-sm">
+            <div className="font-semibold">{account.description}</div>
+            <div className="num mt-1 text-xs text-subtle">
+              {t('Saldo em aberto', 'Outstanding')}: {money(outstanding)} {accountIsPartial(account) ? `· ${t('já pago', 'already paid')} ${money(accountPaidAmount(account))}` : ''}
+            </div>
+          </div>
+          <Field label={t('Valor', 'Amount')} hint={over ? t('Valor acima do saldo em aberto.', 'Amount exceeds the outstanding balance.') : undefined}>
+            <input className={inputCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose}>{t('Cancelar', 'Cancel')}</Button>
+            <Button disabled={!(value > 0) || over} onClick={submit}>{t('Registrar', 'Record')}</Button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  )
+}
+
 type Tab = 'open' | 'payable' | 'receivable' | 'paid'
 
 export function Finance() {
@@ -118,6 +158,7 @@ export function Finance() {
   const { requestPay, requestIntent } = useNav()
   const [tab, setTab] = useState<Tab>('open')
   const [target, setTarget] = useState<Account | 'new' | null>(null)
+  const [partial, setPartial] = useState<Account | null>(null)
   const [limit, setLimit] = useState(30)
   const totals = accountTotals(data)
 
@@ -151,6 +192,14 @@ export function Finance() {
         </span>
       )
     }
+    if (accountIsPartial(a)) {
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <Badge tone="warn">{t('Parcial', 'Partial')}</Badge>
+          <span className="num text-xs text-subtle">{money(accountPaidAmount(a))} / {money(a.amount)}</span>
+        </span>
+      )
+    }
     if (d < 0) return <Badge tone="bad">{t(`${-d} dia(s) em atraso`, `${-d} day(s) overdue`)}</Badge>
     if (d <= 7) return <Badge tone="warn">{d === 0 ? t('Vence hoje', 'Due today') : t(`Vence em ${d} dia(s)`, `Due in ${d} day(s)`)}</Badge>
     return <Badge>{t('Em dia', 'On time')}</Badge>
@@ -178,6 +227,11 @@ export function Finance() {
           }}
         >
           <Check size={14} /> {a.kind === 'payable' ? t('Paguei', 'Mark paid') : t('Recebi', 'Mark received')}
+        </Button>
+      ) : null}
+      {a.status === 'open' ? (
+        <Button small variant="ghost" onClick={() => setPartial(a)}>
+          {t('Parcial', 'Partial')}
         </Button>
       ) : null}
       {a.status === 'open' ? (
@@ -279,7 +333,10 @@ export function Finance() {
                         <div className="truncate text-xs text-subtle">{a.contactName}</div>
                       </td>
                       <td className={td}>{statusBadge(a)}</td>
-                      <td className={`${td} num text-right font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</td>
+                      <td className={`${td} num text-right font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>
+                        {money(accountOutstanding(a))}
+                        {accountIsPartial(a) ? <div className="text-[11px] font-normal text-subtle">{t('de', 'of')} {money(a.amount)}</div> : null}
+                      </td>
                       <td className={`${td} text-right`}>{rowActions(a)}</td>
                     </tr>
                   ))}
@@ -297,7 +354,10 @@ export function Finance() {
                         {a.contactName} · {fmtDate(a.dueDate)}
                       </p>
                     </div>
-                    <div className={`num shrink-0 whitespace-nowrap text-sm font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>{money(a.amount)}</div>
+                    <div className={`num shrink-0 whitespace-nowrap text-sm font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>
+                      {money(accountOutstanding(a))}
+                      {accountIsPartial(a) ? <div className="text-[11px] font-normal text-subtle">{t('de', 'of')} {money(a.amount)}</div> : null}
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     {statusBadge(a)}
@@ -319,6 +379,7 @@ export function Finance() {
       </TCard>
 
       <AccountModal target={target} onClose={() => setTarget(null)} />
+      <PartialPaymentModal account={partial} onClose={() => setPartial(null)} />
     </div>
   )
 }

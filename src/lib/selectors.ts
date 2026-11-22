@@ -86,9 +86,24 @@ export interface Totals {
   overdueReceivable: number
 }
 
+/** Valor já liquidado de uma conta (soma das liquidações parciais). */
+export function accountPaidAmount(a: Account): number {
+  return round2((a.settlements ?? []).reduce((s, x) => s + x.amount, 0))
+}
+
+/** Saldo em aberto de uma conta (valor original menos o já liquidado). */
+export function accountOutstanding(a: Account): number {
+  return round2(a.amount - accountPaidAmount(a))
+}
+
+/** Conta parcialmente liquidada (tem liquidações, mas ainda não está paga). */
+export function accountIsPartial(a: Account): boolean {
+  return a.status === 'open' && (a.settlements?.length ?? 0) > 0
+}
+
 export function accountTotals(data: AppData): Totals {
   const open = data.accounts.filter((a) => a.status === 'open')
-  const sum = (list: Account[]) => round2(list.reduce((s, a) => s + a.amount, 0))
+  const sum = (list: Account[]) => round2(list.reduce((s, a) => s + accountOutstanding(a), 0))
   const rec = open.filter((a) => a.kind === 'receivable')
   const pay = open.filter((a) => a.kind === 'payable')
   return {

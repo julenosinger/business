@@ -426,3 +426,39 @@ describe('integridade: partida dobrada e parcial', () => {
     expect(isReversed(l, l.journal[0]!.id)).toBe(false)
   })
 })
+
+describe('liquidações parciais (múltiplas baixas por conta)', () => {
+  test('duas baixas parciais geram dois eventos com sequência; o saldo em aberto fica correto', () => {
+    const prev = base({ payables: true })
+    const open = acct({ id: 'pp1', amount: 1000 })
+    const created = autoPost(prev, { ...prev, accounts: [open] }, opts)
+    expect(bal(created, '2000')).toBe(100000n)
+
+    const settleEntry = (id: string, amount: number) => cashIn({ id, type: 'out', category: 'Aluguel', description: open.description, amount })
+    const partial1: Account = { ...open, settlements: [{ id: 'st1', sequence: 1, amount: 400, date: TODAY }] }
+    const s1 = autoPost({ ...created, accounts: [open] }, { ...created, accounts: [partial1], entries: [settleEntry('pe1', 400)] }, opts)
+    expect(bal(s1, '2000')).toBe(60000n)
+    expect(s1.ledger.events.filter((e) => e.idempotencyKey === 'account:pp1:settle:1')).toHaveLength(1)
+
+    const partial2: Account = { ...open, settlements: [{ id: 'st1', sequence: 1, amount: 400, date: TODAY }, { id: 'st2', sequence: 2, amount: 300, date: TODAY }] }
+    const s2 = autoPost({ ...s1, accounts: [partial1] }, { ...s1, accounts: [partial2], entries: [settleEntry('pe2', 300)] }, opts)
+    expect(bal(s2, '2000')).toBe(30000n)
+    expect(s2.ledger.events.filter((e) => e.idempotencyKey === 'account:pp1:settle:2')).toHaveLength(1)
+
+    const full: Account = { ...open, status: 'paid', paidAt: TODAY, settlements: [...partial2.settlements!, { id: 'st3', sequence: 3, amount: 300, date: TODAY }] }
+    const s3 = autoPost({ ...s2, accounts: [partial2] }, { ...s2, accounts: [full], entries: [settleEntry('pe3', 300)] }, opts)
+    expect(bal(s3, '2000')).toBe(0n)
+    expect(s3.ledger.journal.filter((j) => !j.reversalOf)).toHaveLength(4) // obrigação + 3 baixas
+  })
+
+  test('conta parcial aparece no Centro de Conciliação como parcial, com saldo em aberto', () => {
+    const prev = base({ payables: true })
+    const open = acct({ id: 'pp2', amount: 1000 })
+    const created = autoPost(prev, { ...prev, accounts: [open] }, opts)
+    const partial: Account = { ...open, settlements: [{ id: 'st1', sequence: 1, amount: 400, date: TODAY }] }
+    const s1 = autoPost({ ...created, accounts: [open] }, { ...created, accounts: [partial], entries: [cashIn({ id: 'pe1', type: 'out', category: 'Aluguel', description: open.description, amount: 400 })] }, opts)
+    const items = buildReconciliation({ ...s1, accounts: [partial], entries: [cashIn({ id: 'pe1', type: 'out', category: 'Aluguel', description: open.description, amount: 400 })] })
+    const it = items.find((i) => i.key === 'account:pp2')!
+    expect(it).toMatchObject({ state: 'pending', reason: 'partial_payment', amount: 600 })
+  })
+})
