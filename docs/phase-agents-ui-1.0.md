@@ -1,6 +1,6 @@
 # Fase AGENTS UI 1.0: Abas Agents e Chatbot
 
-**HEAD inicial:** `df358f4` (Fase 3.2.5) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `df358f4` (Fase 3.2.5) · **HEAD final:** `54c5877`
 
 Resultado: **312 testes passando** (eram 307), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
