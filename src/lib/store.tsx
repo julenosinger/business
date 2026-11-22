@@ -33,6 +33,7 @@ import { autoPost } from './accounting/autopost'
 import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
+import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
 import { t } from './i18n'
@@ -144,6 +145,8 @@ export interface Store {
   closeAccountingPeriod: (key: string) => LedgerResult<{ key: string }>
   reopenAccountingPeriod: (key: string, reason: string) => LedgerResult<{ key: string }>
   setAccountingPeriodReview: (key: string) => LedgerResult<{ key: string }>
+  /** Reconciliação histórica de compras: aplica os lançamentos propostos (dry-run), com aprovação humana. */
+  reconcilePurchases: (ids: string[]) => LedgerResult<{ posted: number; duplicates: number; rejected: number }>
   updateEntry: (id: string, patch: Partial<Entry>) => void
   removeEntry: (id: string) => void
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
@@ -337,6 +340,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       closeAccountingPeriod: (key) => runLedger((l, ctx) => closePeriod(l, key, ctx)),
       reopenAccountingPeriod: (key, reason) => runLedger((l, ctx) => reopenPeriod(l, key, reason, ctx)),
       setAccountingPeriodReview: (key) => runLedger((l, ctx) => setPeriodReview(l, key, ctx)),
+      reconcilePurchases: (ids) => {
+        const wanted = new Set(ids)
+        const mk = (d: AppData): Ctx => ({ now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' } })
+        const plan = planPurchaseReconciliation(data).filter((i) => wanted.has(i.purchaseId))
+        const out = applyPurchaseReconciliation(data.ledger, plan, mk(data))
+        setData((d) => {
+          const again = planPurchaseReconciliation(d).filter((i) => wanted.has(i.purchaseId))
+          return { ...d, ledger: applyPurchaseReconciliation(d.ledger, again, mk(d)).ledger }
+        })
+        return { ok: true as const, value: { posted: out.posted, duplicates: out.duplicates, rejected: out.rejected } }
+      },
       setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
       updateEntry: (id, patch) => {
         const before = data.entries.find((e) => e.id === id)

@@ -139,15 +139,13 @@ export function buildReconciliation(data: AppData): ReconItem[] {
   }
 
   // ----- Compras -----------------------------------------------------------------------------------------------------
-  if (flags.purchases) {
-    for (const p of data.purchases) {
-      const base = { key: `purchase:${p.id}`, group: 'purchases' as const, label: p.supplierName, date: p.date, amount: p.total, refs: { purchaseId: p.id } }
-      const ev = eventFor(ledger.events, `purchase:${p.id}:recorded`)
-      if (!p.stockPosted) add({ ...base, state: 'pending', reason: 'pending_confirmation' }) // aguarda o recebimento da mercadoria
-      else if (!ev) add({ ...base, state: 'review', reason: 'purchase_missing' })
-      else if (ev.status !== 'posted') add({ ...base, currency: ev.currency, state: 'review', reason: 'event_rejected', refs: base.refs })
-      else add({ ...base, currency: ev.currency, state: BigInt(ev.amountMinor) === (fromNumber(p.total, ev.currency) ?? -1n) ? 'matched' : 'mismatch', reason: BigInt(ev.amountMinor) === (fromNumber(p.total, ev.currency) ?? -1n) ? 'ok' : 'amount_mismatch', refs: { ...base.refs, journalId: ev.journalEntryId } })
-    }
+  for (const p of data.purchases) {
+    const base = { key: `purchase:${p.id}`, group: 'purchases' as const, label: p.supplierName, date: p.date, amount: p.total, refs: { purchaseId: p.id } }
+    const ev = eventFor(ledger.events, `purchase:${p.id}:recorded`)
+    if (!p.stockPosted) add({ ...base, state: 'pending', reason: 'pending_confirmation' }) // aguarda o recebimento da mercadoria
+    else if (!ev) add({ ...base, state: 'review', reason: 'purchase_missing' })
+    else if (ev.status !== 'posted') add({ ...base, currency: ev.currency, state: 'review', reason: 'event_rejected', refs: base.refs })
+    else add({ ...base, currency: ev.currency, state: BigInt(ev.amountMinor) === (fromNumber(p.total, ev.currency) ?? -1n) ? 'matched' : 'mismatch', reason: BigInt(ev.amountMinor) === (fromNumber(p.total, ev.currency) ?? -1n) ? 'ok' : 'amount_mismatch', refs: { ...base.refs, journalId: ev.journalEntryId } })
   }
 
   // ----- Contas a pagar/receber ----------------------------------------------------------------------------------------

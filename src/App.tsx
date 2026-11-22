@@ -65,6 +65,7 @@ function Workspace() {
   const [page, setPage] = useState<PageId>('dashboard')
   const [payAccountId, setPayAccountId] = useState<string | null>(null)
   const [intent, setIntent] = useState<Intent | null>(null)
+  const [ledgerFocus, setLedgerFocus] = useState<string | null>(null)
 
   const nav = useMemo<Nav>(
     () => ({
@@ -89,8 +90,15 @@ function Workspace() {
           window.scrollTo({ top: 0 })
         }
       },
+      ledgerFocus,
+      focusLedger: (query) => {
+        setLedgerFocus(query)
+        setPage('accounting')
+        window.scrollTo({ top: 0 })
+      },
+      clearLedgerFocus: () => setLedgerFocus(null),
     }),
-    [page, payAccountId, intent],
+    [page, payAccountId, intent, ledgerFocus],
   )
 
   return (

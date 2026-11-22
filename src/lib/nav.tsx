@@ -26,6 +26,12 @@ export interface Nav {
   /** Pedido para abrir pagamento em lote ou cobrança na tesouraria. */
   intent: Intent | null
   requestIntent: (intent: Intent | null) => void
+  /** Busca pré-preenchida no Razão Geral (ex.: `purchase:PUR-0001`). Nulo = sem foco. */
+  ledgerFocus: string | null
+  /** Navega para a Contabilidade e abre o Razão Geral filtrado por `query`. */
+  focusLedger: (query: string) => void
+  /** Limpa o foco do Razão (chamado pela página ao consumir). */
+  clearLedgerFocus: () => void
 }
 
 export const NavContext = createContext<Nav | null>(null)

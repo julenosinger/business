@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeftRight, BookOpen, Download, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp } from 'lucide-react'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -13,6 +13,7 @@ import { ChartOfAccountsTab } from '@/components/accounting/ChartOfAccountsTab'
 import { ReconciliationTab } from '@/components/accounting/ReconciliationTab'
 import { PeriodsTab } from '@/components/accounting/PeriodsTab'
 import { useStore } from '@/lib/store'
+import { useNav } from '@/lib/nav'
 import { expensesByCategory, inPeriod, kpis, monthPeriod, type Period } from '@/lib/selectors'
 import { fmtDate, downloadCsv, iso, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
@@ -125,11 +126,16 @@ type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliat
 
 export function Accounting() {
   const { data, removeEntry } = useStore()
+  const { ledgerFocus, clearLedgerFocus } = useNav()
   const [range, setRange] = useState<Range>('month')
   const [tab, setTab] = useState<AccountingTab>('overview')
   const [target, setTarget] = useState<Entry | 'new' | null>(null)
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all')
   const [limit, setLimit] = useState(30)
+
+  useEffect(() => {
+    if (ledgerFocus) setTab('ledger')
+  }, [ledgerFocus])
   const period = periodFor(range)
   const k = kpis(data, period)
   const cats = expensesByCategory(data, period).filter((c) => c.category !== CAT_PURCHASE && c.category !== CAT_SALES)
@@ -377,7 +383,7 @@ export function Accounting() {
       </TCard>
       ) : null}
 
-      {tab === 'ledger' ? <GeneralLedgerTab /> : null}
+      {tab === 'ledger' ? <GeneralLedgerTab initialQuery={ledgerFocus ?? undefined} onConsume={clearLedgerFocus} /> : null}
       {tab === 'chart' ? <ChartOfAccountsTab /> : null}
       {tab === 'reconciliation' ? <ReconciliationTab /> : null}
       {tab === 'periods' ? <PeriodsTab /> : null}

@@ -144,8 +144,8 @@ export interface PurchaseInput {
   stockPosted: boolean
 }
 
-export function purchaseEvent(ledger: LedgerState, p: PurchaseInput, currency: CurrencyCode): AdapterResult {
-  if (!isAdapterEnabled(ledger, 'purchases')) return { ok: false, reason: 'adapter_disabled' }
+export function purchaseEvent(ledger: LedgerState, p: PurchaseInput, currency: CurrencyCode, opts?: { forceEnabled?: boolean; imported?: boolean }): AdapterResult {
+  if (!opts?.forceEnabled && !isAdapterEnabled(ledger, 'purchases')) return { ok: false, reason: 'adapter_disabled' }
   if (!p.id) return { ok: false, reason: 'insufficient_data' }
   if (!p.stockPosted) return { ok: false, reason: 'insufficient_data' }
   if (!DATE_RE.test(p.date)) return { ok: false, reason: 'invalid_date' }
@@ -160,7 +160,7 @@ export function purchaseEvent(ledger: LedgerState, p: PurchaseInput, currency: C
       accountingDate: p.date,
       currency,
       amountMinor,
-      payload: { paidNow: p.paidNow, settleIn: 'cash' },
+      payload: { paidNow: p.paidNow, settleIn: 'cash', ...(opts?.imported ? { imported: true } : {}) },
       confirmation: 'confirmed',
     }),
   }

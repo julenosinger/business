@@ -18,6 +18,7 @@ const { buildReconciliation, summarize } = await import('../src/lib/accounting/r
 const { glRows, entryDetail, glCsvRows } = await import('../src/lib/accounting/gl')
 const { chartTree, descendants, defaultChart } = await import('../src/lib/accounting/chart')
 const { cashBookEvent } = await import('../src/lib/accounting/adapters')
+const { planPurchaseReconciliation, applyPurchaseReconciliation } = await import('../src/lib/accounting/purchase-reconcile')
 import type { AppData, Account, Sale, TreasuryOp, Entry, PurchaseRef } from '../src/lib/types'
 import type { EventDraft } from '../src/lib/accounting/types'
 
@@ -460,5 +461,53 @@ describe('liquidações parciais (múltiplas baixas por conta)', () => {
     const items = buildReconciliation({ ...s1, accounts: [partial], entries: [cashIn({ id: 'pe1', type: 'out', category: 'Aluguel', description: open.description, amount: 400 })] })
     const it = items.find((i) => i.key === 'account:pp2')!
     expect(it).toMatchObject({ state: 'pending', reason: 'partial_payment', amount: 600 })
+  })
+})
+
+describe('conciliação histórica de compras', () => {
+  test('dry-run propõe; aplicar lança uma vez; reprocessar não duplica', () => {
+    const d = base({})
+    const purchase: PurchaseRef = { id: 'PUR-0009', date: '2026-10-05', supplierName: 'Forn', items: [], total: 150, stockPosted: true, createdAt: NOW }
+    const ap = acct({ id: 'ap9', source: 'purchase', category: 'Compra de mercadorias', description: 'Compra de mercadorias - Forn', contactName: 'Forn', amount: 150 })
+    const data: AppData = { ...d, purchases: [purchase], accounts: [ap] }
+    const plan = planPurchaseReconciliation(data)
+    expect(plan).toHaveLength(1)
+    expect(plan[0]!.status).toBe('ready')
+    expect(plan[0]!.draft!.idempotencyKey).toBe('purchase:PUR-0009:recorded')
+    const applied = applyPurchaseReconciliation(data.ledger, plan, ctx)
+    expect(applied.posted).toBe(1)
+    expect(bal({ ...data, ledger: applied.ledger }, '1200')).toBe(15000n)
+    expect(bal({ ...data, ledger: applied.ledger }, '2000')).toBe(15000n)
+    const again = applyPurchaseReconciliation(applied.ledger, plan, ctx)
+    expect(again.posted).toBe(0)
+    expect(again.duplicates).toBe(1)
+    expect(again.ledger.journal).toHaveLength(1)
+    const replan = planPurchaseReconciliation({ ...data, ledger: applied.ledger })
+    expect(replan[0]!.status).toBe('posted')
+  })
+
+  test('aguardando recebimento e sem evidência ficam fora do lançamento', () => {
+    const d = base({})
+    const waiting: PurchaseRef = { id: 'PUR-0010', date: '2026-10-05', supplierName: 'Forn', items: [], total: 80, stockPosted: false, createdAt: NOW }
+    const noEvidence: PurchaseRef = { id: 'PUR-0011', date: '2026-10-05', supplierName: 'Forn', items: [], total: 90, stockPosted: true, createdAt: NOW }
+    const plan = planPurchaseReconciliation({ ...d, purchases: [waiting, noEvidence] })
+    expect(plan.find((i) => i.purchaseId === 'PUR-0010')!.status).toBe('awaiting_receipt')
+    expect(plan.find((i) => i.purchaseId === 'PUR-0011')!.status).toBe('requires_review')
+    const applied = applyPurchaseReconciliation(d.ledger, plan, ctx)
+    expect(applied.posted).toBe(0)
+    expect(applied.rejected).toBe(2)
+  })
+
+  test('compra paga na hora (saída no Livro-Caixa) lança Dr Estoque / Cr Caixa', () => {
+    const d = base({})
+    const purchase: PurchaseRef = { id: 'PUR-0012', date: '2026-10-05', supplierName: 'Forn', items: [], total: 200, stockPosted: true, createdAt: NOW }
+    const entry = cashIn({ id: 'pc1', type: 'out', category: 'Compra de mercadorias', description: 'Compra', amount: 200, date: '2026-10-05' })
+    const data = { ...d, purchases: [purchase], entries: [entry] }
+    const plan = planPurchaseReconciliation(data)
+    expect(plan[0]!.status).toBe('ready')
+    expect(plan[0]!.paidNow).toBe(true)
+    const applied = applyPurchaseReconciliation(data.ledger, plan, ctx)
+    expect(bal({ ...data, ledger: applied.ledger }, '1200')).toBe(20000n)
+    expect(bal({ ...data, ledger: applied.ledger }, '1000')).toBe(-20000n)
   })
 })

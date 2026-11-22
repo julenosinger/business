@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, Globe2, Search, BookText } from 'lucide-react'
 import clsx from 'clsx'
 import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
@@ -90,7 +90,7 @@ function FxModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   )
 }
 
-export function GeneralLedgerTab() {
+export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: string; onConsume?: () => void } = {}) {
   const { data } = useStore()
   const ledger = data.ledger
   const lang = getLang()
@@ -101,11 +101,19 @@ export function GeneralLedgerTab() {
   const [type, setType] = useState<EventType | ''>('')
   const [module, setModule] = useState<SourceModule | ''>('')
   const [status, setStatus] = useState<GlStatus | ''>('')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(initialQuery ?? '')
   const [reporting, setReporting] = useState<CurrencyCode | ''>('')
   const [page, setPage] = useState(0)
   const [openEntry, setOpenEntry] = useState<string | null>(null)
   const [fxOpen, setFxOpen] = useState(false)
+
+  useEffect(() => {
+    if (initialQuery) {
+      setQ(initialQuery)
+      setPage(0)
+      onConsume?.()
+    }
+  }, [initialQuery, onConsume])
 
   const rows = useMemo(
     () =>

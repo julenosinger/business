@@ -8,6 +8,7 @@ import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
+import { PurchaseReconciliationPanel } from '@/components/accounting/PurchaseReconciliationPanel'
 import { useStore } from '@/lib/store'
 import { inPeriod, monthPeriod } from '@/lib/selectors'
 import { addDays, daysUntil, fmtDate, money, parseNum, today } from '@/lib/format'
@@ -235,6 +236,8 @@ export function Purchases() {
           )}
         </TCard>
       </div>
+
+      <PurchaseReconciliationPanel />
     </div>
   )
 }
