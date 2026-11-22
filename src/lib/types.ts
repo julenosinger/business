@@ -49,6 +49,8 @@ export interface AccountSettlement {
   date: string
   /** Link do explorer da transação em USDC que liquidou (quando via tesouraria). */
   treasuryTx?: string
+  /** True quando a liquidação já foi verificada on-chain (não nasce pendente no razão). */
+  verified?: boolean
 }
 
 export interface Account {
@@ -116,6 +118,12 @@ export interface TreasuryOp {
   recipient?: string
   accountId?: string
   note: string
+  /** Estado de liquidação. Ausente (registros antigos) = legado/desconhecido (tratar como pendente). */
+  status?: TreasuryOpStatus
+  /** Quando a liquidação foi confirmada (verificada on-chain). */
+  settledAt?: string
+  /** Id da liquidação (AccountSettlement) criada ao confirmar. */
+  settlementId?: string
 }
 
 /** USDC é uma moeda do app como as outras: nunca é tratado como equivalente de USD (não há conversão automática). */
@@ -460,6 +468,7 @@ export interface Shipment {
 }
 
 import type { LedgerState } from './accounting/types'
+import type { TreasuryOpStatus } from './accounting/settlement'
 
 export interface AppData {
   products: Product[]

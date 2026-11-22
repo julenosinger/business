@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ArrowRight, Copy, ExternalLink, Layers, ListChecks } from 'lucide-react'
+import { ArrowRight, Copy, ExternalLink, Layers, ListChecks, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey } from '@/lib/gateway'
 import { shortAddr, usdcFmt } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
+import { useStore } from '@/lib/store'
 import type { TreasuryOp } from '@/lib/types'
 import { sameAddress } from './shared'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -37,18 +38,27 @@ const whenDate = (iso: string) => new Date(iso).toLocaleDateString(locale())
 const whenTime = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 const when = (iso: string) => new Date(iso).toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' })
 
-/** Os registros guardam a operação depois que o SDK retorna; a liquidação final não é reverificada aqui. */
-function StatusBadge() {
-  return (
-    <span title={t('Registrada pelo app quando o SDK retornou. A liquidação final não é reverificada nesta tela.', 'Recorded by the app when the SDK returned. Final settlement is not re-verified on this screen.')}>
-      <Badge tone="accent">{t('Registrada', 'Recorded')}</Badge>
-    </span>
-  )
+/** Status real da liquidação (submissão ≠ liquidação). */
+function StatusBadge({ op }: { op: TreasuryOp }) {
+  const status = op.status ?? 'pending'
+  if (status === 'confirmed') return <Badge tone="ok">{t('Confirmada', 'Confirmed')}</Badge>
+  if (status === 'failed') return <Badge tone="bad">{t('Falhou', 'Failed')}</Badge>
+  if (status === 'requires_review') return <Badge tone="warn">{t('Requer revisão', 'Requires review')}</Badge>
+  if (status === 'ambiguous') return <Badge tone="warn">{t('Ambígua', 'Ambiguous')}</Badge>
+  return <Badge tone="neutral">{t('Pendente', 'Pending')}</Badge>
 }
 
-function Actions({ op }: { op: TreasuryOp }) {
+function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp) => void | Promise<void> }) {
   return (
     <span className="flex items-center gap-0.5">
+      {op.accountId && (op.status ?? 'pending') === 'pending' && onVerify ? (
+        <button
+          onClick={() => void onVerify(op)}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-strong"
+        >
+          <ShieldCheck size={14} /> {t('Verificar', 'Verify')}
+        </button>
+      ) : null}
       {op.txHash ? (
         <button
           aria-label={t('Copiar hash da transação', 'Copy transaction hash')}
@@ -79,8 +89,17 @@ function Actions({ op }: { op: TreasuryOp }) {
 }
 
 export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string }) {
+  const { verifyAndSettle } = useStore()
   const [shown, setShown] = useState(PAGE)
   const list = ops.slice(0, shown)
+
+  const verify = async (op: TreasuryOp) => {
+    const r = await verifyAndSettle(op.id)
+    if (!r.ok) toast.error(t('Operação não encontrada.', 'Operation not found.'))
+    else if (r.status === 'confirmed') toast.success(t('Liquidação verificada e conta baixada.', 'Settlement verified and bill settled.'))
+    else if (r.status === 'failed') toast.error(t('Transação falhou na rede.', 'Transaction failed on-chain.'))
+    else toast.warning(t('Ainda sem confirmação: mantida como pendente/revisão.', 'Not confirmed yet: kept pending/review.'))
+  }
   const head = (
     <tr className="text-left text-[12px] text-muted">
       <th className="py-3 pl-5 pr-2 font-medium">{t('Operação', 'Operation')}</th>
@@ -133,8 +152,8 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
                 </td>
                 <td className="py-3 pl-2 pr-5">
                   <div className="flex flex-wrap items-center gap-1">
-                    <StatusBadge />
-                    <Actions op={op} />
+                    <StatusBadge op={op} />
+                    <Actions op={op} onVerify={verify} />
                   </div>
                 </td>
               </tr>
@@ -166,8 +185,8 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
               <div className="flex items-center justify-between gap-2">
                 <span className="num text-xs text-muted">{when(op.date)}</span>
                 <span className="flex items-center gap-1">
-                  <StatusBadge />
-                  <Actions op={op} />
+                  <StatusBadge op={op} />
+                  <Actions op={op} onVerify={verify} />
                 </span>
               </div>
             </li>

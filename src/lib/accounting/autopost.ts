@@ -187,7 +187,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
     // Liquidações parciais e totais: cada NOVA liquidação vira um evento, com sequência única e idempotente.
     const prevSettlements = new Set((old.settlements ?? []).map((s) => s.id))
     const newSettlements = (a.settlements ?? []).filter((s) => !prevSettlements.has(s.id))
-    const postSettlement = (amount: number, date: string, sequence: number, treasuryTx: string | undefined, settlementId?: string): void => {
+    const postSettlement = (amount: number, date: string, sequence: number, treasuryTx: string | undefined, settlementId?: string, verified?: boolean): void => {
       if (!hasActiveObligation(ledger, a.id)) return
       const amountMinor = minor(amount)
       if (!amountMinor) return
@@ -202,14 +202,14 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
           accountingDate: date,
           currency,
           amountMinor,
-          // Pagamento via USDC/Gateway só vira liquidação confirmada depois da revisão humana com evidência.
+          // Pagamento via USDC/Gateway só vira liquidação CONFIRMADA quando já verificado (verified) ou quando for caixa.
           payload: { accountId: a.id, settleIn: viaTreasury && currency === 'USDC' ? 'usdc_gateway' : 'cash', cashEntryId: str(cashEntryId), txRef: str(treasuryTx), ...(settlementId ? { settlementId } : {}) },
-          confirmation: viaTreasury ? 'pending' : 'confirmed',
+          confirmation: viaTreasury && !verified ? 'pending' : 'confirmed',
         }, opts.now),
       )
     }
     if (newSettlements.length > 0) {
-      for (const s of newSettlements) postSettlement(s.amount, s.date, s.sequence, s.treasuryTx, s.id)
+      for (const s of newSettlements) postSettlement(s.amount, s.date, s.sequence, s.treasuryTx, s.id, s.verified)
     } else if (old.status === 'open' && a.status === 'paid') {
       // Liquidação legada (sem lista de liquidações): baixa total no valor da conta.
       postSettlement(a.amount, a.paidAt ?? opts.today, 1, a.treasuryTx)

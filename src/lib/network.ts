@@ -53,6 +53,20 @@ export const arcChainIdOf = (id: NetworkId = current): number => NETWORKS[id].ch
 export const ARC_GATEWAY_KEYS: Record<NetworkId, 'Arc' | 'Arc_Testnet'> = { mainnet: 'Arc', testnet: 'Arc_Testnet' }
 export const arcGatewayKeyOf = (id: NetworkId = current): 'Arc' | 'Arc_Testnet' => ARC_GATEWAY_KEYS[id]
 
+/** Chain ID por chave de rede do Gateway (valores estáveis do registro on-chain). */
+const GATEWAY_KEY_CHAIN_IDS: Record<string, number> = {
+  Arc: 5042,
+  Arc_Testnet: 5042002,
+  Base_Sepolia: 84532,
+  Ethereum_Sepolia: 11155111,
+  Arbitrum_Sepolia: 421614,
+  Optimism_Sepolia: 11155420,
+  Avalanche_Fuji: 43113,
+  Polygon_Amoy_Testnet: 80002,
+}
+
+export const gatewayChainIdOf = (key: string): number | undefined => GATEWAY_KEY_CHAIN_IDS[key]
+
 /** Troca a rede (ação explícita). Persiste e notifica assinantes. */
 export function setNetwork(id: NetworkId): void {
   if (!isValidNetwork(id) || id === current) return

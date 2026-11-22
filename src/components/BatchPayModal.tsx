@@ -39,7 +39,7 @@ const wasRejected = (err: unknown) => /user rejected|rejected the request|denied
 export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null; balances: GatewayBalances | undefined; onClose: () => void }) {
   const { address, connector, chainId } = useAccount()
   const { switchChainAsync } = useSwitchChain()
-  const { data, addTreasuryOp, settleAccount, updateContact, updateEmployee } = useStore()
+  const { data, addTreasuryOp, updateContact, updateEmployee } = useStore()
   const network = useNetwork()
   const [rows, setRows] = useState<Row[]>([])
   const [originKey, setOriginKey] = useState<string>(arcGatewayKeyOf(network))
@@ -92,6 +92,8 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
 
   const run = async () => {
     if (!connector || !origin) return
+    const destChain = chainByKey(destKey)
+    if (!destChain) return
     setRunning(true)
     try {
       if (chainId !== origin.chainId) await switchChainAsync({ chainId: origin.chainId })
@@ -107,22 +109,24 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
           const amountStr = amount.toString()
           const res = await appKit.unifiedBalance.spend({
             from: { adapter, allocations: { amount: amountStr, chain: origin.key } },
-            to: { chain: chainByKey(destKey)?.key ?? 'Arc_Testnet', recipientAddress: wallet, useForwarder: true },
+            to: { chain: destChain.key, recipientAddress: wallet, useForwarder: true },
             amount: amountStr,
           })
           const account = data.accounts.find((a) => a.id === row.id)
+          // A resposta do SDK prova a SUBMISSÃO, não a liquidação: registra como pendente.
+          // A baixa da conta só ocorre após verificação independente (verifyAndSettle).
           addTreasuryOp({
             kind: 'spend',
             chain: origin.key,
-            destChain: destKey,
+            destChain: destChain.key,
             amount: amountStr,
             txHash: res.txHash,
             explorerUrl: res.explorerUrl,
             recipient: wallet,
             accountId: row.id,
+            status: 'pending',
             note: row.title,
           })
-          settleAccount(row.id, res.explorerUrl)
           if (saveWallets && account) {
             if (account.employeeId) updateEmployee(account.employeeId, { wallet })
             else if (account.contactId) updateContact(account.contactId, { wallet })

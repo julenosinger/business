@@ -34,6 +34,8 @@ import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
+import { reconcileTreasuryOp } from './settlement-service'
+import type { TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
 import { t } from './i18n'
@@ -101,6 +103,8 @@ function load(): AppData {
 
 export type LedgerResult<T> = { ok: true; value: T } | { ok: false; errors: PostErrorCode[] }
 
+export type VerifyOutcome = { ok: true; status: TreasuryOpStatus } | { ok: false; error: 'not_found' }
+
 export interface SaleInput {
   customerId?: string
   method: PayMethod
@@ -166,6 +170,8 @@ export interface Store {
   updateRequest: (id: string, patch: Partial<PaymentRequest>) => void
   receiveRequest: (id: string, txHash: string, payer: string, explorerUrl: string) => void
   addTreasuryOp: (op: Omit<TreasuryOp, 'id' | 'date'>) => void
+  /** Verifica a liquidação de uma operação de tesouraria e, se confirmada, baixa a conta uma única vez. */
+  verifyAndSettle: (opId: string) => Promise<VerifyOutcome>
   createShipment: (input: logistics.ShipmentInput) => LogisticsResult<{ id: string }>
   updateShipment: (id: string, input: logistics.ShipmentInput) => LogisticsResult<{ changed: string[] }>
   transitionShipment: (id: string, to: ShipmentStatus, opts?: logistics.TransitionOptions) => LogisticsResult<{ status: ShipmentStatus }>
@@ -269,12 +275,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ok: true, value: out.value }
     }
 
-    const settle = (d: AppData, id: string, amount: number, treasuryTx?: string): AppData => {
+    const settle = (d: AppData, id: string, amount: number, treasuryTx?: string, verified?: boolean): AppData => {
       const acc = d.accounts.find((a) => a.id === id)
       if (!acc || acc.status === 'paid') return d
       const date = today()
       const seq = (acc.settlements?.length ?? 0) + 1
-      const settlement = { id: uid(), sequence: seq, amount: round2(amount), date, ...(treasuryTx ? { treasuryTx } : {}) }
+      const settlement = { id: uid(), sequence: seq, amount: round2(amount), date, ...(treasuryTx ? { treasuryTx } : {}), ...(verified ? { verified } : {}) }
       const settlements = [...(acc.settlements ?? []), settlement]
       const paid = round2(settlements.reduce((s, x) => s + x.amount, 0))
       const fullyPaid = paid >= acc.amount - 1e-9
@@ -645,7 +651,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, t('Rascunho de remessa removido.', 'Draft shipment removed.'))
         return { ok: true, value: out.value }
       },
-      addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString() }, ...d.treasuryOps] })),
+      addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString(), status: op.status ?? 'pending' }, ...d.treasuryOps] })),
+      verifyAndSettle: async (opId) => {
+        const op = data.treasuryOps.find((o) => o.id === opId)
+        if (!op) return { ok: false, error: 'not_found' as const }
+        // Estados terminais: idempotente, não re-verifica nem re-baixa.
+        if (op.status === 'confirmed' || op.status === 'failed') return { ok: true, status: op.status }
+        const { status } = await reconcileTreasuryOp(op)
+        setData((d) => {
+          const cur = d.treasuryOps.find((o) => o.id === opId)
+          if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
+          const settledAt = status === 'confirmed' ? new Date().toISOString() : cur.settledAt
+          let next: AppData = { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status, settledAt } : o)) }
+          if (status === 'confirmed' && cur.accountId) {
+            const acc = next.accounts.find((a) => a.id === cur.accountId)
+            if (acc && acc.status === 'open') next = settle(next, cur.accountId, accountOutstanding(acc), cur.explorerUrl, true)
+          }
+          return next
+        })
+        return { ok: true, status }
+      },
       updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.'), false),
       loadDemo: () =>

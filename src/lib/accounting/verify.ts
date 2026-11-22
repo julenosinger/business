@@ -57,24 +57,30 @@ export function decodeUsdcTransfers(logs: readonly { address: string; data: Hex;
   return out
 }
 
-/** Alguma transferência bate com o destinatário/valor esperado? */
-export function matchTransfer(transfers: readonly UsdcTransfer[], expectedTo?: string, expectedAmountMinor?: bigint): UsdcTransfer | undefined {
+/** Alguma transferência bate com o remetente/destinatário/valor esperado? */
+export function matchTransfer(transfers: readonly UsdcTransfer[], expectedTo?: string, expectedAmountMinor?: bigint, expectedFrom?: string): UsdcTransfer | undefined {
   return transfers.find(
-    (t) => (!expectedTo || t.to.toLowerCase() === expectedTo.toLowerCase()) && (expectedAmountMinor === undefined || t.amountMinor === expectedAmountMinor),
+    (t) =>
+      (!expectedTo || t.to.toLowerCase() === expectedTo.toLowerCase()) &&
+      (!expectedFrom || t.from.toLowerCase() === expectedFrom.toLowerCase()) &&
+      (expectedAmountMinor === undefined || t.amountMinor === expectedAmountMinor),
   )
 }
 
 /**
  * Verifica um recibo de transação USDC na rede.
  *
- * - `expectedTo`/`expectedAmountMinor` são opcionais; quando informados, a verificação só retorna
- *   `confirmed` se encontrar uma transferência de USDC correspondente no recibo.
+ * - EXIGE evidência esperada (remetente, destinatário ou valor): um recibo com sucesso genérico NÃO é
+ *   confirmação de pagamento. Sem evidência, retorna `ambiguous` (`insufficient_evidence`).
  * - `pending` significa "ainda não há prova": NUNCA classifique como liquidado.
+ * - `ambiguous` (erro de rede/entrada inválida) NUNCA é tratado como confirmado.
  */
-export async function verifyUsdcReceipt(input: { chainId: number; txHash: string; expectedTo?: string; expectedAmountMinor?: bigint }): Promise<Verification> {
+export async function verifyUsdcReceipt(input: { chainId: number; txHash: string; expectedTo?: string; expectedFrom?: string; expectedAmountMinor?: bigint }): Promise<Verification> {
   const { chainId, txHash } = input
   if (!isKnownChain(chainId)) return { state: 'ambiguous', chainId, txHash, reason: 'unknown_chain' }
   if (!isHexHash(txHash)) return { state: 'ambiguous', chainId, txHash, reason: 'invalid_hash' }
+  const hasEvidence = input.expectedTo !== undefined || input.expectedFrom !== undefined || input.expectedAmountMinor !== undefined
+  if (!hasEvidence) return { state: 'ambiguous', chainId, txHash, reason: 'insufficient_evidence' }
   const chain = getChain(chainId)!
   const usdc = getUsdc(chainId)
   try {
@@ -82,11 +88,9 @@ export async function verifyUsdcReceipt(input: { chainId: number; txHash: string
     const receipt = await client.getTransactionReceipt({ hash: txHash })
     if (receipt.status === 'reverted') return { state: 'failed', chainId, txHash, blockNumber: receipt.blockNumber }
     const transfers = usdc ? decodeUsdcTransfers(receipt.logs, usdc.address) : []
-    if (input.expectedTo || input.expectedAmountMinor !== undefined) {
-      const hit = matchTransfer(transfers, input.expectedTo, input.expectedAmountMinor)
-      if (!hit) return { state: 'pending', chainId, txHash, blockNumber: receipt.blockNumber, transfers, reason: 'no_matching_transfer' }
-    }
-    return { state: 'confirmed', chainId, txHash, blockNumber: receipt.blockNumber, transfers }
+    const hit = matchTransfer(transfers, input.expectedTo, input.expectedAmountMinor, input.expectedFrom)
+    if (!hit) return { state: 'pending', chainId, txHash, blockNumber: receipt.blockNumber, transfers, reason: 'no_matching_transfer' }
+    return { state: 'confirmed', chainId, txHash, blockNumber: receipt.blockNumber, transfers: [hit] }
   } catch {
     // Falha de rede/RPC: ambiguidade, nunca confirmação.
     return { state: 'ambiguous', chainId, txHash, reason: 'fetch_error' }

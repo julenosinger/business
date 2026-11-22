@@ -59,7 +59,7 @@ function ChainSelect({ value, onChange, label, options }: { value: string; onCha
 export function TreasuryModal({ mode, account, balances, defaultRecipient, onClose }: Props) {
   const { address, connector, chainId } = useAccount()
   const { switchChainAsync } = useSwitchChain()
-  const { data, addTreasuryOp, settleAccount, updateContact, updateEmployee } = useStore()
+  const { data, addTreasuryOp, updateContact, updateEmployee } = useStore()
   const network = useNetwork()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const [amountText, setAmountText] = useState('')
@@ -124,27 +124,33 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
       const adapter = await getAdapter(origin.chainId)
       if (mode === 'deposit') {
         const res = await appKit.unifiedBalance.deposit({ from: { adapter, chain: origin.key }, amount: amountStr })
-        addTreasuryOp({ kind: 'deposit', chain: origin.key, amount: amountStr, txHash: res.txHash, explorerUrl: res.explorerUrl, note: t('Depósito no saldo unificado', 'Deposit into unified balance') })
+        addTreasuryOp({ kind: 'deposit', chain: origin.key, amount: amountStr, txHash: res.txHash, explorerUrl: res.explorerUrl, status: 'pending', note: t('Depósito no saldo unificado', 'Deposit into unified balance') })
         setPhase({ kind: 'done', url: res.explorerUrl, hash: res.txHash })
       } else {
+        if (!destChain) {
+          setPhase({ kind: 'error', message: t('Rede de destino inválida.', 'Invalid destination network.') })
+          return
+        }
         const to = recipient.trim()
         const res = await appKit.unifiedBalance.spend({
           from: { adapter, allocations: { amount: amountStr, chain: origin.key } },
-          to: { chain: destChain?.key ?? 'Arc_Testnet', recipientAddress: to, useForwarder: true },
+          to: { chain: destChain.key, recipientAddress: to, useForwarder: true },
           amount: amountStr,
         })
+        // A resposta do SDK prova a SUBMISSÃO, não a liquidação final: registra como pendente.
+        // A baixa da conta só ocorre após verificação independente (verifyAndSettle).
         addTreasuryOp({
           kind: 'spend',
           chain: origin.key,
-          destChain: destChain?.key,
+          destChain: destChain.key,
           amount: amountStr,
           txHash: res.txHash,
           explorerUrl: res.explorerUrl,
           recipient: to,
           accountId: account?.id,
+          status: 'pending',
           note: account ? account.description : t('Envio de USDC', 'USDC transfer'),
         })
-        if (account) settleAccount(account.id, res.explorerUrl)
         if (account && newWallet && saveWallet) {
           if (account.employeeId) updateEmployee(account.employeeId, { wallet: to })
           else if (account.contactId) updateContact(account.contactId, { wallet: to })
@@ -167,7 +173,9 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
           <p className="display text-lg font-semibold">{mode === 'deposit' ? t('Depósito concluído', 'Deposit complete') : t('Pagamento enviado', 'Payment sent')}</p>
           <p className="text-sm text-muted">
             {usdcFmt(amount?.toString() ?? amountText)} USDC{' '}
-            {mode === 'spend' && account ? t('e a conta foi baixada no caixa.', 'and the bill was settled in your cash book.') : t('registrados na tesouraria.', 'recorded in the treasury.')}
+            {mode === 'spend' && account
+              ? t('submetido. A liquidação aguarda confirmação na rede antes de baixar a conta.', 'submitted. Settlement awaits on-chain confirmation before the bill is settled.')
+              : t('registrados na tesouraria.', 'recorded in the treasury.')}
           </p>
           {phase.url ? (
             <a href={phase.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline">
