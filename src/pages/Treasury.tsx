@@ -18,7 +18,6 @@ import { useStore } from '@/lib/store'
 import { useNav, type Intent } from '@/lib/nav'
 import { useShareBase } from '@/lib/invoice'
 import { useGatewayBalances } from '@/lib/gateway'
-import { isMainnetBlocked, useNetwork } from '@/lib/network'
 import { t } from '@/lib/i18n'
 import { usdcRateOf } from '@/lib/format'
 
@@ -28,8 +27,6 @@ export function Treasury() {
   const { payAccountId, requestPay, intent, requestIntent } = useNav()
   const shareBase = useShareBase()
   const gw = useGatewayBalances(address)
-  const network = useNetwork()
-  const mainnetBlocked = isMainnetBlocked(network)
   const [mode, setMode] = useState<TreasuryMode | null>(null)
   const [payId, setPayId] = useState<string | null>(null)
   const [batchIds, setBatchIds] = useState<string[] | null>(null)
@@ -100,12 +97,6 @@ export function Treasury() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="space-y-4 sm:space-y-5">
-        {mainnetBlocked ? (
-          <div className="rounded-xl border border-warn/40 bg-warn/10 p-4 text-sm text-warn" role="alert">
-            <b className="font-semibold">{t('Arc Mainnet (rede real)', 'Arc Mainnet (live network)')}</b>{' '}
-            {t('ainda não está liberada para execução. Saldos e operações reais estão bloqueados até a validação dos contratos, credenciais e verificação. Use Arc Testnet para testar.', 'is not yet enabled for execution. Real balances and operations are blocked until contracts, credentials and verification are validated. Use Arc Testnet for testing.')}
-          </div>
-        ) : null}
         <TreasuryHeader isConnected={isConnected} address={address} fetching={gw.isFetching} onRefresh={refresh} />
 
         <KpiCards

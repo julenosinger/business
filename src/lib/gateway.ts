@@ -5,7 +5,7 @@ import { Amount } from '@/onchain-money'
 import { t } from './i18n'
 import { USDC_DECIMALS } from '@/onchain-facts'
 import { arc, arcTestnet, arbitrumSepolia, avalancheFuji, baseSepolia, optimismSepolia, polygonAmoy, sepolia } from 'viem/chains'
-import { isMainnetBlocked, useNetwork } from './network'
+import { useNetwork } from './network'
 
 export const appKit = new AppKit()
 
@@ -60,10 +60,9 @@ function toAmount(value: string): Amount {
 export function useGatewayBalances(address: Address | undefined) {
   const network = useNetwork()
   const networkType = network === 'mainnet' ? 'mainnet' : 'testnet'
-  const blocked = isMainnetBlocked(network)
   return useQuery<GatewayBalances>({
     queryKey: ['gateway-balances', address, networkType],
-    enabled: Boolean(address) && !blocked,
+    enabled: Boolean(address),
     refetchInterval: 30_000,
     queryFn: async () => {
       if (!address) return { total: 0, pending: 0, byChain: [] }

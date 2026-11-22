@@ -7,6 +7,7 @@ import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, chainByKey, explainError } from '@/lib/gateway'
+import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
 import { money, parseNum, toUsdc, today, usdcFmt, usdcRateOf } from '@/lib/format'
@@ -37,6 +38,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const { address } = useAccount()
   const { data, addAccount, addRequest } = useStore()
   const base = useShareBase()
+  const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open')
   const rate = usdcRateOf(data.settings)
 
@@ -44,7 +46,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const [desc, setDesc] = useState('')
   const [fiat, setFiat] = useState('')
   const [usdcText, setUsdcText] = useState('')
-  const [chainKey, setChainKey] = useState('Arc_Testnet')
+  const [chainKey, setChainKey] = useState<string>(arcGatewayKeyOf(network))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [createdId, setCreatedId] = useState<string | null>(null)

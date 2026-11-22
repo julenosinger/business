@@ -6,7 +6,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Circle, ExternalLink, Loader2,
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type GatewayBalances } from '@/lib/gateway'
-import { MAINNET_READY } from '@/lib/network'
+import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { useStore } from '@/lib/store'
 import { money, shortAddr, toUsdc, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -40,9 +40,10 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
   const { address, connector, chainId } = useAccount()
   const { switchChainAsync } = useSwitchChain()
   const { data, addTreasuryOp, settleAccount, updateContact, updateEmployee } = useStore()
+  const network = useNetwork()
   const [rows, setRows] = useState<Row[]>([])
-  const [originKey, setOriginKey] = useState('Arc_Testnet')
-  const [destKey, setDestKey] = useState('Arc_Testnet')
+  const [originKey, setOriginKey] = useState<string>(arcGatewayKeyOf(network))
+  const [destKey, setDestKey] = useState<string>(arcGatewayKeyOf(network))
   const [saveWallets, setSaveWallets] = useState(true)
   const [confirmed, setConfirmed] = useState(false)
   const [running, setRunning] = useState(false)
@@ -54,8 +55,8 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
     setSeed(seedKey)
     setConfirmed(false)
     setRunning(false)
-    setDestKey('Arc_Testnet')
-    setOriginKey(balances?.byChain[0]?.key ?? 'Arc_Testnet')
+    setDestKey(arcGatewayKeyOf(network))
+    setOriginKey(balances?.byChain[0]?.key ?? arcGatewayKeyOf(network))
     setRows(
       (ids ?? []).flatMap((id) => {
         const a = data.accounts.find((x) => x.id === id && x.kind === 'payable' && x.status === 'open')
@@ -86,13 +87,11 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
   const limit = data.settings.approvalLimit
   const needsConfirm = Boolean(limit && Number(total.toString()) > limit)
   const origin = chainByKey(originKey)
-  const dest = chainByKey(destKey)
-  const blocked = (origin?.env === 'live' && !MAINNET_READY) || (dest?.env === 'live' && !MAINNET_READY)
-  const canRun = Boolean(address && connector && rowsValid && !overBalance && !running && (!needsConfirm || confirmed)) && !blocked
+  const canRun = Boolean(address && connector && rowsValid && !overBalance && !running && (!needsConfirm || confirmed))
   const spendChains = (balances?.byChain ?? []).filter((b) => b.amount > 0)
 
   const run = async () => {
-    if (!connector || !origin || blocked) return
+    if (!connector || !origin) return
     setRunning(true)
     try {
       if (chainId !== origin.chainId) await switchChainAsync({ chainId: origin.chainId })
@@ -147,11 +146,6 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
   return (
     <Modal open={ids !== null} onClose={running ? () => undefined : onClose} title={t('Pagar em lote', 'Pay in batch')} wide>
       <div className="space-y-4">
-        {blocked ? (
-          <p className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn" role="alert">
-            {t('Arc Mainnet ainda não está liberada para execução real. Use a rede de teste.', 'Arc Mainnet is not yet enabled for real execution. Use the test network.')}
-          </p>
-        ) : null}
         {rows.length === 0 ? (
           <p className="text-sm text-muted">{t('Nenhuma conta a pagar selecionada.', 'No payables selected.')}</p>
         ) : (

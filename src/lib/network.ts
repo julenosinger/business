@@ -49,17 +49,9 @@ export const getNetwork = (): NetworkId => current
 export const networkInfo = (id: NetworkId = current): NetworkInfo => NETWORKS[id]
 export const arcChainIdOf = (id: NetworkId = current): number => NETWORKS[id].chainId
 
-/**
- * Gate de prontidão de Mainnet (Seção 6/7 da fase 2.3).
- *
- * Enquanto `MAINNET_READY` for `false`, a execução financeira em Mainnet fica BLOQUEADA:
- * nenhum depósito/pagamento real é iniciado e nenhum saldo real é consultado. Isso é uma
- * decisão de segurança, não uma configuração do usuário: só pode ser liberada após validar
- * contratos oficiais, credenciais, backend e verificação. Testnet permanece inalterado.
- */
-export const MAINNET_READY = false
-
-export const isMainnetBlocked = (network: NetworkId = current): boolean => network === 'mainnet' && !MAINNET_READY
+/** Chave da rede Arc no Circle Gateway (`Arc` = Mainnet, `Arc_Testnet` = Testnet). */
+export const ARC_GATEWAY_KEYS: Record<NetworkId, 'Arc' | 'Arc_Testnet'> = { mainnet: 'Arc', testnet: 'Arc_Testnet' }
+export const arcGatewayKeyOf = (id: NetworkId = current): 'Arc' | 'Arc_Testnet' => ARC_GATEWAY_KEYS[id]
 
 /** Troca a rede (ação explícita). Persiste e notifica assinantes. */
 export function setNetwork(id: NetworkId): void {

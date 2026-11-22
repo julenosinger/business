@@ -11,7 +11,7 @@ g.localStorage = {
 const dataset: Record<string, string> = {}
 g.document = { documentElement: { dataset } }
 
-const { getNetwork, setNetwork, NETWORKS, arcChainIdOf, isMainnetBlocked, isValidNetwork, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } = await import('../src/lib/network')
+const { getNetwork, setNetwork, NETWORKS, arcChainIdOf, arcGatewayKeyOf, isValidNetwork, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } = await import('../src/lib/network')
 const { setTheme } = await import('../src/lib/theme')
 
 describe('rede ativa (Mainnet default, seleção explícita e persistência)', () => {
@@ -39,9 +39,10 @@ describe('rede ativa (Mainnet default, seleção explícita e persistência)', (
     expect(getNetwork()).toBe('mainnet')
   })
 
-  test('gate de Mainnet: bloqueada até liberação; Testnet sempre liberada', () => {
-    expect(isMainnetBlocked('mainnet')).toBe(true) // MAINNET_READY = false
-    expect(isMainnetBlocked('testnet')).toBe(false)
+  test('Mainnet é operacional: mapeia para a chain Arc correta, sem gate artificial', () => {
+    // Não existe mais MAINNET_READY/isMainnetBlocked: Mainnet deve ser executável.
+    expect(arcGatewayKeyOf('mainnet')).toBe('Arc')
+    expect(arcGatewayKeyOf('testnet')).toBe('Arc_Testnet')
     expect(isValidNetwork('mainnet')).toBe(true)
     expect(isValidNetwork('testnet')).toBe(true)
     expect(isValidNetwork('foo')).toBe(false)
