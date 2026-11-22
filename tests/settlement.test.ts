@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canTransition, classifyVerification, isTerminalStatus, PAYMENT_STATUSES } from '../src/lib/accounting/settlement'
 import { isHexHash, matchTransfer, verifyUsdcReceipt } from '../src/lib/accounting/verify'
-import { allocationAmount, gatewayWalletForChain, reconcileTreasuryOp } from '../src/lib/settlement-service'
+import { allocationAmount, gatewayWalletForChain, planAllocation, reconcileTreasuryOp } from '../src/lib/settlement-service'
 import { backoffDelay, isAutoReconcilable } from '../src/lib/reconciliation'
 import { emptyLedger } from '../src/lib/accounting/engine'
 import { recordFxRate } from '../src/lib/accounting/reviews'
@@ -150,6 +150,25 @@ describe('verificação de crédito no Gateway (depósito)', () => {
 
   test('chain desconhecida não resolve GatewayWallet', () => {
     expect(gatewayWalletForChain(99999999)).toBeUndefined()
+  })
+})
+
+describe('plano de alocação exata (partial settlement)', () => {
+  test('300 sobre 1000 → parcial, sem excesso', () => {
+    expect(planAllocation(300, 1000)).toEqual({ amount: 300, excess: 0, accountingStatus: 'partially_settled' })
+  })
+
+  test('1000 sobre 1000 → liquidado, sem excesso', () => {
+    expect(planAllocation(1000, 1000)).toEqual({ amount: 1000, excess: 0, accountingStatus: 'settled' })
+  })
+
+  test('1300 sobre 1000 → aloca 1000 e preserva 300 de excesso (nunca descarta)', () => {
+    expect(planAllocation(1300, 1000)).toEqual({ amount: 1000, excess: 300, accountingStatus: 'settled' })
+  })
+
+  test('pagamento final completa a obrigação (700 + 300)', () => {
+    // Obrigação 1000; já pago 700; saldo em aberto 300; pagamento verificado 300.
+    expect(planAllocation(300, 300)).toEqual({ amount: 300, excess: 0, accountingStatus: 'settled' })
   })
 })
 

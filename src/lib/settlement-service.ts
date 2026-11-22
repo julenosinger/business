@@ -71,6 +71,21 @@ export async function reconcileTreasuryOp(op: TreasuryOp): Promise<ReconcileOutc
 
 export type AllocationResult = { ok: true; amount: number } | { ok: false; reason: 'fx_required' | 'invalid_amount' | 'unknown_currency' }
 
+export interface AllocationPlan {
+  /** Valor efetivamente alocado (min(valor verificável, saldo em aberto)). */
+  amount: number
+  /** Excesso quando o pagamento supera o saldo em aberto (nunca descartado silenciosamente). */
+  excess: number
+  accountingStatus: 'settled' | 'partially_settled'
+}
+
+/** Plano de alocação exata: nunca aloca mais que o saldo em aberto; excesso vira não-alocado. */
+export function planAllocation(allocated: number, outstanding: number): AllocationPlan {
+  const amount = Math.min(allocated, outstanding)
+  const excess = allocated > outstanding ? allocated - outstanding : 0
+  return { amount, excess, accountingStatus: amount < outstanding ? 'partially_settled' : 'settled' }
+}
+
 /**
  * Converte o valor USDC verificado em unidades menores para a moeda da conta.
  * - Moeda USDC: 1:1 (exato).

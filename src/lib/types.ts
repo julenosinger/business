@@ -128,6 +128,10 @@ export interface TreasuryOp {
   status?: TreasuryOpStatus
   /** Estado contábil (separado do on-chain): settled / partially_settled / requires_review / unallocated. */
   accountingStatus?: AccountingStatus
+  /** Valor (na moeda da conta) efetivamente alocado a esta obrigação. */
+  allocatedAmount?: number
+  /** Excesso não alocado (na moeda da conta) quando o pagamento supera o saldo em aberto. */
+  unallocatedAmount?: number
   /** Quando a liquidação foi confirmada (verificada on-chain). */
   settledAt?: string
   /** Id da liquidação (AccountSettlement) criada ao confirmar. */

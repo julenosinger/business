@@ -35,7 +35,7 @@ import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
-import { reconcileTreasuryOp, allocationAmount } from './settlement-service'
+import { reconcileTreasuryOp, allocationAmount, planAllocation } from './settlement-service'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -133,6 +133,8 @@ export type LedgerResult<T> = { ok: true; value: T } | { ok: false; errors: Post
 
 export type VerifyOutcome = { ok: true; status: TreasuryOpStatus } | { ok: false; error: 'not_found' }
 
+export type AccountingOutcome = { ok: true; status: AccountingStatus } | { ok: false; error: 'not_found' | 'not_confirmed' }
+
 export interface SaleInput {
   customerId?: string
   method: PayMethod
@@ -200,6 +202,8 @@ export interface Store {
   addTreasuryOp: (op: Omit<TreasuryOp, 'id' | 'date'>) => void
   /** Verifica a liquidação de uma operação de tesouraria e, se confirmada, baixa a conta uma única vez. */
   verifyAndSettle: (opId: string) => Promise<VerifyOutcome>
+  /** Reconcilia APENAS a contabilidade de uma operação já confirmada on-chain (sem re-verificar nem reenviar). */
+  reconcileAccounting: (opId: string) => AccountingOutcome
   createShipment: (input: logistics.ShipmentInput) => LogisticsResult<{ id: string }>
   updateShipment: (id: string, input: logistics.ShipmentInput) => LogisticsResult<{ changed: string[] }>
   transitionShipment: (id: string, to: ShipmentStatus, opts?: logistics.TransitionOptions) => LogisticsResult<{ status: ShipmentStatus }>
@@ -324,6 +328,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...d,
         entries: [entry, ...d.entries],
         accounts: d.accounts.map((a) => (a.id === id ? { ...a, settlements, status: fullyPaid ? 'paid' : 'open', paidAt: fullyPaid ? date : undefined, treasuryTx: treasuryTx ?? a.treasuryTx } : a)),
+      }
+    }
+
+    /**
+     * Aplica a alocação contábil de uma operação JÁ confirmada on-chain (idempotente).
+     * - Depósito (sem `accountId`): só marca o crédito confirmado (sem obrigação).
+     * - Pagamento (com `accountId`): baixa exatamente o valor verificado (parcial), com moeda/FX da conta.
+     * Nunca reenvia transação; só posta contabilidade.
+     */
+    const applyConfirmedAccounting = (d: AppData, opId: string): AppData => {
+      const cur = d.treasuryOps.find((o) => o.id === opId)
+      if (!cur) return d
+      if (!cur.accountId) {
+        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', settledAt: new Date().toISOString() } : o)) }
+      }
+      const acc = d.accounts.find((a) => a.id === cur.accountId)
+      if (!acc || acc.status !== 'open') {
+        // Obrigação já liquidada/ausente: só confirma o op (não baixa de novo).
+        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', settledAt: new Date().toISOString(), accountingStatus: 'settled' as const } : o)) }
+      }
+      const alloc = allocationAmount(d.ledger, acc.currency, cur.amount, cur.date.slice(0, 10))
+      if (!alloc.ok) {
+        // Preserva a confirmação on-chain; alocação contábil fica para revisão.
+        return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed', accountingStatus: 'requires_review' as const, reviewReason: alloc.reason } : o)) }
+      }
+      const plan = planAllocation(alloc.amount, accountOutstanding(acc))
+      let next = d
+      if (plan.amount > 0) next = settle(next, cur.accountId, plan.amount, cur.explorerUrl, true)
+      return {
+        ...next,
+        treasuryOps: next.treasuryOps.map((o) =>
+          o.id === opId
+            ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString(), accountingStatus: plan.accountingStatus, allocatedAmount: plan.amount, ...(plan.excess > 0 ? { unallocatedAmount: plan.excess } : {}) }
+            : o,
+        ),
       }
     }
 
@@ -698,30 +737,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const cur = d.treasuryOps.find((o) => o.id === opId)
             if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
             if (finalStatus !== 'confirmed') {
-              // Blockchain pendente/ambígua/falhou: sem alocação contábil.
               return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: finalStatus, accountingStatus: 'unallocated' as const } : o)) }
             }
-            // Blockchain confirmado. A alocação contábil depende da MOEDA DA CONTA (não da configuração global).
-            const accCurrency = cur.accountId ? d.accounts.find((a) => a.id === cur.accountId)?.currency : undefined
-            const fresh = allocationAmount(d.ledger, accCurrency, cur.amount, cur.date.slice(0, 10))
-            if (!fresh.ok) {
-              // Preserva a confirmação on-chain; alocação contábil fica para revisão (ex.: FX ausente, moeda desconhecida).
-              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, accountingStatus: 'requires_review' as const, reviewReason: fresh.reason } : o)) }
-            }
-            let next: AppData = { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString() } : o)) }
-            let accountingStatus: AccountingStatus = 'settled'
-            if (cur.accountId) {
-              const acc = next.accounts.find((a) => a.id === cur.accountId)
-              if (acc && acc.status === 'open') {
-                const outstanding = accountOutstanding(acc)
-                const amount = Math.min(fresh.amount, outstanding)
-                if (amount > 0) next = settle(next, cur.accountId, amount, cur.explorerUrl, true)
-                accountingStatus = amount < outstanding ? 'partially_settled' : 'settled'
-              }
-            }
-            return { ...next, treasuryOps: next.treasuryOps.map((o) => (o.id === opId ? { ...o, accountingStatus } : o)) }
+            // Confirmado on-chain: aplica a alocação contábil (ou só confirma o crédito, para depósito).
+            return applyConfirmedAccounting(d, opId)
           })
           return { ok: true, status: finalStatus }
+        } finally {
+          inflight.delete(opId)
+        }
+      },
+      reconcileAccounting: (opId) => {
+        const op = data.treasuryOps.find((o) => o.id === opId)
+        if (!op) return { ok: false, error: 'not_found' as const }
+        if (op.status !== 'confirmed') return { ok: false, error: 'not_confirmed' as const }
+        // Já liquidado (total ou parcial): idempotente, não realoca.
+        if (op.accountingStatus === 'settled' || op.accountingStatus === 'partially_settled') return { ok: true, status: op.accountingStatus }
+        if (inflight.has(opId)) return { ok: true, status: op.accountingStatus ?? 'requires_review' }
+        inflight.add(opId)
+        try {
+          // Resultado determinístico a partir do snapshot atual (nunca reenvia transação).
+          const preview = applyConfirmedAccounting(data, opId)
+          const outcome: AccountingStatus = preview.treasuryOps.find((o) => o.id === opId)?.accountingStatus ?? 'requires_review'
+          setData((d) => {
+            const cur = d.treasuryOps.find((o) => o.id === opId)
+            if (!cur || cur.status !== 'confirmed') return d
+            if (cur.accountingStatus === 'settled' || cur.accountingStatus === 'partially_settled') return d
+            return applyConfirmedAccounting(d, opId)
+          })
+          return { ok: true, status: outcome }
         } finally {
           inflight.delete(opId)
         }

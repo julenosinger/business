@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowRight, Copy, ExternalLink, Layers, ListChecks, ShieldCheck } from 'lucide-react'
+import { ArrowRight, BookCheck, Copy, ExternalLink, Layers, ListChecks, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
@@ -52,7 +52,7 @@ function StatusBadge({ op }: { op: TreasuryOp }) {
   return <Badge tone="neutral">{t('Pendente', 'Pending')}</Badge>
 }
 
-function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp) => void | Promise<void> }) {
+function Actions({ op, onVerify, onReconcileAccounting }: { op: TreasuryOp; onVerify?: (op: TreasuryOp) => void | Promise<void>; onReconcileAccounting?: (op: TreasuryOp) => void | Promise<void> }) {
   return (
     <span className="flex items-center gap-0.5">
       {op.txHash && (op.status ?? 'pending') !== 'confirmed' && (op.status ?? 'pending') !== 'failed' && onVerify ? (
@@ -61,6 +61,14 @@ function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp)
           className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-strong"
         >
           <ShieldCheck size={14} /> {t('Verificar', 'Verify')}
+        </button>
+      ) : null}
+      {op.status === 'confirmed' && op.accountingStatus === 'requires_review' && onReconcileAccounting ? (
+        <button
+          onClick={() => void onReconcileAccounting(op)}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-strong"
+        >
+          <BookCheck size={14} /> {t('Reconciliar contabilidade', 'Reconcile accounting')}
         </button>
       ) : null}
       {op.txHash ? (
@@ -93,7 +101,7 @@ function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp)
 }
 
 export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string }) {
-  const { verifyAndSettle } = useStore()
+  const { verifyAndSettle, reconcileAccounting } = useStore()
   const [shown, setShown] = useState(PAGE)
   const list = ops.slice(0, shown)
 
@@ -103,6 +111,13 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
     else if (r.status === 'confirmed') toast.success(op.accountId ? t('Liquidação verificada e conta baixada.', 'Settlement verified and bill settled.') : t('Liquidação verificada.', 'Settlement verified.'))
     else if (r.status === 'failed') toast.error(t('Transação falhou na rede.', 'Transaction failed on-chain.'))
     else toast.warning(t('Ainda sem confirmação: mantida como pendente/revisão.', 'Not confirmed yet: kept pending/review.'))
+  }
+
+  const reconcile = (op: TreasuryOp) => {
+    const r = reconcileAccounting(op.id)
+    if (!r.ok) toast.error(r.error === 'not_confirmed' ? t('A liquidação on-chain ainda não está confirmada.', 'On-chain settlement is not confirmed yet.') : t('Operação não encontrada.', 'Operation not found.'))
+    else if (r.status === 'settled' || r.status === 'partially_settled') toast.success(t('Contabilidade reconciliada.', 'Accounting reconciled.'))
+    else toast.warning(t('Ainda requer revisão (ex.: moeda ou câmbio ausentes).', 'Still requires review (e.g. missing currency or FX).'))
   }
   const head = (
     <tr className="text-left text-[12px] text-muted">
@@ -157,7 +172,7 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
                 <td className="py-3 pl-2 pr-5">
                   <div className="flex flex-wrap items-center gap-1">
                     <StatusBadge op={op} />
-                    <Actions op={op} onVerify={verify} />
+                    <Actions op={op} onVerify={verify} onReconcileAccounting={reconcile} />
                   </div>
                 </td>
               </tr>
@@ -190,7 +205,7 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
                 <span className="num text-xs text-muted">{when(op.date)}</span>
                 <span className="flex items-center gap-1">
                   <StatusBadge op={op} />
-                  <Actions op={op} onVerify={verify} />
+                  <Actions op={op} onVerify={verify} onReconcileAccounting={reconcile} />
                 </span>
               </div>
             </li>
