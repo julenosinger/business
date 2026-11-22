@@ -10,11 +10,19 @@
 import { gatewayChainEnv, type NetworkId } from './network'
 import type { PaymentRequest, TreasuryOp } from './types'
 
-export type OpEnv = 'live' | 'test' | 'unknown'
+export type OpEnv = 'live' | 'test' | 'unknown' | 'invalid_environment'
 
-/** Ambiente de uma operação de tesouraria, derivado da rede persistida (origem, depois destino). */
+/**
+ * Ambiente de uma operação de tesouraria, derivado da rede persistida.
+ * - Origem/destino conhecidos e compatíveis → o ambiente.
+ * - Origem e destino conhecidos mas de ambientes diferentes → `invalid_environment` (nunca escolher um deles).
+ * - Sem rede identificável → `unknown`.
+ */
 export function treasuryOpEnv(op: Pick<TreasuryOp, 'chain' | 'destChain'>): OpEnv {
-  return gatewayChainEnv(op.chain) ?? (op.destChain ? gatewayChainEnv(op.destChain) : undefined) ?? 'unknown'
+  const src = gatewayChainEnv(op.chain)
+  const dst = op.destChain ? gatewayChainEnv(op.destChain) : undefined
+  if (src && dst && src !== dst) return 'invalid_environment'
+  return src ?? dst ?? 'unknown'
 }
 
 /** Operações da tesouraria filtradas pelo ambiente (Mainnet = 'live', Testnet = 'test'). */

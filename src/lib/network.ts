@@ -82,6 +82,13 @@ const GATEWAY_KEY_ENVS: Record<string, 'live' | 'test'> = {
   Optimism: 'live',
   Avalanche: 'live',
   Polygon: 'live',
+  // Redes adicionais do enum oficial do SDK, reconhecidas para CLASSIFICAÇÃO de histórico
+  // (não habilitam depósito/envio/mint automaticamente).
+  Sei: 'live',
+  Sonic: 'live',
+  HyperEVM: 'live',
+  Unichain: 'live',
+  World_Chain: 'live',
   Arc_Testnet: 'test',
   Base_Sepolia: 'test',
   Ethereum_Sepolia: 'test',
@@ -89,6 +96,11 @@ const GATEWAY_KEY_ENVS: Record<string, 'live' | 'test'> = {
   Optimism_Sepolia: 'test',
   Avalanche_Fuji: 'test',
   Polygon_Amoy_Testnet: 'test',
+  Sei_Testnet: 'test',
+  Sonic_Testnet: 'test',
+  HyperEVM_Testnet: 'test',
+  Unichain_Sepolia: 'test',
+  World_Chain_Sepolia: 'test',
 }
 
 export const gatewayChainEnv = (key: string): 'live' | 'test' | undefined => GATEWAY_KEY_ENVS[key]

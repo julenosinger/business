@@ -140,7 +140,7 @@ export function Treasury() {
         <div className="grid items-stretch gap-4 lg:grid-cols-2 sm:gap-5">
           <PaymentQueue queue={queue} picked={picked} setPicked={setPicked} isConnected={isConnected} rate={rate} onPay={(id) => open('spend', id)} onBatch={setBatchIds} />
           <RequestsCard
-            requests={data.requests}
+            requests={visibleRequests}
             company={data.settings.company}
             shareBase={shareBase}
             enabled={isConnected}

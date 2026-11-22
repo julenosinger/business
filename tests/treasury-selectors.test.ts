@@ -40,6 +40,25 @@ describe('isolamento de histórico da tesouraria', () => {
     expect(treasuryOpsForNetwork(ops, 'testnet')).toHaveLength(0)
   })
 
+  test('origem e destino de ambientes diferentes → invalid_environment', () => {
+    expect(treasuryOpEnv({ chain: 'Arc', destChain: 'Arc_Testnet' })).toBe('invalid_environment')
+    expect(treasuryOpEnv({ chain: 'Arc_Testnet', destChain: 'Base' })).toBe('invalid_environment')
+    // Não vaza para nenhum ambiente.
+    expect(treasuryOpsForNetwork([{ ...op('Arc'), destChain: 'Arc_Testnet' }], 'mainnet')).toHaveLength(0)
+    expect(treasuryOpsForNetwork([{ ...op('Arc'), destChain: 'Arc_Testnet' }], 'testnet')).toHaveLength(0)
+  })
+
+  test('redes adicionais são reconhecidas para classificação (sem habilitar execução)', () => {
+    expect(treasuryOpEnv(op('Sei'))).toBe('live')
+    expect(treasuryOpEnv(op('Sonic'))).toBe('live')
+    expect(treasuryOpEnv(op('HyperEVM'))).toBe('live')
+    expect(treasuryOpEnv(op('Unichain'))).toBe('live')
+    expect(treasuryOpEnv(op('World_Chain'))).toBe('live')
+    expect(treasuryOpEnv(op('Sei_Testnet'))).toBe('test')
+    expect(treasuryOpEnv(op('Unichain_Sepolia'))).toBe('test')
+    expect(treasuryOpEnv(op('World_Chain_Sepolia'))).toBe('test')
+  })
+
   test('requestsForNetwork filtra cobranças por chainKey persistida', () => {
     const rs = [req('Arc'), req('Arc_Testnet'), req('Base')]
     expect(requestsForNetwork(rs, 'mainnet').map((r) => r.chainKey)).toEqual(['Arc', 'Base'])
