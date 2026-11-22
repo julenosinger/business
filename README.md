@@ -7,7 +7,7 @@ Built with [Arc Studio](https://studio.arc.io)
 ## Features
 
 - Dashboard with revenue, profit, expenses, stock value, cash flow and upcoming obligations
-- Accounting: cash book and a simplified income statement (DRE)
+- Accounting: cash book and a simplified income statement (DRE), plus a double-entry General Ledger, configurable Chart of Accounts and a Reconciliation Center, with optional automatic posting from sales, payables, purchases, payroll and treasury (see `docs/accounting-engine.md`)
 - Accounts payable and receivable with due dates and overdue tracking
 - Sales and point of sale, with automatic stock and cash updates
 - Stock control with minimum levels and movements

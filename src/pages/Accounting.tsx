@@ -8,6 +8,9 @@ import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
+import { GeneralLedgerTab } from '@/components/accounting/GeneralLedgerTab'
+import { ChartOfAccountsTab } from '@/components/accounting/ChartOfAccountsTab'
+import { ReconciliationTab } from '@/components/accounting/ReconciliationTab'
 import { useStore } from '@/lib/store'
 import { expensesByCategory, inPeriod, kpis, monthPeriod, type Period } from '@/lib/selectors'
 import { fmtDate, downloadCsv, iso, money, parseNum, today } from '@/lib/format'
@@ -117,9 +120,12 @@ function DreRow({ label, value, strong, tone }: { label: string; value: number; 
   )
 }
 
+type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliation'
+
 export function Accounting() {
   const { data, removeEntry } = useStore()
   const [range, setRange] = useState<Range>('month')
+  const [tab, setTab] = useState<AccountingTab>('overview')
   const [target, setTarget] = useState<Entry | 'new' | null>(null)
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all')
   const [limit, setLimit] = useState(30)
@@ -168,14 +174,34 @@ export function Accounting() {
         title={t('Contabilidade', 'Accounting')}
         subtitle={t('Livro-caixa com entradas e saídas, e o resultado do período (DRE simplificada).', 'Cash book with inflows and outflows, plus the period result (simplified income statement).')}
         actions={
-          <>
-            <PillTabs label={t('Período', 'Period')} value={range} onChange={pickRange} items={rangeTabs()} />
-            <Button onClick={() => setTarget('new')}>
-              <Plus size={16} /> {t('Lançamento', 'Entry')}
-            </Button>
-          </>
+          tab === 'overview' || tab === 'cashbook' ? (
+            <>
+              <PillTabs label={t('Período', 'Period')} value={range} onChange={pickRange} items={rangeTabs()} />
+              <Button onClick={() => setTarget('new')}>
+                <Plus size={16} /> {t('Lançamento', 'Entry')}
+              </Button>
+            </>
+          ) : undefined
         }
       />
+
+      <div className="overflow-x-auto">
+        <PillTabs
+          label={t('Seções da contabilidade', 'Accounting sections')}
+          value={tab}
+          onChange={setTab}
+          items={[
+            { id: 'overview', label: t('Visão geral', 'Overview') },
+            { id: 'cashbook', label: t('Livro-Caixa', 'Cash Book') },
+            { id: 'ledger', label: t('Razão Geral', 'General Ledger') },
+            { id: 'chart', label: t('Plano de contas', 'Chart of Accounts') },
+            { id: 'reconciliation', label: t('Conciliação', 'Reconciliation') },
+          ]}
+        />
+      </div>
+
+      {tab === 'overview' ? (
+        <>
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="ok" icon={<TrendingUp size={20} />} label={t('Receita bruta', 'Gross revenue')} value={money(k.revenue)} sub={`${t('Vendas', 'Sales')} ${money(salesRev)}`} />
@@ -246,6 +272,10 @@ export function Accounting() {
             </TCard>
         </div>
 
+        </>
+      ) : null}
+
+      {tab === 'cashbook' ? (
       <TCard className="overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:px-5">
             <PanelTitle
@@ -343,6 +373,11 @@ export function Accounting() {
             </>
           )}
       </TCard>
+      ) : null}
+
+      {tab === 'ledger' ? <GeneralLedgerTab /> : null}
+      {tab === 'chart' ? <ChartOfAccountsTab /> : null}
+      {tab === 'reconciliation' ? <ReconciliationTab /> : null}
 
       <EntryModal target={target} onClose={() => setTarget(null)} />
     </div>

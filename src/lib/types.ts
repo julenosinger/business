@@ -446,6 +446,8 @@ export interface Shipment {
   updatedAt: string
 }
 
+import type { LedgerState } from './accounting/types'
+
 export interface AppData {
   products: Product[]
   moves: StockMove[]
@@ -461,6 +463,8 @@ export interface AppData {
   returns: ReturnAuthorization[]
   purchases: PurchaseRef[]
   receipts: GoodsReceipt[]
+  /** Razão contábil (motor de partida dobrada). Ver docs/accounting-engine.md. */
+  ledger: LedgerState
   settings: Settings
 }
 

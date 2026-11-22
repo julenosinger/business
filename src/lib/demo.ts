@@ -1,3 +1,4 @@
+import { emptyLedger } from './accounting/engine'
 import {
   CAT_PAYROLL,
   CAT_PURCHASE,
@@ -182,6 +183,7 @@ export function buildDemoData(currency: CurrencyCode = 'USDC'): AppData {
     returns: [],
     purchases: [],
     receipts: [],
+    ledger: emptyLedger(),
     settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency, usdcRate: null, approvalLimit: null },
   }
   return { ...base, ...demoShipments(base, now) }

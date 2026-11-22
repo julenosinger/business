@@ -1,5 +1,6 @@
 import type { AppData } from './types'
 import { emptyData } from './store'
+import { normalizeLedger } from './accounting/engine'
 import { iso } from './format'
 import { t } from './i18n'
 
@@ -65,6 +66,9 @@ export function parseBackup(text: string): ParseResult {
   }
   if (body.settings && typeof body.settings === 'object') {
     next.settings = { ...base.settings, ...(body.settings as Partial<AppData['settings']>) }
+  }
+  if (body.ledger && typeof body.ledger === 'object') {
+    next.ledger = normalizeLedger(body.ledger)
   }
   if (!LIST_KEYS.some((k) => body[k] !== undefined)) {
     return { ok: false, error: t('Arquivo de backup não reconhecido.', 'Unrecognized backup file.') }

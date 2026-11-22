@@ -27,6 +27,13 @@ import * as freight from './freight'
 import * as international from './international'
 import * as returns from './returns'
 import { buildDemoData } from './demo'
+import { emptyLedger, normalizeLedger, setAdapterFlag, type AdapterFlagName, type Ctx, type OpResult } from './accounting/engine'
+import { autoPost } from './accounting/autopost'
+import * as chartOps from './accounting/chart-ops'
+import * as reviewOps from './accounting/reviews'
+import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
+import type { LedgerState, PostErrorCode } from './accounting/types'
+import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
 import { t } from './i18n'
 
 const STORAGE_KEY = 'gbos:v1'
@@ -42,6 +49,20 @@ export const emptySettings = (): Settings => ({
   usdcRate: null,
   approvalLimit: null,
 })
+
+/** Ator e contexto de lançamento no razão: o proprietário cadastrado nas Configurações (usuário humano). */
+function ledgerCtx(d: AppData): SyncCtx {
+  return { now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' }, currency: d.settings.currency }
+}
+
+/** Executa a sincronização com o razão sem nunca propagar exceção: o Livro-Caixa tem prioridade. */
+export function guardLedger(d: AppData, run: (ctx: SyncCtx) => AppData['ledger']): AppData['ledger'] {
+  try {
+    return run(ledgerCtx(d))
+  } catch {
+    return d.ledger
+  }
+}
 
 export function emptyData(): AppData {
   return {
@@ -59,6 +80,7 @@ export function emptyData(): AppData {
   returns: [],
   purchases: [],
   receipts: [],
+    ledger: emptyLedger(),
     settings: emptySettings(),
   }
 }
@@ -69,11 +91,13 @@ function load(): AppData {
     if (!raw) return emptyData()
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
-    return { ...base, ...parsed, settings: { ...base.settings, ...(parsed.settings ?? {}) } }
+    return { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
   } catch {
     return emptyData()
   }
 }
+
+export type LedgerResult<T> = { ok: true; value: T } | { ok: false; errors: PostErrorCode[] }
 
 export interface SaleInput {
   customerId?: string
@@ -104,6 +128,17 @@ export interface Store {
   updateContact: (id: string, patch: Partial<Contact>) => void
   removeContact: (id: string) => void
   addEntry: (e: Omit<Entry, 'id'>) => void
+  /** Liga/desliga um adaptador do razão contábil. Cada um só trata registros criados DEPOIS de ligado. */
+  setLedgerAdapter: (name: AdapterFlagName, on: boolean) => void
+  createLedgerAccount: (input: chartOps.AccountInput) => LedgerResult<{ code: string }>
+  updateLedgerAccount: (code: string, patch: chartOps.AccountPatch) => LedgerResult<{ code: string }>
+  setLedgerAccountActive: (code: string, active: boolean) => LedgerResult<{ code: string }>
+  deleteLedgerAccount: (code: string) => LedgerResult<{ code: string }>
+  /** Decisão humana na conciliação (confirmar/falhar uma liquidação pendente com evidência, ou dispensar um item). */
+  reviewLedgerItem: (input: reviewOps.ReviewInput) => LedgerResult<{ reviewId: string; entryId: string | null }>
+  recordLedgerFxRate: (input: reviewOps.FxInput) => LedgerResult<{ id: string }>
+  registerLedgerFee: (input: FeeInput) => LedgerResult<{ feeId: string; duplicate: boolean; entryId: string | null }>
+  confirmLedgerFee: (dedupeKey: string, patch: { amountMinor?: string; relatedRef?: string; accountingDate: string }) => LedgerResult<{ entryId: string | null }>
   updateEntry: (id: string, patch: Partial<Entry>) => void
   removeEntry: (id: string) => void
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
@@ -173,12 +208,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const store = useMemo<Store>(() => {
-    const set = (fn: (d: AppData) => AppData) => setData(fn)
+    /**
+     * Toda mudança passa por aqui: o razão contábil acompanha na MESMA atualização de estado (atômico na memória).
+     * `auto: false` é só para substituição total dos dados (backup, demonstração, apagar tudo), que não gera lançamentos.
+     */
+    const apply = (fn: (d: AppData) => AppData, auto = true): void =>
+      setData((d) => {
+        const n = fn(d)
+        if (!auto || n === d) return n
+        return autoPost(d, n, { today: today(), actorId: n.settings.owner.trim() || 'local-user', now: new Date().toISOString() })
+      })
+    const set = (fn: (d: AppData) => AppData) => apply(fn)
+
+    /** Operações do razão (plano de contas, revisões, câmbio, taxas): valida agora e reaplica no estado mais recente. */
+    const runLedger = <T,>(op: (l: LedgerState, ctx: Ctx) => OpResult<T>): LedgerResult<T> => {
+      const mk = (d: AppData): Ctx => ({ now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' } })
+      const out = op(data.ledger, mk(data))
+      if (!out.ok) {
+        setData((d) => ({ ...d, ledger: op(d.ledger, mk(d)).ledger }))
+        return { ok: false, errors: out.errors }
+      }
+      setData((d) => {
+        const again = op(d.ledger, mk(d))
+        return { ...d, ledger: again.ledger }
+      })
+      return { ok: true, value: out.value }
+    }
 
     /** Aplica uma mudança destrutiva e oferece desfazer por alguns segundos. */
-    const undoable = (fn: (d: AppData) => AppData, message: string) => {
+    const undoable = (fn: (d: AppData) => AppData, message: string, auto = true) => {
       const snapshot = data
-      setData(fn)
+      apply(fn, auto)
       toast(message, {
         duration: 8000,
         action: { label: t('Desfazer', 'Undo'), onClick: () => setData(snapshot) },
@@ -192,7 +252,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString()
       const out = op(data, now)
       if (!out.ok) return out
-      setData((d) => {
+      apply((d) => {
         const again = op(d, now)
         return again.ok ? again.data : d
       })
@@ -242,9 +302,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addContact: (c) => set((d) => ({ ...d, contacts: [{ ...c, id: uid() }, ...d.contacts] })),
       updateContact: (id, patch) => set((d) => ({ ...d, contacts: d.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) })),
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
-      addEntry: (e) => set((d) => ({ ...d, entries: [{ ...e, id: uid() }, ...d.entries] })),
-      updateEntry: (id, patch) => set((d) => ({ ...d, entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
-      removeEntry: (id) => undoable((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }), t('Lançamento removido.', 'Entry removed.')),
+      // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
+      // (atômico dentro da memória) e nunca derruba o lançamento manual: erros viram eventos rejeitados na auditoria.
+      addEntry: (e) =>
+        set((d) => {
+          const entry = { ...e, id: uid() }
+          return { ...d, entries: [entry, ...d.entries], ledger: guardLedger(d, (ctx) => syncAdded(d.ledger, entry, ctx)) }
+        }),
+      createLedgerAccount: (input) => runLedger((l, ctx) => chartOps.createAccount(l, input, ctx)),
+      updateLedgerAccount: (code, patch) => runLedger((l, ctx) => chartOps.updateAccount(l, code, patch, ctx)),
+      setLedgerAccountActive: (code, active) => runLedger((l, ctx) => chartOps.setAccountActive(l, code, active, ctx)),
+      deleteLedgerAccount: (code) => runLedger((l, ctx) => chartOps.deleteAccount(l, code, ctx)),
+      reviewLedgerItem: (input) => runLedger((l, ctx) => reviewOps.recordReview(l, input, ctx)),
+      recordLedgerFxRate: (input) => runLedger((l, ctx) => reviewOps.recordFxRate(l, input, ctx)),
+      registerLedgerFee: (input) => runLedger((l, ctx) => registerFee(l, input, ctx)),
+      confirmLedgerFee: (dedupeKey, patch) => runLedger((l, ctx) => confirmFee(l, dedupeKey, patch, ctx)),
+      setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
+      updateEntry: (id, patch) =>
+        set((d) => {
+          const before = d.entries.find((e) => e.id === id)
+          if (!before) return d
+          const after = { ...before, ...patch }
+          return { ...d, entries: d.entries.map((e) => (e.id === id ? after : e)), ledger: guardLedger(d, (ctx) => syncUpdated(d.ledger, before, after, ctx)) }
+        }),
+      removeEntry: (id) =>
+        undoable((d) => {
+          const gone = d.entries.find((e) => e.id === id)
+          return { ...d, entries: d.entries.filter((e) => e.id !== id), ledger: gone ? guardLedger(d, (ctx) => syncRemoved(d.ledger, gone, ctx)) : d.ledger }
+        }, t('Lançamento removido.', 'Entry removed.')),
       addAccount: (a) => {
         const id = uid()
         set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual' }, ...d.accounts] }))
@@ -414,7 +499,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .filter((e) => e.active)
             .filter((e) => !d.accounts.some((a) => a.source === 'payroll' && a.employeeId === e.id && a.description.endsWith(month)))
         const created = pending(data).length
-        setData((d) => {
+        apply((d) => {
           const accs: Account[] = pending(d).map((e) => ({
             id: uid(),
             kind: 'payable',
@@ -495,13 +580,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString() }, ...d.treasuryOps] })),
       updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
-      importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.')),
+      importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.'), false),
       loadDemo: () =>
         undoable(
-          (d) => ({ ...buildDemoData(d.settings.currency), settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') } }),
+          (d) => ({
+            ...buildDemoData(d.settings.currency),
+            // Mantém a configuração do razão (plano de contas, flags, regras fiscais); os lançamentos antigos
+            // pertencem aos dados substituídos e saem junto com eles (o Desfazer restaura tudo).
+            ledger: { ...emptyLedger(d.ledger.orgId), flags: d.ledger.flags, chart: d.ledger.chart, categoryMap: d.ledger.categoryMap, taxRules: d.ledger.taxRules, fxRates: d.ledger.fxRates },
+            settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') },
+          }),
           t('Dados de demonstração carregados.', 'Demo data loaded.'),
+          false,
         ),
-      resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.')),
+      resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.'), false),
     }
   }, [data])
 
