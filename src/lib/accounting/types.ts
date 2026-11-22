@@ -1,4 +1,5 @@
 import type { CurrencyCode } from '../types'
+import type { Role } from './auth'
 
 /** Classe contábil da conta. O lado normal é débito para ativo/despesa e crédito para os demais. */
 export type AccountClass = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
@@ -40,6 +41,8 @@ export type ActorKind = 'user' | 'system' | 'agent'
 export interface Actor {
   id: string
   kind: ActorKind
+  /** Papel de autorização. Ausente = `owner` no app de usuário único (comportamento legado). */
+  role?: Role
 }
 
 export type SourceModule = 'cashbook' | 'sales' | 'purchases' | 'payables' | 'receivables' | 'payroll' | 'logistics' | 'treasury' | 'fees' | 'adjustment'
