@@ -16,6 +16,7 @@ import { accountByCode, accountBySubtype, defaultCategoryMap, defaultChart, NORM
 import { isCurrency, minorFromString, parseRate, mulRate } from './money'
 import { FEE_SUBTYPE, isEventType, RULES } from './rules'
 import type {
+  AccountingPeriod,
   Actor,
   ApprovalRequest,
   AuditAction,
@@ -29,6 +30,7 @@ import type {
   JournalEntry,
   JournalLine,
   LedgerState,
+  PeriodStatus,
   PostErrorCode,
   SourceModule,
   TaxRule,
@@ -52,6 +54,7 @@ export function emptyLedger(orgId: string = DEFAULT_ORG): LedgerState {
     approvals: [],
     reviews: [],
     fxRates: [],
+    periods: [],
   }
 }
 
@@ -76,6 +79,7 @@ export function normalizeLedger(raw: Partial<LedgerState> | undefined | null, or
     approvals: Array.isArray(raw.approvals) ? raw.approvals : [],
     reviews: Array.isArray(raw.reviews) ? raw.reviews : [],
     fxRates: Array.isArray(raw.fxRates) ? raw.fxRates : [],
+    periods: Array.isArray(raw.periods) ? raw.periods : [],
   }
 }
 
@@ -104,6 +108,68 @@ const nextSeq = (items: { id: string }[], prefix: string): string => {
 }
 
 const isDate = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Períodos contábeis (fechamento explícito, nunca automático)
+// ---------------------------------------------------------------------------------------------------------------------
+
+const PERIOD_KEY_RE = /^\d{4}-\d{2}$/
+
+/** Chave do mês de uma data contábil (`YYYY-MM-DD` -> `YYYY-MM`). */
+export const periodKeyOf = (date: string): string => date.slice(0, 7)
+
+export const isValidPeriodKey = (key: string): boolean => PERIOD_KEY_RE.test(key)
+
+export const findPeriod = (ledger: LedgerState, key: string): AccountingPeriod | undefined => ledger.periods.find((p) => p.key === key)
+
+export const periodStatusOf = (ledger: LedgerState, key: string): PeriodStatus => findPeriod(ledger, key)?.status ?? 'open'
+
+/** Uma data está em período fechado? (lançamentos bloqueados). */
+export const isDateClosed = (ledger: LedgerState, date: string): boolean => periodStatusOf(ledger, periodKeyOf(date)) === 'closed'
+
+const requireUser = (ctx: Ctx): boolean => ctx.actor.kind === 'user'
+
+/** Move um período para "revisão de fechamento" (não bloqueia lançamentos; é um marco com auditoria). */
+export function setPeriodReview(ledger: LedgerState, key: string, ctx: Ctx): OpResult<{ key: string }> {
+  if (!requireUser(ctx)) return { ok: false, ledger: withAudit(ledger, ctx, 'event.rejected', 'period review denied: actor is not a user'), errors: ['not_authorized'] }
+  if (!isValidPeriodKey(key)) return { ok: false, ledger, errors: ['invalid_period'] }
+  const current = findPeriod(ledger, key)
+  if (current?.status === 'closed') return { ok: false, ledger, errors: ['period_already_closed'] }
+  const period: AccountingPeriod = current ? { ...current, status: 'review' } : { key, status: 'review' }
+  const periods = current ? ledger.periods.map((p) => (p.key === key ? period : p)) : [...ledger.periods, period]
+  return { ok: true, ledger: withAudit({ ...ledger, periods }, ctx, 'period.review', `period ${key} -> review`), value: { key } }
+}
+
+/** Fecha um período. A partir daqui, lançamentos e estornos nesse mês são recusados (com auditoria). */
+export function closePeriod(ledger: LedgerState, key: string, ctx: Ctx): OpResult<{ key: string }> {
+  if (!requireUser(ctx)) return { ok: false, ledger: withAudit(ledger, ctx, 'event.rejected', 'period close denied: actor is not a user'), errors: ['not_authorized'] }
+  if (!isValidPeriodKey(key)) return { ok: false, ledger, errors: ['invalid_period'] }
+  const current = findPeriod(ledger, key)
+  if (current?.status === 'closed') return { ok: true, ledger, value: { key } } // idempotente
+  const period: AccountingPeriod = {
+    ...(current ?? { key }),
+    status: 'closed',
+    closedAt: ctx.now,
+    closedBy: ctx.actor,
+    // Reabertura anterior deixa de valer ao fechar de novo.
+    ...(current ? { reopenReason: undefined, reopenedAt: undefined, reopenedBy: undefined } : {}),
+  }
+  const periods = current ? ledger.periods.map((p) => (p.key === key ? period : p)) : [...ledger.periods, period]
+  return { ok: true, ledger: withAudit({ ...ledger, periods }, ctx, 'period.closed', `period ${key} closed`), value: { key } }
+}
+
+/** Reabre um período fechado, com motivo obrigatório e trilha de auditoria. Único caminho para ajustes em período fechado. */
+export function reopenPeriod(ledger: LedgerState, key: string, reason: string, ctx: Ctx): OpResult<{ key: string }> {
+  if (!requireUser(ctx)) return { ok: false, ledger: withAudit(ledger, ctx, 'event.rejected', 'period reopen denied: actor is not a user'), errors: ['not_authorized'] }
+  if (!isValidPeriodKey(key)) return { ok: false, ledger, errors: ['invalid_period'] }
+  const current = findPeriod(ledger, key)
+  if (!current || current.status !== 'closed') return { ok: false, ledger, errors: ['period_not_closed'] }
+  const why = reason.trim()
+  if (why.length < 3) return { ok: false, ledger, errors: ['reason_required'] }
+  const period: AccountingPeriod = { ...current, status: 'open', reopenReason: why.slice(0, 200), reopenedAt: ctx.now, reopenedBy: ctx.actor }
+  const periods = ledger.periods.map((p) => (p.key === key ? period : p))
+  return { ok: true, ledger: withAudit({ ...ledger, periods }, ctx, 'period.reopened', `period ${key} reopened: ${why}`), value: { key } }
+}
 
 export function withAudit(ledger: LedgerState, ctx: Ctx, action: AuditAction, detail: string, ids: { eventId?: string; entryId?: string } = {}): LedgerState {
   const rec: AuditRecord = { id: nextSeq(ledger.audit, 'AU'), at: ctx.now, actor: ctx.actor, action, orgId: ledger.orgId, detail: detail.slice(0, 300), ...ids }
@@ -156,6 +222,7 @@ function validateDraft(ledger: LedgerState, draft: EventDraft, ctx: Ctx): PostEr
   if (!isEventType(draft.type)) errors.push('unknown_event_type')
   if (!isCurrency(draft.currency)) errors.push('invalid_currency')
   if (!isDate(draft.accountingDate)) errors.push('invalid_date')
+  if (isDate(draft.accountingDate) && isDateClosed(ledger, draft.accountingDate)) errors.push('period_closed')
   const amount = minorFromString(draft.amountMinor)
   if (amount === null || amount <= 0n) errors.push('invalid_amount')
   return errors
@@ -289,6 +356,9 @@ export function reverseEntry(ledger: LedgerState, entryId: string, reason: strin
   if (!original) return { ok: false, ledger, errors: ['not_found'] }
   if (original.reversalOf) return { ok: false, ledger, errors: ['is_reversal'] }
   if (isReversed(ledger, entryId)) return { ok: false, ledger, errors: ['already_reversed'] }
+  if (isDateClosed(ledger, original.accountingDate)) {
+    return { ok: false, ledger: withAudit(ledger, ctx, 'event.rejected', `reversal blocked: period ${periodKeyOf(original.accountingDate)} closed`, { entryId }), errors: ['period_closed'] }
+  }
   const why = reason.trim()
   if (why.length < 3) return { ok: false, ledger, errors: ['reason_required'] }
 

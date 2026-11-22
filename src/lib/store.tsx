@@ -27,7 +27,7 @@ import * as freight from './freight'
 import * as international from './international'
 import * as returns from './returns'
 import { buildDemoData } from './demo'
-import { emptyLedger, normalizeLedger, setAdapterFlag, type AdapterFlagName, type Ctx, type OpResult } from './accounting/engine'
+import { emptyLedger, normalizeLedger, setAdapterFlag, closePeriod, reopenPeriod, setPeriodReview, isDateClosed, type AdapterFlagName, type Ctx, type OpResult } from './accounting/engine'
 import { autoPost } from './accounting/autopost'
 import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
@@ -139,6 +139,10 @@ export interface Store {
   recordLedgerFxRate: (input: reviewOps.FxInput) => LedgerResult<{ id: string }>
   registerLedgerFee: (input: FeeInput) => LedgerResult<{ feeId: string; duplicate: boolean; entryId: string | null }>
   confirmLedgerFee: (dedupeKey: string, patch: { amountMinor?: string; relatedRef?: string; accountingDate: string }) => LedgerResult<{ entryId: string | null }>
+  /** Fechamento de período contábil (bloqueia lançamentos no mês, com auditoria). */
+  closeAccountingPeriod: (key: string) => LedgerResult<{ key: string }>
+  reopenAccountingPeriod: (key: string, reason: string) => LedgerResult<{ key: string }>
+  setAccountingPeriodReview: (key: string) => LedgerResult<{ key: string }>
   updateEntry: (id: string, patch: Partial<Entry>) => void
   removeEntry: (id: string) => void
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
@@ -304,11 +308,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
       // (atômico dentro da memória) e nunca derruba o lançamento manual: erros viram eventos rejeitados na auditoria.
-      addEntry: (e) =>
+      addEntry: (e) => {
+        if (isDateClosed(data.ledger, e.date)) {
+          toast.error(t('Período fechado: este mês está fechado e não aceita novos lançamentos. Reabra o período para lançar.', 'Closed period: this month is closed and does not accept new entries. Reopen the period to post.'))
+          return
+        }
         set((d) => {
           const entry = { ...e, id: uid() }
           return { ...d, entries: [entry, ...d.entries], ledger: guardLedger(d, (ctx) => syncAdded(d.ledger, entry, ctx)) }
-        }),
+        })
+      },
       createLedgerAccount: (input) => runLedger((l, ctx) => chartOps.createAccount(l, input, ctx)),
       updateLedgerAccount: (code, patch) => runLedger((l, ctx) => chartOps.updateAccount(l, code, patch, ctx)),
       setLedgerAccountActive: (code, active) => runLedger((l, ctx) => chartOps.setAccountActive(l, code, active, ctx)),
@@ -317,19 +326,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       recordLedgerFxRate: (input) => runLedger((l, ctx) => reviewOps.recordFxRate(l, input, ctx)),
       registerLedgerFee: (input) => runLedger((l, ctx) => registerFee(l, input, ctx)),
       confirmLedgerFee: (dedupeKey, patch) => runLedger((l, ctx) => confirmFee(l, dedupeKey, patch, ctx)),
+      closeAccountingPeriod: (key) => runLedger((l, ctx) => closePeriod(l, key, ctx)),
+      reopenAccountingPeriod: (key, reason) => runLedger((l, ctx) => reopenPeriod(l, key, reason, ctx)),
+      setAccountingPeriodReview: (key) => runLedger((l, ctx) => setPeriodReview(l, key, ctx)),
       setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
-      updateEntry: (id, patch) =>
+      updateEntry: (id, patch) => {
+        const before = data.entries.find((e) => e.id === id)
+        if (!before) return
+        const after = { ...before, ...patch }
+        const financial = (['type', 'amount', 'date', 'category'] as const).some((k) => before[k] !== after[k])
+        if (financial && (isDateClosed(data.ledger, before.date) || isDateClosed(data.ledger, after.date))) {
+          toast.error(t('Período fechado: edições financeiras neste mês estão bloqueadas. Reabra o período para ajustar.', 'Closed period: financial edits in this month are blocked. Reopen the period to adjust.'))
+          return
+        }
         set((d) => {
-          const before = d.entries.find((e) => e.id === id)
-          if (!before) return d
-          const after = { ...before, ...patch }
-          return { ...d, entries: d.entries.map((e) => (e.id === id ? after : e)), ledger: guardLedger(d, (ctx) => syncUpdated(d.ledger, before, after, ctx)) }
-        }),
-      removeEntry: (id) =>
+          const b = d.entries.find((e) => e.id === id)
+          if (!b) return d
+          const a = { ...b, ...patch }
+          return { ...d, entries: d.entries.map((e) => (e.id === id ? a : e)), ledger: guardLedger(d, (ctx) => syncUpdated(d.ledger, b, a, ctx)) }
+        })
+      },
+      removeEntry: (id) => {
+        const gone = data.entries.find((e) => e.id === id)
+        if (gone && isDateClosed(data.ledger, gone.date)) {
+          toast.error(t('Período fechado: este lançamento não pode ser removido. Reabra o período para ajustar.', 'Closed period: this entry cannot be removed. Reopen the period to adjust.'))
+          return
+        }
         undoable((d) => {
-          const gone = d.entries.find((e) => e.id === id)
-          return { ...d, entries: d.entries.filter((e) => e.id !== id), ledger: gone ? guardLedger(d, (ctx) => syncRemoved(d.ledger, gone, ctx)) : d.ledger }
-        }, t('Lançamento removido.', 'Entry removed.')),
+          const g = d.entries.find((e) => e.id === id)
+          return { ...d, entries: d.entries.filter((e) => e.id !== id), ledger: g ? guardLedger(d, (ctx) => syncRemoved(d.ledger, g, ctx)) : d.ledger }
+        }, t('Lançamento removido.', 'Entry removed.'))
+      },
       addAccount: (a) => {
         const id = uid()
         set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual' }, ...d.accounts] }))

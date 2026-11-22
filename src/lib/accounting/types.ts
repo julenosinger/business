@@ -141,6 +141,10 @@ export type AuditAction =
   | 'chart.changed'
   | 'review.recorded'
   | 'fx.recorded'
+  | 'period.review'
+  | 'period.closed'
+  | 'period.reopened'
+  | 'period.adjusted'
 
 export interface AuditRecord {
   id: string
@@ -243,6 +247,23 @@ export interface StoredFxRate {
   recordedBy: Actor
 }
 
+/** Situação de um período contábil. Só `closed` bloqueia lançamentos; `review` é um marco informativo de fechamento. */
+export type PeriodStatus = 'open' | 'review' | 'closed'
+
+/**
+ * Período contábil mensal, identificado pela chave `YYYY-MM`. Períodos ausentes desta lista são considerados
+ * abertos (nenhum lançamento é bloqueado). Fechar é uma decisão explícita de um usuário, nunca automática.
+ */
+export interface AccountingPeriod {
+  key: string
+  status: PeriodStatus
+  closedAt?: string
+  closedBy?: Actor
+  reopenReason?: string
+  reopenedAt?: string
+  reopenedBy?: Actor
+}
+
 export interface LedgerState {
   orgId: string
   version: 1
@@ -258,6 +279,8 @@ export interface LedgerState {
   approvals: ApprovalRequest[]
   reviews: ReviewRecord[]
   fxRates: StoredFxRate[]
+  /** Períodos contábeis com fechamento explícito. Ausência = período aberto. */
+  periods: AccountingPeriod[]
 }
 
 export type PostErrorCode =
@@ -301,3 +324,8 @@ export type PostErrorCode =
   | 'invalid_fx'
   | 'invalid_review'
   | 'invalid_subtype'
+  | 'period_closed'
+  | 'period_not_found'
+  | 'period_already_closed'
+  | 'period_not_closed'
+  | 'invalid_period'

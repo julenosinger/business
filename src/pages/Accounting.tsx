@@ -11,6 +11,7 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { GeneralLedgerTab } from '@/components/accounting/GeneralLedgerTab'
 import { ChartOfAccountsTab } from '@/components/accounting/ChartOfAccountsTab'
 import { ReconciliationTab } from '@/components/accounting/ReconciliationTab'
+import { PeriodsTab } from '@/components/accounting/PeriodsTab'
 import { useStore } from '@/lib/store'
 import { expensesByCategory, inPeriod, kpis, monthPeriod, type Period } from '@/lib/selectors'
 import { fmtDate, downloadCsv, iso, money, parseNum, today } from '@/lib/format'
@@ -120,7 +121,7 @@ function DreRow({ label, value, strong, tone }: { label: string; value: number; 
   )
 }
 
-type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliation'
+type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliation' | 'periods'
 
 export function Accounting() {
   const { data, removeEntry } = useStore()
@@ -196,6 +197,7 @@ export function Accounting() {
             { id: 'ledger', label: t('Razão Geral', 'General Ledger') },
             { id: 'chart', label: t('Plano de contas', 'Chart of Accounts') },
             { id: 'reconciliation', label: t('Conciliação', 'Reconciliation') },
+            { id: 'periods', label: t('Períodos', 'Periods') },
           ]}
         />
       </div>
@@ -378,6 +380,7 @@ export function Accounting() {
       {tab === 'ledger' ? <GeneralLedgerTab /> : null}
       {tab === 'chart' ? <ChartOfAccountsTab /> : null}
       {tab === 'reconciliation' ? <ReconciliationTab /> : null}
+      {tab === 'periods' ? <PeriodsTab /> : null}
 
       <EntryModal target={target} onClose={() => setTarget(null)} />
     </div>

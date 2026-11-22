@@ -25,6 +25,12 @@ export function ledgerError(code: PostErrorCode): string {
     not_estimated: t('A taxa já foi confirmada.', 'The fee is already confirmed.'),
     invalid_source: t('Informe a origem da taxa.', 'Enter the fee source.'),
     invalid_currency: t('Moeda inválida.', 'Invalid currency.'),
+    period_closed: t('Período fechado: este mês não aceita lançamentos nem estornos. Reabra o período para ajustar.', 'Closed period: this month does not accept postings or reversals. Reopen the period to adjust.'),
+    period_not_found: t('Período não encontrado.', 'Period not found.'),
+    period_already_closed: t('O período já está fechado.', 'The period is already closed.'),
+    period_not_closed: t('O período não está fechado.', 'The period is not closed.'),
+    invalid_period: t('Período inválido (use o formato AAAA-MM).', 'Invalid period (use YYYY-MM).'),
+    reason_required: t('Informe o motivo (mín. 3 caracteres).', 'Enter a reason (min. 3 characters).'),
   }
   return m[code] ?? t(`Operação recusada (${code}).`, `Operation rejected (${code}).`)
 }
