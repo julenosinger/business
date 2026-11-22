@@ -37,6 +37,7 @@ import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
 import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
 import { fromNumber, toDisplayNumber } from './accounting/money'
+import { canCancel, inFlightIntentEnv } from './treasury-selectors'
 import type { NetworkId } from './network'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
@@ -132,6 +133,19 @@ function accountOutstandingMinor(acc: Account): bigint | null {
   return amountMinor - paidMinor
 }
 
+function cancelReasonText(reason: string): string {
+  switch (reason) {
+    case 'not_manual':
+      return t('Esta obrigação vem de outro módulo e não pode ser cancelada aqui.', 'This obligation comes from another module and cannot be canceled here.')
+    case 'settled':
+      return t('Obrigação já liquidada: use estorno formal em vez de cancelar.', 'Obligation already settled: use a formal reversal instead of canceling.')
+    case 'active_intent':
+      return t('Há um pagamento em processamento para esta obrigação.', 'There is a payment in progress for this obligation.')
+    default:
+      return t('Não foi possível cancelar a obrigação.', 'Could not cancel the obligation.')
+  }
+}
+
 function load(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -150,6 +164,9 @@ export type LedgerResult<T> = { ok: true; value: T } | { ok: false; errors: Post
 export type VerifyOutcome = { ok: true; status: TreasuryOpStatus } | { ok: false; error: 'not_found' }
 
 export type AccountingOutcome = { ok: true; status: AccountingStatus } | { ok: false; error: 'not_found' | 'not_confirmed' }
+
+export type CancelResult = { ok: true } | { ok: false; reason: string }
+export type BatchCancelResult = { canceled: string[]; refused: { id: string; reason: string }[] }
 
 export interface SaleInput {
   customerId?: string
@@ -207,8 +224,10 @@ export interface Store {
   removeAccount: (id: string) => void
   /** Associa EXPLICITAMENTE uma obrigação a um ambiente de pagamento (preparação). */
   preparePayment: (id: string, network: NetworkId) => void
-  /** Cancela logicamente (auditável) uma obrigação manual sem pagamentos/vínculos. */
-  cancelAccount: (id: string) => void
+  /** Cancela logicamente (auditável) uma obrigação manual sem pagamentos/vínculos. Retorna resultado. */
+  cancelAccount: (id: string) => CancelResult
+  /** Cancelamento em lote com resultado por item. */
+  cancelAccounts: (ids: string[]) => BatchCancelResult
   recordSale: (input: SaleInput) => void
   cancelSale: (id: string) => void
   recordPurchase: (input: PurchaseInput) => void
@@ -508,25 +527,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => settle(d, id, amount, treasuryTx))
       },
       removeAccount: (id) => undoable((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== id) }), t('Conta removida.', 'Bill removed.')),
-      preparePayment: (id, network) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, paymentNetwork: network } : a)) })),
-      cancelAccount: (id) => {
+      preparePayment: (id, network) => {
         const acc = data.accounts.find((a) => a.id === id)
-        if (!acc) return
-        // Só cancela obrigação MANUAL sem pagamentos e sem intenção ativa (preserva rastreabilidade).
-        if (acc.source !== 'manual') {
-          toast.error(t('Esta obrigação vem de outro módulo e não pode ser cancelada aqui.', 'This obligation comes from another module and cannot be canceled here.'))
+        if (!acc || acc.paymentNetwork === network) return
+        // Bloqueia mudança de ambiente quando há intenção ativa (pendente/ambígua/revisão) em QUALQUER rede.
+        if (inFlightIntentEnv(id, data.treasuryOps) !== null) {
+          toast.error(t('Há um pagamento em processamento para esta obrigação. Acompanhe na reconciliação antes de trocar a rede.', 'There is a payment in progress for this obligation. Track it in reconciliation before changing the network.'))
           return
         }
-        if ((acc.settlements?.length ?? 0) > 0 || acc.status === 'paid') {
-          toast.error(t('Obrigação já liquidada: use estorno formal em vez de cancelar.', 'Obligation already settled: use a formal reversal instead of canceling.'))
-          return
+        set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, paymentNetwork: network } : a)) }))
+      },
+      cancelAccount: (id) => {
+        const decision = canCancel(data.accounts.find((a) => a.id === id), data.treasuryOps)
+        if (!decision.ok) {
+          toast.error(cancelReasonText(decision.reason))
+          return { ok: false, reason: decision.reason }
         }
-        const hasActiveOp = data.treasuryOps.some((o) => o.accountId === id && o.status !== 'failed')
-        if (hasActiveOp) {
-          toast.error(t('Há um pagamento em processamento para esta obrigação. Acompanhe na reconciliação.', 'There is a payment in progress for this obligation. Track it in reconciliation.'))
-          return
+        // Revalida no estado mais recente dentro do updater (defesa contra corrida entre renders).
+        undoable((d) => {
+          const recheck = canCancel(d.accounts.find((a) => a.id === id), d.treasuryOps)
+          if (!recheck.ok) return d
+          return { ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, canceledAt: today() } : a)) }
+        }, t('Obrigação cancelada (arquivada).', 'Obligation canceled (archived).'))
+        return { ok: true }
+      },
+      cancelAccounts: (ids) => {
+        const canceled: string[] = []
+        const refused: { id: string; reason: string }[] = []
+        for (const id of ids) {
+          const decision = canCancel(data.accounts.find((a) => a.id === id), data.treasuryOps)
+          if (decision.ok) canceled.push(id)
+          else refused.push({ id, reason: decision.reason })
         }
-        undoable((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, canceledAt: today() } : a)) }), t('Obrigação cancelada (arquivada).', 'Obligation canceled (archived).'))
+        set((d) => {
+          const valid = new Set(canceled)
+          return { ...d, accounts: d.accounts.map((a) => (valid.has(a.id) && canCancel(a, d.treasuryOps).ok ? { ...a, canceledAt: today() } : a)) }
+        })
+        return { canceled, refused }
       },
       cancelSale: (id) =>
         undoable((d) => {

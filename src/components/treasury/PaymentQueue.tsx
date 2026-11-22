@@ -1,9 +1,11 @@
 import { Coins, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge, Button, CardTitle } from '@/components/ui'
 import { TCard } from '@/components/ds/Panel'
 import { daysUntil, fmtDate, money, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Account } from '@/lib/types'
+import type { BatchCancelResult } from '@/lib/store'
 
 interface Props {
   queue: Account[]
@@ -19,9 +21,10 @@ interface Props {
   onPrepare: (id: string) => void
   onBatch: (ids: string[]) => void
   onCancel: (id: string) => void
+  onCancelMany: (ids: string[]) => BatchCancelResult
 }
 
-export function PaymentQueue({ queue, unprepared, inFlight, picked, setPicked, isConnected, rate, onPay, onPrepare, onBatch, onCancel }: Props) {
+export function PaymentQueue({ queue, unprepared, inFlight, picked, setPicked, isConnected, rate, onPay, onPrepare, onBatch, onCancel, onCancelMany }: Props) {
   const eligible = queue.filter((a) => !(inFlight?.has(a.id) ?? false))
   const toggleAll = () => setPicked(picked.length === eligible.length ? [] : eligible.map((a) => a.id))
   const confirmCancel = (a: Account) => {
@@ -30,8 +33,10 @@ export function PaymentQueue({ queue, unprepared, inFlight, picked, setPicked, i
   const bulkCancel = () => {
     if (picked.length === 0) return
     if (window.confirm(t(`Cancelar ${picked.length} obrigação(ões) selecionada(s)?`, `Cancel ${picked.length} selected obligation(s)?`))) {
-      picked.forEach((id) => onCancel(id))
-      setPicked([])
+      const r = onCancelMany(picked)
+      if (r.canceled.length > 0) toast.success(t(`${r.canceled.length} cancelada(s).`, `${r.canceled.length} canceled.`))
+      if (r.refused.length > 0) toast.warning(t(`${r.refused.length} recusada(s): vinculadas a outro módulo, já liquidadas ou em processamento.`, `${r.refused.length} refused: linked to another module, already settled, or in progress.`))
+      setPicked(r.refused.map((x) => x.id))
     }
   }
 

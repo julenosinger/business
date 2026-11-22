@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { inFlightIntentEnv, paymentQueueState, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
-import type { PaymentRequest, TreasuryOp } from '../src/lib/types'
+import { canCancel, inFlightIntentEnv, payEligibility, paymentQueueState, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
+import type { Account, PaymentRequest, TreasuryOp } from '../src/lib/types'
 
 const op = (chain: string, over: Partial<TreasuryOp> = {}): TreasuryOp => ({ id: 'op', date: '2026-11-22', kind: 'spend', chain, amount: '1', note: '', ...over })
 
@@ -99,5 +99,36 @@ describe('estado da obrigação na fila (preparação explícita)', () => {
     expect(paymentQueueState({ paymentNetwork: 'testnet' }, 'mainnet')).toBe('other_env')
     expect(paymentQueueState({ paymentNetwork: 'testnet' }, 'testnet')).toBe('prepared')
     expect(paymentQueueState({ paymentNetwork: undefined }, 'mainnet')).toBe('unprepared')
+  })
+})
+
+describe('elegibilidade e cancelamento (puros)', () => {
+  const acc = (over: Partial<Account> = {}): Account => ({
+    id: 'a1',
+    kind: 'payable',
+    description: 'd',
+    contactName: 'c',
+    amount: 100,
+    dueDate: '2026-12-01',
+    category: 'Aluguel',
+    status: 'open',
+    source: 'manual',
+    ...over,
+  })
+  const pendingOp: TreasuryOp = { id: 'op', date: '2026-11-22', kind: 'spend', chain: 'Arc', amount: '1', note: '', accountId: 'a1', status: 'pending' }
+
+  test('payEligibility: cancelada/liquidada/intenção ativa/ok', () => {
+    expect(payEligibility(acc(), [])).toEqual({ ok: true })
+    expect(payEligibility(acc({ canceledAt: '2026-11-22' }), [])).toEqual({ ok: false, reason: 'canceled' })
+    expect(payEligibility(acc({ status: 'paid' }), [])).toEqual({ ok: false, reason: 'settled' })
+    expect(payEligibility(acc(), [pendingOp])).toEqual({ ok: false, reason: 'active_intent' })
+  })
+
+  test('canCancel: só manual, sem liquidações e sem intenção ativa', () => {
+    expect(canCancel(acc(), [])).toEqual({ ok: true })
+    expect(canCancel(acc({ source: 'purchase' }), [])).toEqual({ ok: false, reason: 'not_manual' })
+    expect(canCancel(acc({ settlements: [{ id: 's', sequence: 1, amount: 10, date: '2026-11-22' }] }), [])).toEqual({ ok: false, reason: 'settled' })
+    expect(canCancel(acc(), [pendingOp])).toEqual({ ok: false, reason: 'active_intent' })
+    expect(canCancel(undefined, [])).toEqual({ ok: false, reason: 'not_found' })
   })
 })

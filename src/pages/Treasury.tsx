@@ -25,7 +25,7 @@ import { usdcRateOf } from '@/lib/format'
 
 export function Treasury() {
   const { address, isConnected } = useAccount()
-  const { data, updateRequest, preparePayment, cancelAccount } = useStore()
+  const { data, updateRequest, preparePayment, cancelAccount, cancelAccounts } = useStore()
   const { payAccountId, requestPay, intent, requestIntent } = useNav()
   const shareBase = useShareBase()
   const gw = useGatewayBalances(address)
@@ -159,6 +159,7 @@ export function Treasury() {
               open('spend', id)
             }}
             onCancel={cancelAccount}
+            onCancelMany={cancelAccounts}
             onBatch={setBatchIds}
           />
           <RequestsCard

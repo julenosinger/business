@@ -65,3 +65,28 @@ export function paymentQueueState(account: Pick<Account, 'paymentNetwork'>, netw
   if (account.paymentNetwork === undefined) return 'unprepared'
   return account.paymentNetwork === network ? 'prepared' : 'other_env'
 }
+
+export type PayEligibility = { ok: true } | { ok: false; reason: 'canceled' | 'settled' | 'active_intent' }
+
+/**
+ * Elegibilidade centralizada para executar/preparar um pagamento (reutilizada por Preparar, Pagar,
+ * checkbox, selecionar todas e lote). Considera obrigação aberta, não cancelada e sem intenção ativa
+ * em QUALQUER ambiente.
+ */
+export function payEligibility(account: Account, ops: TreasuryOp[]): PayEligibility {
+  if (account.canceledAt) return { ok: false, reason: 'canceled' }
+  if (account.status !== 'open') return { ok: false, reason: 'settled' }
+  if (inFlightIntentEnv(account.id, ops) !== null) return { ok: false, reason: 'active_intent' }
+  return { ok: true }
+}
+
+export type CancelDecision = { ok: true } | { ok: false; reason: 'not_found' | 'not_manual' | 'settled' | 'active_intent' }
+
+/** Validação de cancelamento lógico: só obrigação manual, sem liquidações e sem intenção ativa. */
+export function canCancel(account: Account | undefined, ops: TreasuryOp[]): CancelDecision {
+  if (!account) return { ok: false, reason: 'not_found' }
+  if (account.source !== 'manual') return { ok: false, reason: 'not_manual' }
+  if ((account.settlements?.length ?? 0) > 0 || account.status === 'paid') return { ok: false, reason: 'settled' }
+  if (ops.some((o) => o.accountId === account.id && o.status !== 'failed')) return { ok: false, reason: 'active_intent' }
+  return { ok: true }
+}
