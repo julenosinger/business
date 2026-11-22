@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { inFlightIntentEnv, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
+import { inFlightIntentEnv, paymentQueueState, requestEnv, requestsForNetwork, treasuryOpEnv, treasuryOpsForNetwork } from '../src/lib/treasury-selectors'
 import type { PaymentRequest, TreasuryOp } from '../src/lib/types'
 
 const op = (chain: string, over: Partial<TreasuryOp> = {}): TreasuryOp => ({ id: 'op', date: '2026-11-22', kind: 'spend', chain, amount: '1', note: '', ...over })
@@ -90,5 +90,14 @@ describe('intenção de pagamento em processamento', () => {
     expect(inFlightIntentEnv('a1', [])).toBeNull()
     expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'failed')])).toBeNull()
     expect(inFlightIntentEnv('a1', [spendOp('a1', 'Arc', 'confirmed')])).toBeNull()
+  })
+})
+
+describe('estado da obrigação na fila (preparação explícita)', () => {
+  test('preparada para o ambiente atual → prepared; outro ambiente → other_env; sem rede → unprepared', () => {
+    expect(paymentQueueState({ paymentNetwork: 'mainnet' }, 'mainnet')).toBe('prepared')
+    expect(paymentQueueState({ paymentNetwork: 'testnet' }, 'mainnet')).toBe('other_env')
+    expect(paymentQueueState({ paymentNetwork: 'testnet' }, 'testnet')).toBe('prepared')
+    expect(paymentQueueState({ paymentNetwork: undefined }, 'mainnet')).toBe('unprepared')
   })
 })

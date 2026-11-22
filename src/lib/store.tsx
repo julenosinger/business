@@ -37,6 +37,7 @@ import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
 import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
 import { fromNumber, toDisplayNumber } from './accounting/money'
+import type { NetworkId } from './network'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -204,6 +205,10 @@ export interface Store {
   /** Liquidação parcial: reduz o saldo em aberto sem fechar a conta. Recusa valor acima do saldo. */
   settleAccountPartial: (id: string, amount: number, treasuryTx?: string) => void
   removeAccount: (id: string) => void
+  /** Associa EXPLICITAMENTE uma obrigação a um ambiente de pagamento (preparação). */
+  preparePayment: (id: string, network: NetworkId) => void
+  /** Cancela logicamente (auditável) uma obrigação manual sem pagamentos/vínculos. */
+  cancelAccount: (id: string) => void
   recordSale: (input: SaleInput) => void
   cancelSale: (id: string) => void
   recordPurchase: (input: PurchaseInput) => void
@@ -503,6 +508,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => settle(d, id, amount, treasuryTx))
       },
       removeAccount: (id) => undoable((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== id) }), t('Conta removida.', 'Bill removed.')),
+      preparePayment: (id, network) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, paymentNetwork: network } : a)) })),
+      cancelAccount: (id) => {
+        const acc = data.accounts.find((a) => a.id === id)
+        if (!acc) return
+        // Só cancela obrigação MANUAL sem pagamentos e sem intenção ativa (preserva rastreabilidade).
+        if (acc.source !== 'manual') {
+          toast.error(t('Esta obrigação vem de outro módulo e não pode ser cancelada aqui.', 'This obligation comes from another module and cannot be canceled here.'))
+          return
+        }
+        if ((acc.settlements?.length ?? 0) > 0 || acc.status === 'paid') {
+          toast.error(t('Obrigação já liquidada: use estorno formal em vez de cancelar.', 'Obligation already settled: use a formal reversal instead of canceling.'))
+          return
+        }
+        const hasActiveOp = data.treasuryOps.some((o) => o.accountId === id && o.status !== 'failed')
+        if (hasActiveOp) {
+          toast.error(t('Há um pagamento em processamento para esta obrigação. Acompanhe na reconciliação.', 'There is a payment in progress for this obligation. Track it in reconciliation.'))
+          return
+        }
+        undoable((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, canceledAt: today() } : a)) }), t('Obrigação cancelada (arquivada).', 'Obligation canceled (archived).'))
+      },
       cancelSale: (id) =>
         undoable((d) => {
           const sale = d.sales.find((s) => s.id === id)

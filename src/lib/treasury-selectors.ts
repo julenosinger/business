@@ -8,7 +8,7 @@
  * Registros legados sem rede identificável → `unknown` (preservados, nunca atribuídos automaticamente).
  */
 import { gatewayChainEnv, type NetworkId } from './network'
-import type { PaymentRequest, TreasuryOp } from './types'
+import type { Account, PaymentRequest, TreasuryOp } from './types'
 
 export type OpEnv = 'live' | 'test' | 'unknown' | 'invalid_environment'
 
@@ -51,4 +51,17 @@ export function inFlightIntentEnv(accountId: string, ops: TreasuryOp[]): OpEnv |
     (o) => o.accountId === accountId && o.kind === 'spend' && (o.status === 'pending' || o.status === 'ambiguous' || o.status === 'requires_review'),
   )
   return op ? treasuryOpEnv(op) : null
+}
+
+export type QueueState = 'prepared' | 'unprepared' | 'other_env'
+
+/**
+ * Estado de uma obrigação na fila de pagamentos em relação ao ambiente ativo.
+ * - `prepared`: ambiente escolhido explicitamente === ambiente atual (executável).
+ * - `unprepared`: sem ambiente escolhido (não executável; fica no ERP).
+ * - `other_env`: preparada para o outro ambiente (oculta da fila atual).
+ */
+export function paymentQueueState(account: Pick<Account, 'paymentNetwork'>, network: NetworkId): QueueState {
+  if (account.paymentNetwork === undefined) return 'unprepared'
+  return account.paymentNetwork === network ? 'prepared' : 'other_env'
 }

@@ -67,6 +67,10 @@ export interface Account {
   source: AccountSource
   /** Moeda da obrigação. Ausente em registros legados (tratada como desconhecida, nunca adivinhada). */
   currency?: CurrencyCode
+  /** Ambiente escolhido EXPLICITAMENTE para pagar esta obrigação. Ausente = não preparada. */
+  paymentNetwork?: NetworkId
+  /** Cancelamento lógico (auditável). A obrigação deixa de ser executável sem ser apagada. */
+  canceledAt?: string
   /** Link do explorer da transação em USDC que liquidou a conta. */
   treasuryTx?: string
   employeeId?: string
@@ -483,6 +487,7 @@ export interface Shipment {
 
 import type { LedgerState } from './accounting/types'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
+import type { NetworkId } from './network'
 
 export interface AppData {
   products: Product[]

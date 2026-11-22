@@ -162,14 +162,14 @@ export function Finance() {
   const [limit, setLimit] = useState(30)
   const totals = accountTotals(data)
 
-  const openAll = data.accounts.filter((a) => a.status === 'open')
+  const openAll = data.accounts.filter((a) => a.status === 'open' && !a.canceledAt)
   const openReceivable = openAll.filter((a) => a.kind === 'receivable')
   const openPayable = openAll.filter((a) => a.kind === 'payable')
   const overdue = (kind: Account['kind']) => openAll.filter((a) => a.kind === kind && daysUntil(a.dueDate) < 0).length
   const plural = (n: number) => (n === 1 ? t('conta', 'bill') : t('contas', 'bills'))
 
   const list = data.accounts
-    .filter((a) => (tab === 'open' ? a.status === 'open' : tab === 'paid' ? a.status === 'paid' : a.kind === tab && a.status === 'open'))
+    .filter((a) => (tab === 'open' ? a.status === 'open' && !a.canceledAt : tab === 'paid' ? a.status === 'paid' : a.kind === tab && a.status === 'open' && !a.canceledAt))
     .sort((a, b) => (tab === 'paid' ? (b.paidAt ?? '').localeCompare(a.paidAt ?? '') : a.dueDate.localeCompare(b.dueDate)))
   const shown = list.slice(0, limit)
 

@@ -59,7 +59,7 @@ function ChainSelect({ value, onChange, label, options }: { value: string; onCha
 export function TreasuryModal({ mode, account, balances, defaultRecipient, onClose }: Props) {
   const { address, connector, chainId } = useAccount()
   const { switchChainAsync } = useSwitchChain()
-  const { data, addTreasuryOp, updateContact, updateEmployee } = useStore()
+  const { data, addTreasuryOp, preparePayment, updateContact, updateEmployee } = useStore()
   const network = useNetwork()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const [amountText, setAmountText] = useState('')
@@ -153,6 +153,8 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
           ...(res.transferId ? { transferId: res.transferId } : {}),
           note: account ? account.description : t('Envio de USDC', 'USDC transfer'),
         })
+        // Prepara (persiste o ambiente escolhido) a obrigação, mesmo que a baixa só ocorra após verificação.
+        if (account) preparePayment(account.id, network)
         if (account && newWallet && saveWallet) {
           if (account.employeeId) updateEmployee(account.employeeId, { wallet: to })
           else if (account.contactId) updateContact(account.contactId, { wallet: to })

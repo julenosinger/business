@@ -25,7 +25,7 @@ import { usdcRateOf } from '@/lib/format'
 
 export function Treasury() {
   const { address, isConnected } = useAccount()
-  const { data, updateRequest } = useStore()
+  const { data, updateRequest, preparePayment, cancelAccount } = useStore()
   const { payAccountId, requestPay, intent, requestIntent } = useNav()
   const shareBase = useShareBase()
   const gw = useGatewayBalances(address)
@@ -75,17 +75,14 @@ export function Treasury() {
     ? (data.contacts.find((c) => c.id === account.contactId)?.wallet ?? data.employees.find((e) => e.id === account.employeeId)?.wallet ?? '')
     : ''
 
-  const openPayables = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open')
-  // Fila executável: obrigações sem intenção ativa, ou com intenção em processamento NO ambiente atual.
-  // Intenções em processamento no OUTRO ambiente são ocultas aqui (impede pagamento concorrente da mesma obrigação).
-  const wantedEnv = network === 'mainnet' ? 'live' : 'test'
-  const queue = openPayables
-    .filter((a) => {
-      const env = inFlightIntentEnv(a.id, data.treasuryOps)
-      return env === null || env === wantedEnv
-    })
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-  const inFlightIds = new Set(openPayables.filter((a) => inFlightIntentEnv(a.id, data.treasuryOps) === wantedEnv).map((a) => a.id))
+  const openPayables = data.accounts.filter((a) => a.kind === 'payable' && a.status === 'open' && !a.canceledAt)
+  // Fila executável: somente obrigações PREPARADAS para o ambiente atual (escolha explícita persistida).
+  // Obrigações não preparadas ficam fora da fila executável (acessíveis em Contas a pagar/receber).
+  const preparedQueue = openPayables.filter((a) => a.paymentNetwork === network).sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+  const unpreparedQueue = openPayables.filter((a) => a.paymentNetwork === undefined).sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+  const inFlightIds = new Set(
+    preparedQueue.filter((a) => inFlightIntentEnv(a.id, data.treasuryOps) === (network === 'mainnet' ? 'live' : 'test')).map((a) => a.id),
+  )
   const rate = usdcRateOf(data.settings)
   const appIsUsdc = data.settings.currency === 'USDC'
   const activityCount = visibleOps.filter((o) => inLastDays(o.date, period)).length
@@ -148,7 +145,22 @@ export function Treasury() {
         </div>
 
         <div className="grid items-stretch gap-4 lg:grid-cols-2 sm:gap-5">
-          <PaymentQueue queue={queue} inFlight={inFlightIds} picked={picked} setPicked={setPicked} isConnected={isConnected} rate={rate} onPay={(id) => open('spend', id)} onBatch={setBatchIds} />
+          <PaymentQueue
+            queue={preparedQueue}
+            unprepared={unpreparedQueue}
+            inFlight={inFlightIds}
+            picked={picked}
+            setPicked={setPicked}
+            isConnected={isConnected}
+            rate={rate}
+            onPay={(id) => open('spend', id)}
+            onPrepare={(id) => {
+              preparePayment(id, network)
+              open('spend', id)
+            }}
+            onCancel={cancelAccount}
+            onBatch={setBatchIds}
+          />
           <RequestsCard
             requests={visibleRequests}
             company={data.settings.company}
