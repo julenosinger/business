@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { closePeriod, emptyLedger, isDateClosed, normalizeLedger, periodKeyOf, postEvent, reopenPeriod, reverseEntry, setPeriodReview, type Ctx } from '../src/lib/accounting/engine'
-import type { EventDraft, LedgerState } from '../src/lib/accounting/types'
+import type { EventDraft } from '../src/lib/accounting/types'
 
 const NOW = '2026-11-22T10:00:00.000Z'
 const user = { id: 'u1', kind: 'user' as const }

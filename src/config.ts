@@ -6,6 +6,7 @@
 import { http, createConfig } from 'wagmi'
 import { mainnet } from 'wagmi/chains'
 import {
+  arc,
   arcTestnet,
   baseSepolia,
   sepolia,
@@ -17,7 +18,7 @@ import {
 import { injected } from 'wagmi/connectors'
 import { registerChain } from './tracing'
 
-const treasuryChains = [arcTestnet, baseSepolia, sepolia, arbitrumSepolia, optimismSepolia, avalancheFuji, polygonAmoy] as const
+const treasuryChains = [arc, arcTestnet, baseSepolia, sepolia, arbitrumSepolia, optimismSepolia, avalancheFuji, polygonAmoy] as const
 
 // Pre-register chain RPC URLs so trace events show correct chain names immediately
 for (const chain of treasuryChains) {
@@ -25,9 +26,10 @@ for (const chain of treasuryChains) {
 }
 
 export const config = createConfig({
-  chains: [arcTestnet, baseSepolia, sepolia, arbitrumSepolia, optimismSepolia, avalancheFuji, polygonAmoy, mainnet], // mainnet needed for ENS resolution
+  chains: [arc, arcTestnet, baseSepolia, sepolia, arbitrumSepolia, optimismSepolia, avalancheFuji, polygonAmoy, mainnet], // mainnet needed for ENS resolution
   connectors: [injected()],
   transports: {
+    [arc.id]: http(),
     [arcTestnet.id]: http(),
     [baseSepolia.id]: http(),
     [sepolia.id]: http(),

@@ -7,9 +7,10 @@ const listeners = new Set<() => void>()
 
 function read(): Theme {
   try {
-    return localStorage.getItem(KEY) === 'light' ? 'light' : 'dark'
+    // Light é o padrão para novos usuários. Só fica escuro se o usuário escolheu explicitamente.
+    return localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light'
   } catch {
-    return 'dark'
+    return 'light'
   }
 }
 

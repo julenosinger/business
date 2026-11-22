@@ -106,13 +106,16 @@ export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: s
   const [page, setPage] = useState(0)
   const [openEntry, setOpenEntry] = useState<string | null>(null)
   const [fxOpen, setFxOpen] = useState(false)
+  const [appliedQuery, setAppliedQuery] = useState<string | null>(initialQuery ?? null)
 
+  // Aplica o foco vindo do "Ver no razão" (padrão de seed, sem setState em efeito).
+  if (initialQuery && initialQuery !== appliedQuery) {
+    setAppliedQuery(initialQuery)
+    setQ(initialQuery)
+    setPage(0)
+  }
   useEffect(() => {
-    if (initialQuery) {
-      setQ(initialQuery)
-      setPage(0)
-      onConsume?.()
-    }
+    if (initialQuery) onConsume?.()
   }, [initialQuery, onConsume])
 
   const rows = useMemo(

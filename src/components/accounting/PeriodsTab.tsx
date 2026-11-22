@@ -7,7 +7,7 @@ import { explainLedger } from './messages'
 import { useStore } from '@/lib/store'
 import { periodKeyOf, periodStatusOf } from '@/lib/accounting/engine'
 import type { PeriodStatus } from '@/lib/accounting/types'
-import { monthTitle } from '@/lib/format'
+import { monthKey, monthTitle, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
 
 const STATUS_META: Record<PeriodStatus, { label: () => string; tone: 'ok' | 'warn' | 'bad' | 'neutral' }> = {
@@ -87,7 +87,7 @@ export function PeriodsTab() {
     else toast.success(t(`Período ${monthTitle(key)} marcado para revisão de fechamento.`, `Period ${monthTitle(key)} marked for closing review.`))
   }
 
-  const currentMonth = periodKeyOf(new Date().toISOString().slice(0, 10))
+  const currentMonth = monthKey(today())
 
   return (
     <TCard className="overflow-hidden">

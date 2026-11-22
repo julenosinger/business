@@ -4,11 +4,13 @@ import { isAddress, type Address } from 'viem'
 import { Amount } from '@/onchain-money'
 import { t } from './i18n'
 import { USDC_DECIMALS } from '@/onchain-facts'
-import { arcTestnet, arbitrumSepolia, avalancheFuji, baseSepolia, optimismSepolia, polygonAmoy, sepolia } from 'viem/chains'
+import { arc, arcTestnet, arbitrumSepolia, avalancheFuji, baseSepolia, optimismSepolia, polygonAmoy, sepolia } from 'viem/chains'
+import { isMainnetBlocked, useNetwork } from './network'
 
 export const appKit = new AppKit()
 
 export type GatewayChainId =
+  | typeof arc.id
   | typeof arcTestnet.id
   | typeof baseSepolia.id
   | typeof sepolia.id
@@ -19,19 +21,22 @@ export type GatewayChainId =
 
 export interface GatewayChain {
   /** Identificador usado pelo SDK da Circle. */
-  key: 'Arc_Testnet' | 'Base_Sepolia' | 'Ethereum_Sepolia' | 'Arbitrum_Sepolia' | 'Optimism_Sepolia' | 'Avalanche_Fuji' | 'Polygon_Amoy_Testnet'
+  key: 'Arc' | 'Arc_Testnet' | 'Base_Sepolia' | 'Ethereum_Sepolia' | 'Arbitrum_Sepolia' | 'Optimism_Sepolia' | 'Avalanche_Fuji' | 'Polygon_Amoy_Testnet'
   chainId: GatewayChainId
   label: string
+  /** `live` = rede real (Mainnet), `test` = ambiente de teste. */
+  env: 'live' | 'test'
 }
 
 export const GATEWAY_CHAINS: GatewayChain[] = [
-  { key: 'Arc_Testnet', chainId: arcTestnet.id, label: 'Arc Testnet' },
-  { key: 'Base_Sepolia', chainId: baseSepolia.id, label: 'Base Sepolia' },
-  { key: 'Ethereum_Sepolia', chainId: sepolia.id, label: 'Ethereum Sepolia' },
-  { key: 'Arbitrum_Sepolia', chainId: arbitrumSepolia.id, label: 'Arbitrum Sepolia' },
-  { key: 'Optimism_Sepolia', chainId: optimismSepolia.id, label: 'OP Sepolia' },
-  { key: 'Avalanche_Fuji', chainId: avalancheFuji.id, label: 'Avalanche Fuji' },
-  { key: 'Polygon_Amoy_Testnet', chainId: polygonAmoy.id, label: 'Polygon Amoy' },
+  { key: 'Arc', chainId: arc.id, label: 'Arc Mainnet', env: 'live' },
+  { key: 'Arc_Testnet', chainId: arcTestnet.id, label: 'Arc Testnet', env: 'test' },
+  { key: 'Base_Sepolia', chainId: baseSepolia.id, label: 'Base Sepolia', env: 'test' },
+  { key: 'Ethereum_Sepolia', chainId: sepolia.id, label: 'Ethereum Sepolia', env: 'test' },
+  { key: 'Arbitrum_Sepolia', chainId: arbitrumSepolia.id, label: 'Arbitrum Sepolia', env: 'test' },
+  { key: 'Optimism_Sepolia', chainId: optimismSepolia.id, label: 'OP Sepolia', env: 'test' },
+  { key: 'Avalanche_Fuji', chainId: avalancheFuji.id, label: 'Avalanche Fuji', env: 'test' },
+  { key: 'Polygon_Amoy_Testnet', chainId: polygonAmoy.id, label: 'Polygon Amoy', env: 'test' },
 ]
 
 export const chainByKey = (key: string): GatewayChain | undefined => GATEWAY_CHAINS.find((c) => c.key === key)
@@ -53,20 +58,23 @@ function toAmount(value: string): Amount {
 }
 
 export function useGatewayBalances(address: Address | undefined) {
+  const network = useNetwork()
+  const networkType = network === 'mainnet' ? 'mainnet' : 'testnet'
+  const blocked = isMainnetBlocked(network)
   return useQuery<GatewayBalances>({
-    queryKey: ['gateway-balances', address],
-    enabled: Boolean(address),
+    queryKey: ['gateway-balances', address, networkType],
+    enabled: Boolean(address) && !blocked,
     refetchInterval: 30_000,
     queryFn: async () => {
       if (!address) return { total: 0, pending: 0, byChain: [] }
       let pending: number | null = null
       let res: Awaited<ReturnType<typeof appKit.unifiedBalance.getBalances>>
       try {
-        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType: 'testnet', includePending: true })
+        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType, includePending: true })
         pending = Number(toAmount(String((res as { totalPendingBalance?: string }).totalPendingBalance ?? '0')).toString())
       } catch {
         // Se a consulta de pendentes falhar, mantém o saldo confirmado e marca pendentes como indisponível.
-        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType: 'testnet' })
+        res = await appKit.unifiedBalance.getBalances({ sources: { address }, networkType })
       }
       const map = new Map<string, Amount>()
       for (const account of res.breakdown) {

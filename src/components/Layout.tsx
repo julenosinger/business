@@ -3,6 +3,7 @@ import { ConnectKitButton } from 'connectkit'
 import { clsx } from 'clsx'
 import { Menu, Moon, Sun, Wallet } from 'lucide-react'
 import { MobileDrawer, Sidebar, useSidebarWidth } from '@/components/sidebar/Sidebar'
+import { NetworkSelector } from '@/components/NetworkSelector'
 import { sidebar, useSidebar } from '@/lib/sidebar'
 import { useNav } from '@/lib/nav'
 import { useStore } from '@/lib/store'
@@ -68,6 +69,7 @@ export function Layout({ children }: { children: ReactNode }) {
               {data.settings.branch} · {data.settings.currency}
             </div>
           </div>
+          <NetworkSelector />
           <Toggles />
           <ConnectKitButton.Custom>
             {({ isConnected, show, address }) => (

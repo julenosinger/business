@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ArrowLeftRight, BookOpen, Download, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp } from 'lucide-react'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -133,9 +133,8 @@ export function Accounting() {
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all')
   const [limit, setLimit] = useState(30)
 
-  useEffect(() => {
-    if (ledgerFocus) setTab('ledger')
-  }, [ledgerFocus])
+  // Foco vindo do "Ver no razão" em outra tela: abre a aba do Razão Geral (sem setState em efeito).
+  if (ledgerFocus && tab !== 'ledger') setTab('ledger')
   const period = periodFor(range)
   const k = kpis(data, period)
   const cats = expensesByCategory(data, period).filter((c) => c.category !== CAT_PURCHASE && c.category !== CAT_SALES)

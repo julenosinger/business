@@ -76,11 +76,11 @@ export function resolveBackend(cfg?: Partial<BackendConfig>): LedgerBackend {
   return {
     kind: 'remote',
     available: true,
-    async postEvent() {
-      throw new Error('Remote backend transport not implemented: configure the server API (see docs/phase-2.2.md).')
+    postEvent() {
+      return Promise.reject(new Error('Remote backend transport not implemented: configure the server API (see docs/phase-2.2.md).'))
     },
-    async fetch() {
-      throw new Error('Remote backend transport not implemented: configure the server API (see docs/phase-2.2.md).')
+    fetch() {
+      return Promise.reject(new Error('Remote backend transport not implemented: configure the server API (see docs/phase-2.2.md).'))
     },
   }
 }

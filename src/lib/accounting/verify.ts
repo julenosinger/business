@@ -81,7 +81,7 @@ export async function verifyUsdcReceipt(input: { chainId: number; txHash: string
     const client = createPublicClient({ transport: http(chain.rpcUrls[0]) })
     const receipt = await client.getTransactionReceipt({ hash: txHash })
     if (receipt.status === 'reverted') return { state: 'failed', chainId, txHash, blockNumber: receipt.blockNumber }
-    const transfers = usdc ? decodeUsdcTransfers(receipt.logs as { address: string; data: Hex; topics: readonly Hex[] }[], usdc.address) : []
+    const transfers = usdc ? decodeUsdcTransfers(receipt.logs, usdc.address) : []
     if (input.expectedTo || input.expectedAmountMinor !== undefined) {
       const hit = matchTransfer(transfers, input.expectedTo, input.expectedAmountMinor)
       if (!hit) return { state: 'pending', chainId, txHash, blockNumber: receipt.blockNumber, transfers, reason: 'no_matching_transfer' }

@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { GATEWAY_CHAINS, appKit, chainByKey, explainError, isValidAddress, type GatewayBalances, type GatewayChainId } from '@/lib/gateway'
+import { MAINNET_READY } from '@/lib/network'
 import { useStore } from '@/lib/store'
 import { Amount, parseAmount } from '@/onchain-money'
 import { USDC_DECIMALS, getUsdc } from '@/onchain-facts'
@@ -83,6 +84,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
   }
 
   const origin = chainByKey(chainKey) ?? GATEWAY_CHAINS[0]
+  const originBlocked = origin.env === 'live' && !MAINNET_READY
   const usdc = origin ? getUsdc(origin.chainId) : undefined
   const walletBalance = useReadContract({
     address: usdc?.address as `0x${string}` | undefined,
@@ -103,7 +105,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
   const limit = data.settings.approvalLimit
   const needsConfirm = Boolean(mode === 'spend' && limit && amount && Number(amount.toString()) > limit)
   const newWallet = Boolean(mode === 'spend' && account && recipientOk && recipient.trim() !== '' && recipient.trim().toLowerCase() !== defaultRecipient.toLowerCase())
-  const canRun = Boolean(address && connector && amount && !overBalance && recipientOk && (!needsConfirm || confirmed)) && phase.kind !== 'working'
+  const canRun = Boolean(address && connector && amount && !overBalance && recipientOk && (!needsConfirm || confirmed)) && phase.kind !== 'working' && !originBlocked
   const spendChains = (balances?.byChain ?? []).filter((b) => b.amount > 0)
   const destChain = chainByKey(destKey)
 
@@ -178,6 +180,11 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
         </div>
       ) : (
         <div className="space-y-4">
+          {originBlocked ? (
+            <p className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn" role="alert">
+              {t('Arc Mainnet ainda não está liberada para execução real. Use a rede de teste.', 'Arc Mainnet is not yet enabled for real execution. Use the test network.')}
+            </p>
+          ) : null}
           {account ? (
             <div className="rounded-xl border border-line bg-fill/5 p-3 text-sm">
               <div className="font-semibold">{account.description}</div>

@@ -11,6 +11,14 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
     />
+    <script>
+      // Evita "flash" de tema: define o tema antes do primeiro paint. Padrão: claro.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem('gbos:theme') === 'dark' ? 'dark' : 'light';
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
   </head>
   <body>
     <!-- Built with Arc Studio — https://studio.arc.io -->
