@@ -118,12 +118,18 @@ export interface TreasuryOp {
   recipient?: string
   accountId?: string
   note: string
+  /** Carteira conectada (origem dos fundos). Usada na verificação de depósito. */
+  wallet?: string
+  /** Identificador da transferência no Gateway (para consulta de status via provider). */
+  transferId?: string
   /** Estado de liquidação. Ausente (registros antigos) = legado/desconhecido (tratar como pendente). */
   status?: TreasuryOpStatus
   /** Quando a liquidação foi confirmada (verificada on-chain). */
   settledAt?: string
   /** Id da liquidação (AccountSettlement) criada ao confirmar. */
   settlementId?: string
+  /** Motivo de revisão/falha (ex.: fx_required, no_evidence, destination_unverified). */
+  reviewReason?: string
 }
 
 /** USDC é uma moeda do app como as outras: nunca é tratado como equivalente de USD (não há conversão automática). */

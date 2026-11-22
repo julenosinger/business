@@ -125,6 +125,8 @@ export function BatchPayModal({ ids, balances, onClose }: { ids: string[] | null
             recipient: wallet,
             accountId: row.id,
             status: 'pending',
+            wallet: address,
+            ...(res.transferId ? { transferId: res.transferId } : {}),
             note: row.title,
           })
           if (saveWallets && account) {

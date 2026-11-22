@@ -124,7 +124,7 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
       const adapter = await getAdapter(origin.chainId)
       if (mode === 'deposit') {
         const res = await appKit.unifiedBalance.deposit({ from: { adapter, chain: origin.key }, amount: amountStr })
-        addTreasuryOp({ kind: 'deposit', chain: origin.key, amount: amountStr, txHash: res.txHash, explorerUrl: res.explorerUrl, status: 'pending', note: t('Depósito no saldo unificado', 'Deposit into unified balance') })
+        addTreasuryOp({ kind: 'deposit', chain: origin.key, amount: amountStr, txHash: res.txHash, explorerUrl: res.explorerUrl, status: 'pending', wallet: address, note: t('Depósito no saldo unificado', 'Deposit into unified balance') })
         setPhase({ kind: 'done', url: res.explorerUrl, hash: res.txHash })
       } else {
         if (!destChain) {
@@ -149,6 +149,8 @@ export function TreasuryModal({ mode, account, balances, defaultRecipient, onClo
           recipient: to,
           accountId: account?.id,
           status: 'pending',
+          wallet: address,
+          ...(res.transferId ? { transferId: res.transferId } : {}),
           note: account ? account.description : t('Envio de USDC', 'USDC transfer'),
         })
         if (account && newWallet && saveWallet) {

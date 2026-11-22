@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { canTransition, classifyVerification, isTerminalStatus, PAYMENT_STATUSES } from '../src/lib/accounting/settlement'
 import { isHexHash, matchTransfer, verifyUsdcReceipt } from '../src/lib/accounting/verify'
-import { reconcileTreasuryOp } from '../src/lib/settlement-service'
+import { allocationAmount, reconcileTreasuryOp } from '../src/lib/settlement-service'
+import { backoffDelay, isAutoReconcilable } from '../src/lib/reconciliation'
+import { emptyLedger } from '../src/lib/accounting/engine'
+import { recordFxRate } from '../src/lib/accounting/reviews'
 import type { TreasuryOp } from '../src/lib/types'
+
+const ctx = { now: '2026-11-22T10:00:00.000Z', actor: { id: 'u1', kind: 'user' as const } }
 
 describe('máquina de estados de pagamento', () => {
   test('transições válidas', () => {
@@ -87,5 +92,65 @@ describe('reconciliação (reconcileTreasuryOp)', () => {
     expect(mainnet.status).toBe('requires_review') // sem hash
     const testnet = await reconcileTreasuryOp(base({ chain: 'Arc_Testnet' }))
     expect(testnet.status).toBe('requires_review') // sem hash
+  })
+
+  test('spend verifica na cadeia de DESTINO (não na origem)', async () => {
+    const op = base({ chain: 'Arc', destChain: 'Unknown', txHash: `0x${'a'.repeat(64)}`, recipient: `0x${'b'.repeat(40)}` })
+    const r = await reconcileTreasuryOp(op)
+    expect(r.status).toBe('requires_review')
+    expect(r.verification.reason).toBe('unknown_chain') // olhou destChain, não chain
+  })
+
+  test('deposit verifica na cadeia de ORIGEM', async () => {
+    const op = base({ kind: 'deposit', chain: 'Unknown', txHash: `0x${'a'.repeat(64)}` })
+    const r = await reconcileTreasuryOp(op)
+    expect(r.status).toBe('requires_review')
+    expect(r.verification.reason).toBe('unknown_chain')
+  })
+})
+
+describe('alocação exata do valor verificado (partial settlement)', () => {
+  test('USDC é 1:1 (exato)', () => {
+    const r = allocationAmount(emptyLedger(), 'USDC', '300', '2026-11-22')
+    expect(r).toEqual({ ok: true, amount: 300 })
+  })
+
+  test('moeda não-USDC sem taxa registrada → fx_required (não baixa)', () => {
+    const r = allocationAmount(emptyLedger(), 'BRL', '300', '2026-11-22')
+    expect(r).toEqual({ ok: false, reason: 'fx_required' })
+  })
+
+  test('moeda não-USDC com taxa registrada converte exatamente', () => {
+    const l = recordFxRate(emptyLedger(), { from: 'USDC', to: 'BRL', rate: '5.5', source: 'manual', at: '2026-11-22T00:00:00.000Z' }, ctx)
+    if (!l.ok) throw new Error('fx')
+    const r = allocationAmount(l.ledger, 'BRL', '300', '2026-11-22')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.amount).toBe(1650) // 300 USDC × 5,5 = 1650 BRL
+  })
+
+  test('valor inválido → invalid_amount', () => {
+    const r = allocationAmount(emptyLedger(), 'USDC', 'abc', '2026-11-22')
+    expect(r).toEqual({ ok: false, reason: 'invalid_amount' })
+  })
+})
+
+describe('backoff de reconciliação', () => {
+  test('cresce exponencialmente com jitter determinístico', () => {
+    expect(backoffDelay(0, 100, 1000, () => 0.5)).toBe(100)
+    expect(backoffDelay(1, 100, 1000, () => 0.5)).toBe(200)
+    expect(backoffDelay(2, 100, 1000, () => 0.5)).toBe(400)
+  })
+
+  test('é limitado ao máximo', () => {
+    expect(backoffDelay(10, 100, 1000, () => 0.5)).toBe(1000)
+    expect(backoffDelay(20, 100, 1000, () => 0.5)).toBe(1000)
+  })
+
+  test('isAutoReconcilable aceita somente pendente', () => {
+    expect(isAutoReconcilable('pending')).toBe(true)
+    expect(isAutoReconcilable('confirmed')).toBe(false)
+    expect(isAutoReconcilable('failed')).toBe(false)
+    expect(isAutoReconcilable('requires_review')).toBe(false)
+    expect(isAutoReconcilable(undefined)).toBe(false)
   })
 })

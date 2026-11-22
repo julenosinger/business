@@ -6,6 +6,7 @@ import { I18nProvider, useLang } from '@/lib/i18n'
 import { readInvoiceFromLocation } from '@/lib/invoice'
 import { InvalidInvoice, PayPage } from '@/pages/PayPage'
 import { PaymentWatcher } from '@/components/PaymentWatcher'
+import { ReconciliationCoordinator } from '@/components/ReconciliationCoordinator'
 import { Dashboard } from '@/pages/Dashboard'
 import { Accounting } from '@/pages/Accounting'
 import { Finance } from '@/pages/Finance'
@@ -104,6 +105,7 @@ function Workspace() {
   return (
     <StoreProvider>
       <PaymentWatcher />
+      <ReconciliationCoordinator />
       <NavContext.Provider value={nav}>
         <I18nProvider>
           <Layout>

@@ -51,7 +51,7 @@ function StatusBadge({ op }: { op: TreasuryOp }) {
 function Actions({ op, onVerify }: { op: TreasuryOp; onVerify?: (op: TreasuryOp) => void | Promise<void> }) {
   return (
     <span className="flex items-center gap-0.5">
-      {op.accountId && (op.status ?? 'pending') === 'pending' && onVerify ? (
+      {op.txHash && (op.status ?? 'pending') === 'pending' && onVerify ? (
         <button
           onClick={() => void onVerify(op)}
           className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-strong"
@@ -96,7 +96,7 @@ export function ActivityTable({ ops, own }: { ops: TreasuryOp[]; own?: string })
   const verify = async (op: TreasuryOp) => {
     const r = await verifyAndSettle(op.id)
     if (!r.ok) toast.error(t('Operação não encontrada.', 'Operation not found.'))
-    else if (r.status === 'confirmed') toast.success(t('Liquidação verificada e conta baixada.', 'Settlement verified and bill settled.'))
+    else if (r.status === 'confirmed') toast.success(op.accountId ? t('Liquidação verificada e conta baixada.', 'Settlement verified and bill settled.') : t('Liquidação verificada.', 'Settlement verified.'))
     else if (r.status === 'failed') toast.error(t('Transação falhou na rede.', 'Transaction failed on-chain.'))
     else toast.warning(t('Ainda sem confirmação: mantida como pendente/revisão.', 'Not confirmed yet: kept pending/review.'))
   }

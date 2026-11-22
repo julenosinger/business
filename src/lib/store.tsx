@@ -34,13 +34,16 @@ import * as chartOps from './accounting/chart-ops'
 import * as reviewOps from './accounting/reviews'
 import { confirmFee, registerFee, type FeeInput } from './accounting/engine'
 import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accounting/purchase-reconcile'
-import { reconcileTreasuryOp } from './settlement-service'
+import { reconcileTreasuryOp, allocationAmount } from './settlement-service'
 import type { TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
 import { t } from './i18n'
 
 const STORAGE_KEY = 'gbos:v1'
+
+/** Single-flight de verificação de liquidação (por id de operação), para evitar baixas concorrentes. */
+const inflight = new Set<string>()
 
 export const uid = (): string => crypto.randomUUID().slice(0, 12)
 
@@ -657,19 +660,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!op) return { ok: false, error: 'not_found' as const }
         // Estados terminais: idempotente, não re-verifica nem re-baixa.
         if (op.status === 'confirmed' || op.status === 'failed') return { ok: true, status: op.status }
-        const { status } = await reconcileTreasuryOp(op)
-        setData((d) => {
-          const cur = d.treasuryOps.find((o) => o.id === opId)
-          if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
-          const settledAt = status === 'confirmed' ? new Date().toISOString() : cur.settledAt
-          let next: AppData = { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status, settledAt } : o)) }
-          if (status === 'confirmed' && cur.accountId) {
-            const acc = next.accounts.find((a) => a.id === cur.accountId)
-            if (acc && acc.status === 'open') next = settle(next, cur.accountId, accountOutstanding(acc), cur.explorerUrl, true)
-          }
-          return next
-        })
-        return { ok: true, status }
+        // Single-flight: evita verificações/baixas concorrentes para a mesma operação.
+        if (inflight.has(opId)) return { ok: true, status: op.status ?? 'pending' }
+        inflight.add(opId)
+        try {
+          const { status } = await reconcileTreasuryOp(op)
+          // Alocação contábil (valor exato, nunca o saldo inteiro). Moeda não-USDC exige FX registrado.
+          const alloc = status === 'confirmed' ? allocationAmount(data.ledger, data.settings.currency, op.amount, op.date.slice(0, 10)) : null
+          const finalStatus: TreasuryOpStatus = status === 'confirmed' ? (alloc && alloc.ok ? 'confirmed' : 'requires_review') : status
+          setData((d) => {
+            const cur = d.treasuryOps.find((o) => o.id === opId)
+            if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
+            if (finalStatus !== 'confirmed') {
+              const reviewReason = finalStatus === 'requires_review' ? (alloc && !alloc.ok ? alloc.reason : cur.reviewReason) : undefined
+              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: finalStatus, ...(reviewReason ? { reviewReason } : {}) } : o)) }
+            }
+            // Confirmado on-chain: baixa EXATAMENTE o valor verificado (parcial), nunca o saldo inteiro.
+            const fresh = allocationAmount(d.ledger, d.settings.currency, cur.amount, cur.date.slice(0, 10))
+            if (!fresh.ok) {
+              return { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'requires_review' as const, reviewReason: fresh.reason } : o)) }
+            }
+            let next: AppData = { ...d, treasuryOps: d.treasuryOps.map((o) => (o.id === opId ? { ...o, status: 'confirmed' as const, settledAt: new Date().toISOString() } : o)) }
+            if (cur.accountId) {
+              const acc = next.accounts.find((a) => a.id === cur.accountId)
+              if (acc && acc.status === 'open') {
+                const amount = Math.min(fresh.amount, accountOutstanding(acc))
+                if (amount > 0) next = settle(next, cur.accountId, amount, cur.explorerUrl, true)
+              }
+            }
+            return next
+          })
+          return { ok: true, status: finalStatus }
+        } finally {
+          inflight.delete(opId)
+        }
       },
       updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.'), false),
