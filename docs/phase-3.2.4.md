@@ -1,6 +1,6 @@
 # Fase 3.2.4: Isolamento do ambiente financeiro e integridade do ciclo de vida das obrigações
 
-**HEAD inicial:** `e1c961d` (Fase 3.2.3.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `e1c961d` (Fase 3.2.3.2) · **HEAD final:** `4df2363`
 
 Resultado: **300 testes passando** (eram 291), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
