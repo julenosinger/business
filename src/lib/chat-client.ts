@@ -1,15 +1,12 @@
 /**
- * Transporte de chat com IA (fase UI 2.4) — cliente HTTP real.
+ * Transporte de chat com IA (fase UI 2.4.2) — cliente HTTP real, autenticado por sessão (cookie).
  *
- * Envia a mensagem + um contexto empresarial minimizado para o endpoint do servidor e devolve o
- * resultado tipado. O token de autenticação vem de uma configuração de RUNTIME (nunca do bundle e
- * nunca persistido em localStorage). Sem configuração, o chat fica indisponível (o app instrui como
- * configurar, sem simular resposta).
+ * Nenhum token/segredo é embutido no bundle: a autenticação é feita por cookie HttpOnly de sessão
+ * (`credentials: 'include'`). O cabeçalho `X-GBOS-CSRF` é enviado para a defesa CSRF do servidor.
  */
 
 export interface ChatClientConfig {
   url: string
-  token: string
 }
 
 export type ChatClientResult =
@@ -19,17 +16,20 @@ export type ChatClientResult =
 
 export type ChatTransport = (message: string, context: unknown, signal: AbortSignal) => Promise<ChatClientResult>
 
+export const CSRF_HEADER = 'x-gbos-csrf'
+
 export function createChatTransport(cfg: ChatClientConfig): ChatTransport {
   const base = cfg.url.trim().replace(/\/+$/, '')
   return async (message, context, signal) => {
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.token}` },
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', [CSRF_HEADER]: '1' },
       body: JSON.stringify({ message, context }),
       signal,
     })
     if (!res.ok) {
-      let error = `chat_failed:${res.status}`
+      let error = res.status === 401 ? 'unauthorized' : `chat_failed:${res.status}`
       try {
         const body = (await res.json()) as { error?: string }
         if (body && typeof body.error === 'string') error = body.error

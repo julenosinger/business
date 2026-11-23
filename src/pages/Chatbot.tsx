@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, History, Info, PanelLeftOpen, Square } from 'lucide-react'
-import { Badge } from '@/components/ui'
+import { Bot, History, Info, LogIn, LogOut, PanelLeftOpen, Square } from 'lucide-react'
+import { Badge, Button } from '@/components/ui'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { ChatMessage } from '@/components/chat/ChatMessage'
 import { ChatComposer } from '@/components/chat/ChatComposer'
@@ -9,7 +9,7 @@ import { useChat } from '@/lib/chat'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { businessContext } from '@/lib/intelligence'
-import { fetchChatStatus, type AiStatus } from '@/lib/ai-runtime'
+import { fetchChatStatus, login, logout, type AiStatus } from '@/lib/ai-runtime'
 import { useViewport } from '@/lib/sidebar'
 import { t } from '@/lib/i18n'
 
@@ -29,6 +29,9 @@ export function Chatbot() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [loginBusy, setLoginBusy] = useState(false)
   const [status, setStatus] = useState<AiStatus>({ kind: 'not_configured' })
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -36,7 +39,11 @@ export function Chatbot() {
   const count = active?.messages.length ?? 0
   const responding = active?.messages.some((m) => m.status === 'responding') ?? false
 
-  // Estado real de conexão (transporte + backend + provedor).
+  const refreshStatus = () => {
+    void fetchChatStatus().then(setStatus)
+  }
+
+  // Estado real de conexão (transporte + backend + sessão + provedor).
   useEffect(() => {
     let mounted = true
     void fetchChatStatus().then((s) => {
@@ -72,6 +79,45 @@ export function Chatbot() {
     const lastUser = active ? [...active.messages].reverse().find((m) => m.role === 'user') : undefined
     if (lastUser) send(lastUser.text)
   }
+
+  const doLogin = async () => {
+    if (!secret.trim() || loginBusy) return
+    setLoginBusy(true)
+    const ok = await login(secret.trim())
+    setLoginBusy(false)
+    if (ok) {
+      setSecret('')
+      setLoginOpen(false)
+      refreshStatus()
+    }
+  }
+
+  const doLogout = async () => {
+    await logout()
+    refreshStatus()
+  }
+
+  const authenticated = status.kind === 'ready' || status.kind === 'no_provider'
+  const statusLabel =
+    status.kind === 'ready'
+      ? t('Conectado', 'Connected')
+      : status.kind === 'unavailable'
+        ? t('Indisponível', 'Unavailable')
+        : status.kind === 'no_provider'
+          ? t('Sem provedor', 'No provider')
+          : status.kind === 'unauthenticated'
+            ? t('Não autenticado', 'Not authenticated')
+            : t('Não configurado', 'Not configured')
+  const statusSub =
+    status.kind === 'ready'
+      ? t('Conectado ao backend de IA', 'Connected to the AI backend')
+      : status.kind === 'unavailable'
+        ? t('Backend indisponível', 'Backend unavailable')
+        : status.kind === 'no_provider'
+          ? t('Provedor de IA não configurado', 'AI provider not configured')
+          : status.kind === 'unauthenticated'
+            ? t('Faça login para conversar', 'Sign in to chat')
+            : t('Backend não configurado', 'Backend not configured')
 
   const suggest = (text: string) => {
     if (text) setComposer(text)
@@ -121,21 +167,31 @@ export function Chatbot() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="display truncate text-sm font-semibold sm:text-base">{t('Assistente geral', 'General assistant')}</h1>
-            <p className="truncate text-[11px] text-subtle">
-              {status.kind === 'ready'
-                ? t('Conectado ao backend de IA', 'Connected to the AI backend')
-                : status.kind === 'unavailable'
-                  ? t('Backend indisponível', 'Backend unavailable')
-                  : status.kind === 'no_provider'
-                    ? t('Provedor de IA não configurado', 'AI provider not configured')
-                    : t('Não configurado', 'Not configured')}
-            </p>
+            <p className="truncate text-[11px] text-subtle">{statusSub}</p>
           </div>
           <span className="hidden sm:inline-flex">
-            <Badge tone={status.kind === 'ready' ? 'ok' : 'warn'}>
-              {status.kind === 'ready' ? t('Conectado', 'Connected') : status.kind === 'unavailable' ? t('Indisponível', 'Unavailable') : status.kind === 'no_provider' ? t('Sem provedor', 'No provider') : t('Não conectado', 'Not connected')}
-            </Badge>
+            <Badge tone={status.kind === 'ready' ? 'ok' : 'warn'}>{statusLabel}</Badge>
           </span>
+          {authenticated ? (
+            <button
+              type="button"
+              onClick={() => void doLogout()}
+              aria-label={t('Sair', 'Sign out')}
+              className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <LogOut size={16} />
+            </button>
+          ) : status.kind === 'unauthenticated' ? (
+            <button
+              type="button"
+              onClick={() => setLoginOpen((v) => !v)}
+              aria-expanded={loginOpen}
+              aria-label={t('Conectar', 'Connect')}
+              className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <LogIn size={16} />
+            </button>
+          ) : null}
           {responding ? (
             <button
               type="button"
@@ -157,20 +213,34 @@ export function Chatbot() {
           </button>
         </div>
 
+        {loginOpen ? (
+          <form
+            className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2.5 sm:px-5"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void doLogin()
+            }}
+          >
+            <input
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder={t('Segredo de acesso', 'Access secret')}
+              aria-label={t('Segredo de acesso', 'Access secret')}
+              className="min-h-10 min-w-0 flex-1 rounded-xl border border-line bg-fill/5 px-3 text-sm text-ink outline-none placeholder:text-subtle focus:border-accent focus:ring-2 focus:ring-accent/30"
+            />
+            <Button type="submit" small disabled={!secret.trim() || loginBusy}>
+              {loginBusy ? t('Conectando…', 'Connecting…') : t('Conectar', 'Connect')}
+            </Button>
+          </form>
+        ) : null}
+
         {infoOpen ? (
           <div className="shrink-0 border-b border-warn/25 bg-warn/10 px-4 py-2.5 text-xs text-warn sm:px-5">
-            <span className="sm:hidden">
-              <strong>{chat.configured ? '' : t('Não conectado. ', 'Not connected. ')}</strong>
-            </span>
-            {chat.configured
-              ? t(
-                  'O assistente responde com base nos dados reais da empresa (somente leitura) e nunca executa operações automaticamente.',
-                  'The assistant answers using your real business data (read-only) and never performs operations automatically.',
-                )
-              : t(
-                  'Configure o backend de IA no servidor para habilitar respostas reais. Suas mensagens ficam salvas neste navegador.',
-                  'Configure the AI backend on the server to enable real responses. Your messages are saved in this browser.',
-                )}
+            {t(
+              'O assistente responde apenas com os dados reais da empresa (somente leitura) e nunca executa operações automaticamente. A conversa exige uma sessão autenticada no servidor.',
+              'The assistant answers only with your real business data (read-only) and never performs operations automatically. Chat requires an authenticated server session.',
+            )}
           </div>
         ) : null}
 

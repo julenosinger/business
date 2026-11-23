@@ -1,17 +1,16 @@
 /**
- * Endpoint de chat com IA (fase UI 2.4) — backend seguro.
+ * Endpoint de chat com IA (fase UI 2.4.2) — backend seguro, autenticado por sessão.
  *
- * - Autenticação: aceita o token mestre (`GBOS_API_TOKEN`) OU um token de sessão ESCOPADO (`GBOS_CHAT_TOKEN`).
- *   O token mestre NUNCA deve chegar ao navegador; o frontend usa apenas o token de sessão.
+ * - Autenticação por sessão (cookie HttpOnly, validada no servidor). Sem sessão válida → 401.
  * - Validação de payload (mensagem não vazia e com tamanho máximo; contexto limitado e estruturalmente validado).
- * - Rate limiting simples (janela deslizante em memória, instância única — documentado).
+ * - Rate limiting por identidade (sessão).
  * - Sem provedor configurado → responde "indisponível" com instrução, sem simular resposta.
  * - O `context` (dados empresariais minimizados enviados pelo navegador) é tratado como DADOS OPACOS e NÃO CONFIÁVEIS:
- *   o servidor valida apenas a estrutura e o tamanho, nunca interpreta os valores como autoritativos, e o prompt
- *   de sistema reforça que é dado (não instrução).
+ *   o servidor valida apenas a estrutura e o tamanho, nunca interpreta os valores como autoritativos.
  */
 import { UnauthorizedError } from './api'
 import type { ChatProvider } from './ai'
+import type { SessionStore } from './session'
 
 export interface ChatRequest {
   message?: string
@@ -23,10 +22,15 @@ export type ChatResponse =
   | { ok: true; unavailable: true; reason: 'not_configured'; instructions: string }
   | { ok: false; error: string }
 
+export interface ChatStatus {
+  provider: string | null
+  authenticated: boolean
+}
+
 export interface ChatApi {
-  chat(auth: string | undefined, payload: ChatRequest): Promise<ChatResponse>
-  /** Estado do provedor (sem credenciais nem detalhes internos). */
-  status(): { provider: string | null }
+  chat(sessionId: string | undefined, payload: ChatRequest): Promise<ChatResponse>
+  /** Estado do provedor e da sessão (sem credenciais nem detalhes internos). */
+  status(sessionId: string | undefined): ChatStatus
 }
 
 const MAX_MESSAGE = 4000
@@ -55,40 +59,41 @@ function systemPrompt(context: unknown): string {
   ].join('\n')
 }
 
-/** Janela deslizante simples em memória (rate limiting). */
+/** Janela deslizante por identidade (sessão), em memória. */
 export class RateLimiter {
-  private hits: number[] = []
+  private buckets = new Map<string, number[]>()
   constructor(
     private readonly max: number,
     private readonly windowMs: number,
   ) {}
 
-  allow(now = Date.now()): boolean {
+  allow(key: string, now = Date.now()): boolean {
     const cut = now - this.windowMs
-    this.hits = this.hits.filter((t) => t > cut)
-    if (this.hits.length >= this.max) return false
-    this.hits.push(now)
+    const hits = (this.buckets.get(key) ?? []).filter((t) => t > cut)
+    if (hits.length >= this.max) {
+      this.buckets.set(key, hits)
+      return false
+    }
+    hits.push(now)
+    this.buckets.set(key, hits)
     return true
   }
 }
 
 export interface ChatConfig {
-  /** Token mestre (GBOS_API_TOKEN). */
-  token: string
-  /** Token de sessão escopado para chat (GBOS_CHAT_TOKEN), usado pelo frontend. */
-  chatToken?: string
+  sessions: SessionStore
   provider: ChatProvider | null
   rateLimit?: { max: number; windowMs: number }
 }
 
 /** Valida a estrutura do contexto (dados não confiáveis). Rejeita não-objeto e circular. */
-function serializeContext(context: unknown): { ok: true; bytes: number; value: string } | { ok: false } {
-  if (context === undefined || context === null) return { ok: true, bytes: 2, value: 'null' }
+function serializeContext(context: unknown): { ok: true; bytes: number } | { ok: false } {
+  if (context === undefined || context === null) return { ok: true, bytes: 2 }
   if (typeof context !== 'object' || Array.isArray(context)) return { ok: false }
   try {
     const value = JSON.stringify(context)
     if (value === undefined) return { ok: false }
-    return { ok: true, bytes: value.length, value }
+    return { ok: true, bytes: value.length }
   } catch {
     return { ok: false } // circular ou não serializável
   }
@@ -96,19 +101,14 @@ function serializeContext(context: unknown): { ok: true; bytes: number; value: s
 
 export function createChatApi(cfg: ChatConfig): ChatApi {
   const limiter = new RateLimiter(cfg.rateLimit?.max ?? 30, cfg.rateLimit?.windowMs ?? 60_000)
-  const authorize = (auth: string | undefined): void => {
-    if (!auth) throw new UnauthorizedError()
-    if (auth === `Bearer ${cfg.token}`) return
-    if (cfg.chatToken && auth === `Bearer ${cfg.chatToken}`) return
-    throw new UnauthorizedError()
-  }
   return {
-    status() {
-      return { provider: cfg.provider?.id ?? null }
+    status(sessionId) {
+      return { provider: cfg.provider?.id ?? null, authenticated: cfg.sessions.validate(sessionId) !== null }
     },
-    async chat(auth, payload) {
-      authorize(auth)
-      if (!limiter.allow()) return { ok: false, error: 'rate_limited' }
+    async chat(sessionId, payload) {
+      if (!cfg.sessions.validate(sessionId)) throw new UnauthorizedError()
+      const key = sessionId ?? 'anonymous'
+      if (!limiter.allow(key)) return { ok: false, error: 'rate_limited' }
       const message = typeof payload?.message === 'string' ? payload.message.trim() : ''
       if (!message) return { ok: false, error: 'empty_message' }
       if (message.length > MAX_MESSAGE) return { ok: false, error: 'message_too_long' }
