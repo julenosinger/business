@@ -13,7 +13,7 @@
     "lint": "bun run scripts/lint.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
-    "test": "bun test tests",
+    "test": "bun test tests --isolate",
     "server": "bun run server/index.ts",
     "check": "bash scripts/check.sh",
     "contracts:build": "forge build",

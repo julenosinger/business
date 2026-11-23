@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Briefcase, CalendarCheck, ClipboardList, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
+import { Briefcase, CalendarCheck, ClipboardList, Coins, Copy, Eye, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
 import { DraftPrompt, EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormSection } from '@/components/form'
+import { EmployeeProfile } from '@/components/profiles/EmployeeProfile'
 import { isValidIso } from '@/lib/dates'
 import { isEmailValid } from '@/lib/documents'
 import { findEmployeeDuplicates } from '@/lib/duplicates'
@@ -177,6 +178,7 @@ export function Employees() {
   const network = useNetwork()
   const employees = employeesForEnvironment(data, network)
   const [target, setTarget] = useState<Employee | 'new' | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const month = today().slice(0, 7)
   const active = employees.filter((e) => e.active)
   const payroll = active.reduce((s, e) => s + e.salary, 0)
@@ -238,6 +240,9 @@ export function Employees() {
             <Coins size={14} /> {t('Pagar em USDC', 'Pay in USDC')}
           </Button>
         ) : null}
+        <button aria-label={t('Ver perfil', 'View profile')} title={t('Ver perfil', 'View profile')} onClick={() => setSelected(e.id)} className={`${iconBtn} text-sky`}>
+          <Eye size={15} />
+        </button>
         <button aria-label={t('Editar', 'Edit')} onClick={() => setTarget(e)} className={`${iconBtn} text-muted`}>
           <Pencil size={15} />
         </button>
@@ -276,6 +281,10 @@ export function Employees() {
         }
       />
 
+      {selected ? (
+        <EmployeeProfile employeeId={selected} onBack={() => setSelected(null)} onEdit={(e) => setTarget(e)} />
+      ) : (
+        <>
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="sky" icon={<Users size={20} />} label={t('Funcionários ativos', 'Active employees')} value={String(active.length)} sub={`${employees.length - active.length} ${t('inativo(s)', 'inactive')}`} />
         <KpiTile tone="violet" icon={<Wallet size={20} />} label={t('Folha mensal', 'Monthly payroll')} value={money(payroll)} sub={t('soma dos salários ativos', 'sum of active salaries')} />
@@ -353,7 +362,9 @@ export function Employees() {
                         <div className="flex items-center gap-3">
                           {avatar(e)}
                           <div className="min-w-0">
-                            <div className="truncate font-semibold">{e.name}</div>
+                            <button type="button" onClick={() => setSelected(e.id)} className="block max-w-full truncate text-left font-semibold hover:text-sky focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                              {e.name}
+                            </button>
                             <div className="text-xs text-subtle">{e.role}</div>
                           </div>
                         </div>
@@ -377,7 +388,9 @@ export function Employees() {
                     <div className="flex min-w-0 items-center gap-3">
                       {avatar(e)}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{e.name}</p>
+                        <button type="button" onClick={() => setSelected(e.id)} className="block max-w-full truncate text-left text-sm font-semibold hover:text-sky focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                          {e.name}
+                        </button>
                         <p className="truncate text-xs text-subtle">
                           {e.role} · {fmtDate(e.admission)}
                         </p>
@@ -399,6 +412,8 @@ export function Employees() {
           </>
         )}
       </TCard>
+        </>
+      )}
 
       <EmployeeModal target={target} onClose={() => setTarget(null)} />
     </div>

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, ClipboardList, Copy, Loader2, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Copy, Eye, Loader2, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
 import { Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DraftPrompt, EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormHelpText, FormSection } from '@/components/form'
+import { ContactProfile } from '@/components/profiles/ContactProfile'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -392,6 +393,7 @@ export function Contacts({ kind }: { kind: Kind }) {
   const { data, removeContact } = useStore()
   const network = useNetwork()
   const [target, setTarget] = useState<Contact | 'new' | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(30)
   const isCustomer = kind === 'customer'
@@ -422,6 +424,9 @@ export function Contacts({ kind }: { kind: Kind }) {
   const iconBtn = 'flex size-9 items-center justify-center rounded-lg hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60'
   const actions = (c: Contact) => (
     <div className="flex justify-end gap-1">
+      <button aria-label={t('Ver perfil', 'View profile')} title={t('Ver perfil', 'View profile')} onClick={() => setSelected(c.id)} className={`${iconBtn} text-sky`}>
+        <Eye size={15} />
+      </button>
       <button aria-label={t('Editar', 'Edit')} onClick={() => setTarget(c)} className={`${iconBtn} text-muted`}>
         <Pencil size={15} />
       </button>
@@ -463,6 +468,10 @@ export function Contacts({ kind }: { kind: Kind }) {
         }
       />
 
+      {selected ? (
+        <ContactProfile contactId={selected} kind={kind} onBack={() => setSelected(null)} onEdit={(c) => setTarget(c)} />
+      ) : (
+        <>
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="sky" icon={isCustomer ? <Users size={20} /> : <Truck size={20} />} label={title} value={String(all.length)} sub={all.length ? t('cadastrados', 'registered') : t('Nenhum cadastrado', 'None registered')} />
         {isCustomer ? (
@@ -531,7 +540,9 @@ export function Contacts({ kind }: { kind: Kind }) {
                         <div className="flex items-center gap-3">
                           {avatar(c)}
                           <div className="min-w-0">
-                            <div className="truncate font-semibold">{c.name}</div>
+                            <button type="button" onClick={() => setSelected(c.id)} className="block max-w-full truncate text-left font-semibold hover:text-sky focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                              {c.name}
+                            </button>
                             <div className="text-xs text-subtle">{c.doc || t('sem documento', 'no tax ID')}</div>
                           </div>
                         </div>
@@ -557,7 +568,9 @@ export function Contacts({ kind }: { kind: Kind }) {
                     <div className="flex min-w-0 items-center gap-3">
                       {avatar(c)}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{c.name}</p>
+                        <button type="button" onClick={() => setSelected(c.id)} className="block max-w-full truncate text-left text-sm font-semibold hover:text-sky focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                          {c.name}
+                        </button>
                         <p className="truncate text-xs text-subtle">{c.doc || t('sem documento', 'no tax ID')}</p>
                       </div>
                     </div>
@@ -589,6 +602,8 @@ export function Contacts({ kind }: { kind: Kind }) {
           </>
         )}
       </TCard>
+        </>
+      )}
 
       <ContactModal kind={kind} target={target} onClose={() => setTarget(null)} />
     </div>
