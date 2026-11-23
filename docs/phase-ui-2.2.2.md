@@ -1,6 +1,6 @@
 # Fase UI 2.2.2: Profile Display Consistency & Final Certification
 
-**HEAD inicial:** `e05f138` (Fase UI 2.2.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `e05f138` (Fase UI 2.2.1) · **HEAD final:** `8ef6f05`
 
 Resultado: **387 testes passando** (eram 381), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Fase exclusivamente corretiva — nenhuma alteração em cálculos, pagamentos, liquidações, contabilidade ou blockchain.
 
