@@ -1,6 +1,6 @@
 # Fase UI 2.1: Smart Business Forms — Cadastros Inteligentes
 
-**HEAD inicial:** `e32ccca` (Fase UI 2.0) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `e32ccca` (Fase UI 2.0) · **HEAD final:** `7fb7421`
 
 Resultado: **340 testes passando** (eram 323), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
