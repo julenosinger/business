@@ -1,6 +1,6 @@
 # Fase UI 2.0: Enriquecimento dos cadastros empresariais
 
-**HEAD inicial:** `515c669` (Fase UI 1.0) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `515c669` (Fase UI 1.0) · **HEAD final:** `290f58c`
 
 Resultado: **323 testes passando** (eram 317), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
