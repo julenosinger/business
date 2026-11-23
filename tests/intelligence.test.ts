@@ -77,6 +77,16 @@ describe('inteligência operacional (indicadores reais, por moeda)', () => {
     expect(s.lowStock).toEqual([{ name: 'Produto A', stock: 2, minStock: 5 }])
   })
 
+  test('contagem de itens do estoque considera somente o ambiente selecionado', () => {
+    const d = emptyData()
+    d.products = [
+      { id: 'p1', sku: 'S1', name: 'A', category: 'Geral', unit: 'un', cost: 1, price: 2, stock: 1, minStock: 0, environment: 'mainnet' },
+      { id: 'p2', sku: 'S2', name: 'B', category: 'Geral', unit: 'un', cost: 1, price: 2, stock: 1, minStock: 0, environment: 'testnet' },
+    ]
+    expect(businessTools.stockSummary(d, 'mainnet').totalItems).toBe(1)
+    expect(businessTools.stockSummary(d, 'testnet').totalItems).toBe(1)
+  })
+
   test('contexto consolidado distingue ausência de dados (sem erro)', () => {
     const d = emptyData()
     const ctx = businessContext(d, 'mainnet')

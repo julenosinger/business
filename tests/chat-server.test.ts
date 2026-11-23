@@ -56,4 +56,26 @@ describe('endpoint de chat (backend seguro)', () => {
     expect(p?.id).toBe('openai')
     expect(p?.model).toBe('m')
   })
+
+  test('autenticação: token de sessão escopado é aceito (mestre nunca vai ao navegador)', async () => {
+    const api = createChatApi({ token: 'master', chatToken: 'session', provider: mockProvider() })
+    expect((await api.chat('Bearer session', { message: 'oi' })).ok).toBe(true)
+    expect((await api.chat('Bearer master', { message: 'oi' })).ok).toBe(true)
+    await expect(api.chat('Bearer errado', { message: 'oi' })).rejects.toThrow(UnauthorizedError)
+    await expect(api.chat(undefined, { message: 'oi' })).rejects.toThrow(UnauthorizedError)
+  })
+
+  test('contexto não confiável: rejeita não-objeto e circular', async () => {
+    const api = createChatApi({ token: 'secret', provider: mockProvider() })
+    expect(await api.chat('Bearer secret', { message: 'oi', context: 'texto' })).toEqual({ ok: false, error: 'context_invalid' })
+    expect(await api.chat('Bearer secret', { message: 'oi', context: [1, 2] })).toEqual({ ok: false, error: 'context_invalid' })
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(await api.chat('Bearer secret', { message: 'oi', context: circular })).toEqual({ ok: false, error: 'context_invalid' })
+  })
+
+  test('status expõe apenas o id do provedor (sem credenciais)', () => {
+    expect(createChatApi({ token: 'secret', provider: null }).status()).toEqual({ provider: null })
+    expect(createChatApi({ token: 'secret', provider: mockProvider() }).status()).toEqual({ provider: 'mock' })
+  })
 })

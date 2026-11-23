@@ -37,7 +37,7 @@ const provider = resolveProvider({
   model: process.env.GBOS_AI_MODEL,
   baseUrl: process.env.GBOS_AI_BASE_URL,
 })
-const chat = createChatApi({ token, provider })
+const chat = createChatApi({ token, chatToken: process.env.GBOS_CHAT_TOKEN, provider })
 if (!provider) {
   console.log('AI chat is unavailable: set GBOS_AI_PROVIDER and GBOS_AI_API_KEY to enable real responses.')
 }
@@ -50,6 +50,7 @@ Bun.serve({
     const url = new URL(req.url)
     const auth = req.headers.get('authorization') ?? undefined
     try {
+      if (req.method === 'GET' && url.pathname === '/api/chat/status') return json(chat.status())
       if (req.method === 'GET' && url.pathname === '/api/ledger') return json(api.getLedger(auth))
       if (req.method === 'POST' && url.pathname === '/api/ledger/events') return json(api.postEvent(auth, (await req.json()) as never))
       if (req.method === 'POST' && url.pathname === '/api/ledger/settle') return json(await api.settle(auth, (await req.json()) as never))

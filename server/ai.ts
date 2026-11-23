@@ -35,17 +35,27 @@ export interface ProviderConfig {
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1'
 const DEFAULT_ANTHROPIC_BASE = 'https://api.anthropic.com/v1'
 
+/** Timeout da chamada ao provedor (evita requisições penduradas). */
+const PROVIDER_TIMEOUT_MS = 30_000
+/** Tamanho máximo da resposta (evita consumo/custo descontrolado). */
+const MAX_RESPONSE_CHARS = 8_000
+
+function clip(text: string): string {
+  return text.length > MAX_RESPONSE_CHARS ? `${text.slice(0, MAX_RESPONSE_CHARS)}\n…` : text
+}
+
 async function openAiGenerate(base: string, apiKey: string, model: string, messages: AiMessage[]): Promise<string> {
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages, temperature: 0.2 }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 1000 }),
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`provider_error:${res.status}`)
   const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
   const text = body.choices?.[0]?.message?.content?.trim()
   if (!text) throw new Error('provider_empty_response')
-  return text
+  return clip(text)
 }
 
 async function anthropicGenerate(base: string, apiKey: string, model: string, messages: AiMessage[]): Promise<string> {
@@ -55,12 +65,13 @@ async function anthropicGenerate(base: string, apiKey: string, model: string, me
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model, max_tokens: 1000, system: system || undefined, messages: rest }),
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`provider_error:${res.status}`)
   const body = (await res.json()) as { content?: { type: string; text?: string }[] }
   const text = body.content?.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('').trim()
   if (!text) throw new Error('provider_empty_response')
-  return text
+  return clip(text)
 }
 
 /** Resolve o provedor a partir da configuração. `null` = indisponível (não há simulação). */

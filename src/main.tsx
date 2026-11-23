@@ -22,8 +22,12 @@ import { Toaster } from 'sonner'
 import { config } from './config'
 import App from './App'
 import { installShareSync } from './lib/share'
+import { initChatRuntime } from './lib/ai-runtime'
 import './index.css'
 import { useTheme } from './lib/theme'
+
+// Inicializa o transporte de IA uma única vez (idempotente). Sem configuração, o chat fica indisponível.
+initChatRuntime()
 
 const queryClient = new QueryClient()
 

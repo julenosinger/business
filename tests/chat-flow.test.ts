@@ -7,7 +7,7 @@ try {
   // Já registrado em outro arquivo de teste do mesmo processo.
 }
 
-const { chatStore, configureChatTransport, getChatState } = await import('../src/lib/chat')
+const { chatStore, configureChatTransport, getChatState, setResponseTimeout } = await import('../src/lib/chat')
 
 function resetChat(): void {
   const { conversations } = getChatState()
@@ -16,9 +16,16 @@ function resetChat(): void {
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
+// Transporte que respeita o AbortSignal (simula o fetch).
+const abortable = (signal: AbortSignal): Promise<never> =>
+  new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+  })
+
 beforeEach(() => {
   localStorage.clear()
   configureChatTransport(null)
+  setResponseTimeout(45_000)
   resetChat()
 })
 
@@ -102,5 +109,25 @@ describe('fluxo de chat (envio real → resposta)', () => {
     const convs = getChatState().conversations
     expect(convs).toHaveLength(1)
     expect(convs[0]!.messages[1]!.text).toBe('resposta original')
+  })
+
+  test('cancelamento marca a mensagem como cancelada (não fica presa)', async () => {
+    configureChatTransport(async (_m, _c, signal) => abortable(signal))
+    chatStore.newConversation()
+    chatStore.send('pergunta')
+    chatStore.cancelResponse()
+    await flush()
+    const conv = getChatState().conversations[0]!
+    expect(conv.messages[1]!.status).toBe('cancelled')
+  })
+
+  test('timeout marca a mensagem como erro (não fica presa em processamento)', async () => {
+    setResponseTimeout(20)
+    configureChatTransport(async (_m, _c, signal) => abortable(signal))
+    chatStore.newConversation()
+    chatStore.send('pergunta')
+    await new Promise((r) => setTimeout(r, 80))
+    const conv = getChatState().conversations[0]!
+    expect(conv.messages[1]!.status).toBe('error')
   })
 })

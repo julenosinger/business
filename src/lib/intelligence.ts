@@ -19,6 +19,7 @@ import {
   accountsForEnvironment,
   lowStockForEnvironment,
   monthPeriod,
+  productsForEnvironment,
   purchasesForEnvironment,
   salesForEnvironment,
   stockValueForEnvironment,
@@ -128,7 +129,7 @@ function stockSummary(data: AppData, network: NetworkId): StockSummary {
   const low = lowStockForEnvironment(data, network)
   return {
     kind: 'stock',
-    totalItems: data.products.length,
+    totalItems: productsForEnvironment(data, network).length,
     lowStock: low.map((p) => ({ name: p.name, stock: p.stock, minStock: p.minStock })),
     value: { value: round2(stockValueForEnvironment(data, network)), currency: data.settings.currency },
   }

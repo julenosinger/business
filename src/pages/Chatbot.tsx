@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, History, Info, PanelLeftOpen } from 'lucide-react'
+import { Bot, History, Info, PanelLeftOpen, Square } from 'lucide-react'
 import { Badge } from '@/components/ui'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { ChatMessage } from '@/components/chat/ChatMessage'
@@ -9,6 +9,7 @@ import { useChat } from '@/lib/chat'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { businessContext } from '@/lib/intelligence'
+import { fetchChatStatus, type AiStatus } from '@/lib/ai-runtime'
 import { useViewport } from '@/lib/sidebar'
 import { t } from '@/lib/i18n'
 
@@ -28,11 +29,23 @@ export function Chatbot() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [status, setStatus] = useState<AiStatus>({ kind: 'not_configured' })
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const active = chat.active
   const count = active?.messages.length ?? 0
   const responding = active?.messages.some((m) => m.status === 'responding') ?? false
+
+  // Estado real de conexão (transporte + backend + provedor).
+  useEffect(() => {
+    let mounted = true
+    void fetchChatStatus().then((s) => {
+      if (mounted) setStatus(s)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [chat.configured])
 
   // Mantém a última mensagem à vista ao enviar ou trocar de conversa.
   useEffect(() => {
@@ -53,6 +66,11 @@ export function Chatbot() {
     // Envia a mensagem + um contexto empresarial minimizado (somente leitura) para o backend de IA.
     chat.send(text, businessContext(data, network))
     setComposer('')
+  }
+
+  const retry = () => {
+    const lastUser = active ? [...active.messages].reverse().find((m) => m.role === 'user') : undefined
+    if (lastUser) send(lastUser.text)
   }
 
   const suggest = (text: string) => {
@@ -103,11 +121,31 @@ export function Chatbot() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="display truncate text-sm font-semibold sm:text-base">{t('Assistente geral', 'General assistant')}</h1>
-            <p className="truncate text-[11px] text-subtle">{chat.configured ? t('Conectado ao backend de IA', 'Connected to the AI backend') : t('Não configurado', 'Not configured')}</p>
+            <p className="truncate text-[11px] text-subtle">
+              {status.kind === 'ready'
+                ? t('Conectado ao backend de IA', 'Connected to the AI backend')
+                : status.kind === 'unavailable'
+                  ? t('Backend indisponível', 'Backend unavailable')
+                  : status.kind === 'no_provider'
+                    ? t('Provedor de IA não configurado', 'AI provider not configured')
+                    : t('Não configurado', 'Not configured')}
+            </p>
           </div>
           <span className="hidden sm:inline-flex">
-            {chat.configured ? <Badge tone="ok">{t('Conectado', 'Connected')}</Badge> : <Badge tone="warn">{t('Não conectado', 'Not connected')}</Badge>}
+            <Badge tone={status.kind === 'ready' ? 'ok' : 'warn'}>
+              {status.kind === 'ready' ? t('Conectado', 'Connected') : status.kind === 'unavailable' ? t('Indisponível', 'Unavailable') : status.kind === 'no_provider' ? t('Sem provedor', 'No provider') : t('Não conectado', 'Not connected')}
+            </Badge>
           </span>
+          {responding ? (
+            <button
+              type="button"
+              onClick={chat.cancelResponse}
+              aria-label={t('Cancelar resposta', 'Cancel response')}
+              className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <Square size={14} />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setInfoOpen((v) => !v)}
@@ -140,7 +178,7 @@ export function Chatbot() {
           {active && active.messages.length > 0 ? (
             <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-5 sm:px-5">
               {active.messages.map((m) => (
-                <ChatMessage key={m.id} message={m} />
+                <ChatMessage key={m.id} message={m} onRetry={m.status === 'error' ? retry : undefined} />
               ))}
             </div>
           ) : (

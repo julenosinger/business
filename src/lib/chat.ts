@@ -5,7 +5,7 @@ import type { ChatTransport } from './chat-client'
 
 export type ChatRole = 'user' | 'assistant' | 'system'
 
-export type ChatStatus = 'responding' | 'done' | 'error' | 'unavailable'
+export type ChatStatus = 'responding' | 'done' | 'error' | 'unavailable' | 'cancelled'
 
 export interface ChatMessage {
   id: string
@@ -74,14 +74,22 @@ export function chatTransportConfigured(): boolean {
   return transport !== null
 }
 
-/** Requisição em voo (para prevenir respostas obsoletas e envio duplicado). */
+/** Requisição em voo (para prevenir respostas obsoletas, envio duplicado e timeout). */
 interface InFlight {
   conversationId: string
   messageId: string
   abort: AbortController
+  /** True quando o usuário cancelou explicitamente (distingue de timeout/falha de rede). */
+  cancelled: boolean
 }
 
 let inFlight: InFlight | null = null
+
+/** Tempo máximo de espera pela resposta do provedor (configurável para testes). */
+let responseTimeoutMs = 45_000
+export function setResponseTimeout(ms: number): void {
+  responseTimeoutMs = ms
+}
 
 function updateMessage(conversationId: string, messageId: string, patch: Partial<ChatMessage>): void {
   const next = state.conversations.map((c) =>
@@ -99,6 +107,10 @@ function unavailableText(): string {
 
 function errorText(): string {
   return t('Não foi possível obter uma resposta agora. Tente novamente em instantes.', 'Could not get a response right now. Try again shortly.')
+}
+
+function cancelledText(): string {
+  return t('Resposta cancelada.', 'Response cancelled.')
 }
 
 /** Anexa a mensagem do usuário e dispara a resposta da IA (assíncrona, com proteção contra envio duplicado). */
@@ -130,9 +142,11 @@ function send(text: string, context: unknown): void {
   }
 
   const abort = new AbortController()
-  inFlight = { conversationId, messageId: assistantId, abort }
+  inFlight = { conversationId, messageId: assistantId, abort, cancelled: false }
+  const timer = setTimeout(() => abort.abort(), responseTimeoutMs)
 
   const settle = (patch: Partial<ChatMessage>): void => {
+    clearTimeout(timer)
     if (inFlight?.messageId !== assistantId) return // resposta obsoleta descartada
     inFlight = null
     updateMessage(conversationId, assistantId, patch)
@@ -145,12 +159,23 @@ function send(text: string, context: unknown): void {
       else settle({ text: errorText(), status: 'error' })
     })
     .catch((err: unknown) => {
+      clearTimeout(timer)
       if ((err as { name?: string })?.name === 'AbortError') {
-        if (inFlight?.messageId === assistantId) inFlight = null
+        if (inFlight?.messageId !== assistantId) return
+        const cancelled = inFlight.cancelled
+        inFlight = null
+        updateMessage(conversationId, assistantId, cancelled ? { text: cancelledText(), status: 'cancelled' } : { text: errorText(), status: 'error' })
         return
       }
       settle({ text: errorText(), status: 'error' })
     })
+}
+
+/** Cancela a resposta em andamento (marca a mensagem como `cancelled`). */
+function cancelResponse(): void {
+  if (!inFlight) return
+  inFlight.cancelled = true
+  inFlight.abort.abort()
 }
 
 /** Mutações do chat (fonte única da verdade + persistência local). */
@@ -162,11 +187,16 @@ export const chatStore = {
     commit(state.conversations, null)
   },
   removeConversation: (id: string): void => {
-    if (inFlight && inFlight.conversationId === id) inFlight.abort.abort()
+    if (inFlight && inFlight.conversationId === id) {
+      inFlight.cancelled = true
+      inFlight.abort.abort()
+      inFlight = null
+    }
     const next = state.conversations.filter((c) => c.id !== id)
     commit(next, state.activeId === id ? null : state.activeId)
   },
   send,
+  cancelResponse,
 }
 
 function subscribe(cb: () => void): () => void {
@@ -184,10 +214,13 @@ export interface ChatApi {
   activeId: string | null
   active: Conversation | null
   configured: boolean
+  /** True enquanto há uma resposta em andamento. */
+  responding: boolean
   select: (id: string) => void
   newConversation: () => void
   removeConversation: (id: string) => void
   send: (text: string, context?: unknown) => void
+  cancelResponse: () => void
 }
 
 export function useChat(): ChatApi {
@@ -197,9 +230,11 @@ export function useChat(): ChatApi {
     activeId: snapshot.activeId,
     active: snapshot.conversations.find((c) => c.id === snapshot.activeId) ?? null,
     configured: chatTransportConfigured(),
+    responding: inFlight !== null,
     select: chatStore.select,
     newConversation: chatStore.newConversation,
     removeConversation: chatStore.removeConversation,
     send: chatStore.send,
+    cancelResponse: chatStore.cancelResponse,
   }
 }
