@@ -20,9 +20,12 @@ export interface Transition {
   result: TransitionResult
 }
 
-const newId = (): string => crypto.randomUUID().slice(0, 12)
-
-export function addContactTransition(d: AppData, c: Omit<Contact, 'id'>, env: NetworkId): Transition {
+/**
+ * O ID é gerado UMA vez por tentativa (no store) e passado como parte do comando. Isso torna as
+ * transições determinísticas: a mesma entrada produz a mesma saída, sem gerar IDs divergentes em
+ * reexecuções.
+ */
+export function addContactTransition(d: AppData, c: Omit<Contact, 'id'>, env: NetworkId, id: string): Transition {
   if (!docValidForSubmit(c.doc, c.personType ?? 'fisica')) {
     return { nextState: d, result: { ok: false, code: 'invalid_document' } }
   }
@@ -30,7 +33,6 @@ export function addContactTransition(d: AppData, c: Omit<Contact, 'id'>, env: Ne
   if (findContactDuplicates(d.contacts.filter((x) => x.kind === c.kind && x.environment === env), dupInput).exact.length > 0) {
     return { nextState: d, result: { ok: false, code: 'duplicate' } }
   }
-  const id = newId()
   return { nextState: { ...d, contacts: [{ ...c, id, environment: env }, ...d.contacts] }, result: { ok: true, id } }
 }
 
@@ -48,12 +50,11 @@ export function updateContactTransition(d: AppData, id: string, patch: Partial<C
   return { nextState: { ...d, contacts: d.contacts.map((x) => (x.id === id ? next : x)) }, result: { ok: true, id } }
 }
 
-export function addEmployeeTransition(d: AppData, e: Omit<Employee, 'id'>, env: NetworkId): Transition {
+export function addEmployeeTransition(d: AppData, e: Omit<Employee, 'id'>, env: NetworkId, id: string): Transition {
   const dupInput = { registration: e.registration ?? '', email: e.email ?? '', name: e.name }
   if (findEmployeeDuplicates(d.employees.filter((x) => x.environment === env), dupInput).exact.length > 0) {
     return { nextState: d, result: { ok: false, code: 'duplicate' } }
   }
-  const id = newId()
   return { nextState: { ...d, employees: [{ ...e, id, environment: env }, ...d.employees] }, result: { ok: true, id } }
 }
 

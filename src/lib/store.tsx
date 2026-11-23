@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
   CAT_PAYROLL,
@@ -432,6 +432,8 @@ const StoreContext = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(load)
+  // Snapshot autoritativo sincronizado: toda mutação o atualiza sincronicamente (fase UI 2.1.3).
+  const dataRef = useRef(data)
 
   setCurrency(data.settings.currency)
 
@@ -450,39 +452,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const store = useMemo<Store>(() => {
     /**
-     * Toda mudança passa por aqui: o razão contábil acompanha na MESMA atualização de estado (atômico na memória).
-     * `auto: false` é só para substituição total dos dados (backup, demonstração, apagar tudo), que não gera lançamentos.
+     * Commit autoritativo (fase UI 2.1.3): `fn` é avaliado UMA vez contra o snapshot sincronizado
+     * (`dataRef.current`), o resultado é aplicado ao snapshot e agendado no React. O razão contábil
+     * acompanha na MESMA atualização (atômico na memória). `auto: false` é só para substituição total.
      */
-    const apply = (fn: (d: AppData) => AppData, auto = true): void =>
-      setData((d) => {
-        const n = fn(d)
-        if (!auto || n === d) return n
-        return autoPost(d, n, { today: today(), actorId: n.settings.owner.trim() || 'local-user', now: new Date().toISOString() })
-      })
+    const apply = (fn: (d: AppData) => AppData, auto = true): void => {
+      const d = dataRef.current
+      const n = fn(d)
+      const final = !auto || n === d ? n : autoPost(d, n, { today: today(), actorId: n.settings.owner.trim() || 'local-user', now: new Date().toISOString() })
+      dataRef.current = final
+      setData(final)
+    }
     const set = (fn: (d: AppData) => AppData) => apply(fn)
+    /** Substituição direta do estado (backup/demonstração/apagar tudo), mantendo o snapshot sincronizado. */
+    const replace = (next: AppData): void => {
+      dataRef.current = next
+      setData(next)
+    }
 
-    /** Operações do razão (plano de contas, revisões, câmbio, taxas): valida agora e reaplica no estado mais recente. */
+    /** Operações do razão (plano de contas, revisões, câmbio, taxas): valida e aplica sobre o snapshot sincronizado. */
     const runLedger = <T,>(op: (l: LedgerState, ctx: Ctx) => OpResult<T>): LedgerResult<T> => {
       const mk = (d: AppData): Ctx => ({ now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' } })
-      const out = op(data.ledger, mk(data))
-      if (!out.ok) {
-        setData((d) => ({ ...d, ledger: op(d.ledger, mk(d)).ledger }))
-        return { ok: false, errors: out.errors }
-      }
-      setData((d) => {
-        const again = op(d.ledger, mk(d))
-        return { ...d, ledger: again.ledger }
-      })
-      return { ok: true, value: out.value }
+      const d0 = dataRef.current
+      const out = op(d0.ledger, mk(d0))
+      replace({ ...d0, ledger: out.ledger })
+      return out.ok ? { ok: true, value: out.value } : { ok: false, errors: out.errors }
     }
 
     /** Aplica uma mudança destrutiva e oferece desfazer por alguns segundos. */
     const undoable = (fn: (d: AppData) => AppData, message: string, auto = true) => {
-      const snapshot = data
+      const snapshot = dataRef.current
       apply(fn, auto)
       toast(message, {
         duration: 8000,
-        action: { label: t('Desfazer', 'Undo'), onClick: () => setData(snapshot) },
+        action: { label: t('Desfazer', 'Undo'), onClick: () => replace(snapshot) },
       })
     }
 
@@ -594,23 +597,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }),
       addContact: (c) => {
         const env = getNetwork()
-        const { result } = addContactTransition(data, c, env)
+        const id = uid()
+        const { result, nextState } = addContactTransition(dataRef.current, c, env, id)
         if (!result.ok) return { ok: false, code: result.code, message: contactSaveMessage(result.code) }
-        // Reexecuta a MESMA transição pura sobre o estado mais recente (gravação atômica, sem efeitos colaterais).
-        setData((d) => {
-          const t = addContactTransition(d, c, env)
-          return t.result.ok ? t.nextState : d
-        })
-        return { ok: true, id: result.id }
+        replace(nextState)
+        return { ok: true, id }
       },
       updateContact: (id, patch) => {
         const env = getNetwork()
-        const { result } = updateContactTransition(data, id, patch, env)
+        const { result, nextState } = updateContactTransition(dataRef.current, id, patch, env)
         if (!result.ok) return { ok: false, code: result.code, message: contactSaveMessage(result.code) }
-        setData((d) => {
-          const t = updateContactTransition(d, id, patch, env)
-          return t.result.ok ? t.nextState : d
-        })
+        replace(nextState)
         return { ok: true, id: result.id }
       },
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
@@ -642,10 +639,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const mk = (d: AppData): Ctx => ({ now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' } })
         const plan = planPurchaseReconciliation(data).filter((i) => wanted.has(i.purchaseId))
         const out = applyPurchaseReconciliation(data.ledger, plan, mk(data))
-        setData((d) => {
+        apply((d) => {
           const again = planPurchaseReconciliation(d).filter((i) => wanted.has(i.purchaseId))
           return { ...d, ledger: applyPurchaseReconciliation(d.ledger, again, mk(d)).ledger }
-        })
+        }, false)
         return { ok: true as const, value: { posted: out.posted, duplicates: out.duplicates, rejected: out.rejected } }
       },
       setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
@@ -977,22 +974,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addEmployee: (e) => {
         const env = getNetwork()
-        const { result } = addEmployeeTransition(data, e, env)
+        const id = uid()
+        const { result, nextState } = addEmployeeTransition(dataRef.current, e, env, id)
         if (!result.ok) return { ok: false, code: result.code, message: employeeSaveMessage(result.code) }
-        setData((d) => {
-          const t = addEmployeeTransition(d, e, env)
-          return t.result.ok ? t.nextState : d
-        })
-        return { ok: true, id: result.id }
+        replace(nextState)
+        return { ok: true, id }
       },
       updateEmployee: (id, patch) => {
         const env = getNetwork()
-        const { result } = updateEmployeeTransition(data, id, patch, env)
+        const { result, nextState } = updateEmployeeTransition(dataRef.current, id, patch, env)
         if (!result.ok) return { ok: false, code: result.code, message: employeeSaveMessage(result.code) }
-        setData((d) => {
-          const t = updateEmployeeTransition(d, id, patch, env)
-          return t.result.ok ? t.nextState : d
-        })
+        replace(nextState)
         return { ok: true, id: result.id }
       },
       removeEmployee: (id) => undoable((d) => ({ ...d, employees: d.employees.filter((e) => e.id !== id) }), t('Funcionário removido.', 'Employee removed.')),
@@ -1096,7 +1088,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         try {
           const { status } = await reconcileTreasuryOp(op)
           const finalStatus: TreasuryOpStatus = status
-          setData((d) => {
+          apply((d) => {
             const cur = d.treasuryOps.find((o) => o.id === opId)
             if (!cur || cur.status === 'confirmed' || cur.status === 'failed') return d
             if (finalStatus !== 'confirmed') {
@@ -1104,7 +1096,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             // Confirmado on-chain: aplica a alocação contábil (ou só confirma o crédito, para depósito).
             return applyConfirmedAccounting(d, opId)
-          })
+          }, false)
           return { ok: true, status: finalStatus }
         } finally {
           inflight.delete(opId)
@@ -1122,12 +1114,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // Resultado determinístico a partir do snapshot atual (nunca reenvia transação).
           const preview = applyConfirmedAccounting(data, opId)
           const outcome: AccountingStatus = preview.treasuryOps.find((o) => o.id === opId)?.accountingStatus ?? 'requires_review'
-          setData((d) => {
+          apply((d) => {
             const cur = d.treasuryOps.find((o) => o.id === opId)
             if (!cur || cur.status !== 'confirmed') return d
             if (cur.accountingStatus === 'settled' || cur.accountingStatus === 'partially_settled') return d
             return applyConfirmedAccounting(d, opId)
-          })
+          }, false)
           return { ok: true, status: outcome }
         } finally {
           inflight.delete(opId)

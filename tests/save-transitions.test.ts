@@ -42,22 +42,23 @@ const base = (over: Partial<AppData> = {}): AppData => ({ ...emptyData(), ...ove
 describe('transições puras de cadastro (contato)', () => {
   test('cadastro válido retorna sucesso e altera o estado', () => {
     const d = base()
-    const t = addContactTransition(d, { kind: 'customer', name: 'Fulano', doc: '', email: '', phone: '', wallet: '' }, 'mainnet')
-    expect(t.result.ok).toBe(true)
-    if (t.result.ok) expect(t.nextState.contacts).toHaveLength(1)
+    const t = addContactTransition(d, { kind: 'customer', name: 'Fulano', doc: '', email: '', phone: '', wallet: '' }, 'mainnet', 'id-1')
+    expect(t.result).toEqual({ ok: true, id: 'id-1' })
+    expect(t.nextState.contacts).toHaveLength(1)
+    expect(t.nextState.contacts[0]!.id).toBe('id-1')
     expect(t.nextState.contacts[0]!.environment).toBe('mainnet')
   })
 
   test('duplicidade exata (CPF) retorna erro e não altera o estado', () => {
     const d = base({ contacts: [contact({ id: 'a', doc: '111.444.777-35' })] })
-    const t = addContactTransition(d, { kind: 'customer', name: 'Outro', doc: '11144477735', email: '', phone: '', wallet: '' }, 'mainnet')
+    const t = addContactTransition(d, { kind: 'customer', name: 'Outro', doc: '11144477735', email: '', phone: '', wallet: '' }, 'mainnet', 'id-2')
     expect(t.result).toEqual({ ok: false, code: 'duplicate' })
     expect(t.nextState).toBe(d)
   })
 
   test('documento inválido retorna invalid_document', () => {
     const d = base()
-    const t = addContactTransition(d, { kind: 'customer', name: 'Fulano', doc: '111.444.777-36', email: '', phone: '', wallet: '' }, 'mainnet')
+    const t = addContactTransition(d, { kind: 'customer', name: 'Fulano', doc: '111.444.777-36', email: '', phone: '', wallet: '' }, 'mainnet', 'id-3')
     expect(t.result).toEqual({ ok: false, code: 'invalid_document' })
     expect(t.nextState).toBe(d)
   })
@@ -83,20 +84,44 @@ describe('transições puras de cadastro (contato)', () => {
 
   test('duas submissões seguidas não criam duplicata (transição reaplicada sobre o estado atualizado)', () => {
     const input = { kind: 'customer' as const, name: 'Fulano', doc: '111.444.777-35', email: '', phone: '', wallet: '' }
-    const first = addContactTransition(base(), input, 'mainnet')
-    expect(first.result.ok).toBe(true)
+    const first = addContactTransition(base(), input, 'mainnet', 'id-a')
+    expect(first.result).toEqual({ ok: true, id: 'id-a' })
     // A segunda execução usa o nextState da primeira (simulando o updater reaplicado).
-    const second = addContactTransition(first.nextState, input, 'mainnet')
+    const second = addContactTransition(first.nextState, input, 'mainnet', 'id-b')
     expect(second.result).toEqual({ ok: false, code: 'duplicate' })
     expect(second.nextState).toBe(first.nextState)
+  })
+
+  test('transições são determinísticas (mesma entrada → mesma saída)', () => {
+    const input = { kind: 'customer' as const, name: 'Fulano', doc: '', email: '', phone: '', wallet: '' }
+    const a = addContactTransition(base(), input, 'mainnet', 'fixed-id')
+    const b = addContactTransition(base(), input, 'mainnet', 'fixed-id')
+    expect(a).toEqual(b)
+  })
+
+  test('loop de commit (snapshot sincronizado): submissões rápidas não duplicam e IDs ficam consistentes', () => {
+    // Modela o mecanismo do store: um snapshot mutável (dataRef.current) avaliado/atualizado sincronamente.
+    let state = base()
+    const input = { kind: 'customer' as const, name: 'Fulano', doc: '111.444.777-35', email: '', phone: '', wallet: '' }
+
+    const first = addContactTransition(state, input, 'mainnet', 'op-1')
+    if (first.result.ok) state = first.nextState
+    expect(first.result).toEqual({ ok: true, id: 'op-1' })
+    expect(state.contacts.find((c) => c.id === 'op-1')).toBeTruthy()
+
+    // Segunda submissão (mesmo tick) vê o estado sincronizado → duplicidade detectada, sem gravação.
+    const second = addContactTransition(state, input, 'mainnet', 'op-2')
+    expect(second.result).toEqual({ ok: false, code: 'duplicate' })
+    expect(second.nextState).toBe(state)
+    expect(state.contacts).toHaveLength(1)
   })
 })
 
 describe('transições puras de cadastro (funcionário)', () => {
   test('cadastro válido e duplicidade por matrícula', () => {
-    const ok = addEmployeeTransition(base(), { name: 'F', role: 'r', salary: 1, wallet: '', admission: '2026-01-01', active: true }, 'mainnet')
-    expect(ok.result.ok).toBe(true)
-    const dup = addEmployeeTransition(base({ employees: [employee({ id: 'a', registration: 'MAT-001' })] }), { name: 'G', role: 'r', salary: 1, wallet: '', admission: '2026-01-01', active: true, registration: 'mat-001' }, 'mainnet')
+    const ok = addEmployeeTransition(base(), { name: 'F', role: 'r', salary: 1, wallet: '', admission: '2026-01-01', active: true }, 'mainnet', 'id-e1')
+    expect(ok.result).toEqual({ ok: true, id: 'id-e1' })
+    const dup = addEmployeeTransition(base({ employees: [employee({ id: 'a', registration: 'MAT-001' })] }), { name: 'G', role: 'r', salary: 1, wallet: '', admission: '2026-01-01', active: true, registration: 'mat-001' }, 'mainnet', 'id-e2')
     expect(dup.result).toEqual({ ok: false, code: 'duplicate' })
   })
 
