@@ -483,9 +483,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const undoable = (fn: (d: AppData) => AppData, message: string, auto = true) => {
       const snapshot = dataRef.current
       apply(fn, auto)
+      const after = dataRef.current
       toast(message, {
         duration: 8000,
-        action: { label: t('Desfazer', 'Undo'), onClick: () => replace(snapshot) },
+        action: {
+          label: t('Desfazer', 'Undo'),
+          onClick: () => {
+            // Impede restaurar um snapshot completo quando houve alterações posteriores (evita perda de dados).
+            if (dataRef.current !== after) {
+              toast.info(t('Não foi possível desfazer: houve alterações posteriores.', 'Could not undo: later changes occurred.'))
+              return
+            }
+            replace(snapshot)
+          },
+        },
       })
     }
 
