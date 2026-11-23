@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Check, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Tag, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
+import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -49,65 +50,93 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   }
 
   return (
-    <Modal open={target !== null} onClose={onClose} title={editing ? t('Editar conta', 'Edit bill') : t('Nova conta', 'New bill')}>
-      <div className="space-y-3">
+    <Modal
+      open={target !== null}
+      onClose={onClose}
+      icon={<Receipt size={22} />}
+      title={editing ? t('Editar conta', 'Edit bill') : t('Nova conta', 'New bill')}
+      subtitle={editing ? t('Ajuste os dados desta obrigação.', 'Adjust this obligation.') : t('Registre uma obrigação a pagar ou a receber.', 'Record a payable or a receivable.')}
+      size="form"
+    >
+      <div className="space-y-5">
         {!editing ? (
-          <div className="flex gap-2">
-            <button onClick={() => pick('payable')} className={`min-h-10 flex-1 rounded-xl text-sm font-semibold ${kind === 'payable' ? 'bg-bad/20 text-bad' : 'border border-line text-muted'}`}>
-              {t('A pagar', 'Payable')}
-            </button>
-            <button onClick={() => pick('receivable')} className={`min-h-10 flex-1 rounded-xl text-sm font-semibold ${kind === 'receivable' ? 'bg-ok/20 text-ok' : 'border border-line text-muted'}`}>
-              {t('A receber', 'Receivable')}
-            </button>
-          </div>
+          <FormSection title={t('Tipo de conta', 'Account type')} icon={<Repeat size={14} />}>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => pick('payable')}
+                aria-pressed={kind === 'payable'}
+                className={`flex min-h-12 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${
+                  kind === 'payable' ? 'bg-bad/20 text-bad ring-1 ring-bad/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'
+                }`}
+              >
+                <ArrowUpRight size={16} /> {t('A pagar', 'Payable')}
+              </button>
+              <button
+                type="button"
+                onClick={() => pick('receivable')}
+                aria-pressed={kind === 'receivable'}
+                className={`flex min-h-12 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${
+                  kind === 'receivable' ? 'bg-ok/20 text-ok ring-1 ring-ok/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'
+                }`}
+              >
+                <ArrowDownLeft size={16} /> {t('A receber', 'Receivable')}
+              </button>
+            </div>
+          </FormSection>
         ) : null}
-        <Field label={t('Descrição', 'Description')}>
-          <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </Field>
-        <Field label={kind === 'payable' ? t('Fornecedor / credor', 'Supplier / creditor') : t('Cliente', 'Customer')}>
-          <select className={inputCls} value={contactId} onChange={(e) => setContactId(e.target.value)}>
-            <option value="">{t('Não informado', 'Not specified')}</option>
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t('Categoria', 'Category')}>
-          <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
-            {cats.map((c) => (
-              <option key={c} value={c}>
-                {cat(c)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t('Valor', 'Amount')}>
-            <input className={inputCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
+
+        <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
+          <Field label={t('Descrição', 'Description')} required>
+            <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('Ex.: Aluguel do mês', 'E.g. monthly rent')} />
           </Field>
-          <Field label={t('Vencimento', 'Due date')}>
-            <DateField value={dueDate} onChange={setDueDate} />
+          <Field label={kind === 'payable' ? t('Fornecedor / credor', 'Supplier / creditor') : t('Cliente', 'Customer')}>
+            <select className={inputCls} value={contactId} onChange={(e) => setContactId(e.target.value)}>
+              <option value="">{t('Não informado', 'Not specified')}</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </Field>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            {t('Cancelar', 'Cancel')}
-          </Button>
-          <Button
-            disabled={!(value > 0) || !description.trim() || !isValidIso(dueDate)}
-            onClick={() => {
-              const c = data.contacts.find((x) => x.id === contactId)
-              const payload = { description: description.trim(), contactId: c?.id, contactName: c?.name ?? t('Não informado', 'Not specified'), amount: value, dueDate, category }
-              if (editing) updateAccount(editing.id, payload)
-              else addAccount({ kind, ...payload })
-              onClose()
-            }}
-          >
-            {t('Salvar', 'Save')}
-          </Button>
-        </div>
+        </FormSection>
+
+        <FormSection title={t('Classificação', 'Classification')} icon={<Tag size={14} />}>
+          <Field label={t('Categoria', 'Category')}>
+            <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
+              {cats.map((c) => (
+                <option key={c} value={c}>
+                  {cat(c)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </FormSection>
+
+        <FormSection title={t('Condições financeiras', 'Financial terms')} icon={<Banknote size={14} />}>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('Valor', 'Amount')} required>
+              <input className={`${inputCls} num`} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
+            </Field>
+            <Field label={t('Vencimento', 'Due date')} required>
+              <DateField value={dueDate} onChange={setDueDate} />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormFooter
+          left={<EnvironmentBadge />}
+          onCancel={onClose}
+          submitDisabled={!(value > 0) || !description.trim() || !isValidIso(dueDate)}
+          onSubmit={() => {
+            const c = data.contacts.find((x) => x.id === contactId)
+            const payload = { description: description.trim(), contactId: c?.id, contactName: c?.name ?? t('Não informado', 'Not specified'), amount: value, dueDate, category }
+            if (editing) updateAccount(editing.id, payload)
+            else addAccount({ kind, ...payload })
+            onClose()
+          }}
+        />
       </div>
     </Modal>
   )

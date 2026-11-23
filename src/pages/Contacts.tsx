@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Copy, Pencil, Plus, Receipt, Search, Trash2, TrendingUp, Truck, Users, Wallet } from 'lucide-react'
+import { AlertTriangle, Copy, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
 import { Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
+import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
@@ -30,45 +31,61 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
 
+  const isCustomer = kind === 'customer'
+  const icon = isCustomer ? <Users size={22} /> : <Truck size={22} />
+
   return (
-    <Modal open={target !== null} onClose={onClose} title={editing ? t('Editar cadastro', 'Edit record') : kind === 'customer' ? t('Novo cliente', 'New customer') : t('Novo fornecedor', 'New supplier')}>
-      <div className="space-y-3">
-        <Field label={t('Nome', 'Name')}>
-          <input className={inputCls} value={form.name} onChange={set('name')} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t('CPF / CNPJ', 'Tax ID')}>
-            <input className={inputCls} value={form.doc} onChange={set('doc')} />
-          </Field>
-          <Field label={t('Telefone', 'Phone')}>
-            <input className={inputCls} value={form.phone} onChange={set('phone')} />
-          </Field>
-        </div>
-        <Field label="Email">
-          <input className={inputCls} type="email" value={form.email} onChange={set('email')} />
-        </Field>
-        <Field
-          label={t('Carteira para USDC (opcional)', 'USDC wallet (optional)')}
-          hint={walletOk ? t('Usada como destino padrão nos pagamentos pela tesouraria.', 'Used as the default destination for treasury payments.') : t('Endereço inválido. Use um endereço 0x com 42 caracteres.', 'Invalid address. Use a 42-character 0x address.')}
-        >
-          <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
-        </Field>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            {t('Cancelar', 'Cancel')}
-          </Button>
-          <Button
-            disabled={!form.name.trim() || !walletOk}
-            onClick={() => {
-              const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim() }
-              if (editing) updateContact(editing.id, payload)
-              else addContact({ ...payload, kind })
-              onClose()
-            }}
+    <Modal
+      open={target !== null}
+      onClose={onClose}
+      icon={icon}
+      title={editing ? t('Editar cadastro', 'Edit record') : kind === 'customer' ? t('Novo cliente', 'New customer') : t('Novo fornecedor', 'New supplier')}
+      subtitle={editing ? t('Atualize os dados deste cadastro.', 'Update this record.') : isCustomer ? t('Cadastre um cliente.', 'Add a customer.') : t('Cadastre um fornecedor.', 'Add a supplier.')}
+      size="form"
+    >
+      <div className="space-y-5">
+        <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <Field label={t('Nome', 'Name')} required>
+              <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome completo', 'Full name')} />
+            </Field>
+            <Field label={t('CPF / CNPJ', 'Tax ID')}>
+              <input className={inputCls} value={form.doc} onChange={set('doc')} placeholder="000.000.000-00" />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={t('Contato', 'Contact')} icon={<Phone size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Telefone', 'Phone')}>
+              <input className={inputCls} value={form.phone} onChange={set('phone')} placeholder={t('(00) 00000-0000', '(00) 00000-0000')} />
+            </Field>
+            <Field label="Email">
+              <input className={inputCls} type="email" value={form.email} onChange={set('email')} placeholder="email@empresa.com" />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={t('Pagamento digital', 'Digital payment')} icon={<Wallet size={14} />}>
+          <Field
+            label={t('Carteira para USDC (opcional)', 'USDC wallet (optional)')}
+            hint={walletOk ? t('Usada como destino padrão nos pagamentos pela tesouraria.', 'Used as the default destination for treasury payments.') : t('Endereço inválido. Use um endereço 0x com 42 caracteres.', 'Invalid address. Use a 42-character 0x address.')}
           >
-            {t('Salvar', 'Save')}
-          </Button>
-        </div>
+            <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
+          </Field>
+        </FormSection>
+
+        <FormFooter
+          left={<EnvironmentBadge />}
+          onCancel={onClose}
+          submitDisabled={!form.name.trim() || !walletOk}
+          onSubmit={() => {
+            const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim() }
+            if (editing) updateContact(editing.id, payload)
+            else addContact({ ...payload, kind })
+            onClose()
+          }}
+        />
       </div>
     </Modal>
   )

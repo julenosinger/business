@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { CalendarCheck, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
+import { Briefcase, CalendarCheck, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
+import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
 import { Bar, C } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
@@ -34,41 +35,55 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
 
   return (
-    <Modal open={target !== null} onClose={onClose} title={editing ? t('Editar funcionário', 'Edit employee') : t('Novo funcionário', 'New employee')}>
-      <div className="space-y-3">
-        <Field label={t('Nome', 'Name')}>
-          <input className={inputCls} value={form.name} onChange={set('name')} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t('Cargo', 'Role')}>
-            <input className={inputCls} value={form.role} onChange={set('role')} />
+    <Modal
+      open={target !== null}
+      onClose={onClose}
+      icon={<UserRound size={22} />}
+      title={editing ? t('Editar funcionário', 'Edit employee') : t('Novo funcionário', 'New employee')}
+      subtitle={editing ? t('Atualize os dados deste funcionário.', 'Update this employee.') : t('Cadastre um membro da equipe.', 'Add a team member.')}
+      size="form"
+    >
+      <div className="space-y-5">
+        <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
+          <Field label={t('Nome', 'Name')} required>
+            <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome completo', 'Full name')} />
           </Field>
-          <Field label={t('Salário mensal', 'Monthly salary')}>
-            <input className={inputCls} inputMode="decimal" value={form.salary} onChange={set('salary')} placeholder="0,00" />
+        </FormSection>
+
+        <FormSection title={t('Dados profissionais', 'Professional details')} icon={<Briefcase size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Cargo', 'Role')}>
+              <input className={inputCls} value={form.role} onChange={set('role')} placeholder={t('Ex.: Vendedor', 'E.g. Salesperson')} />
+            </Field>
+            <Field label={t('Admissão', 'Hire date')} required>
+              <DateField value={form.admission} onChange={(v) => setForm((f) => ({ ...f, admission: v }))} />
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={t('Remuneração', 'Compensation')} icon={<Coins size={14} />}>
+          <Field label={t('Salário mensal', 'Monthly salary')} required>
+            <input className={`${inputCls} num`} inputMode="decimal" value={form.salary} onChange={set('salary')} placeholder="0,00" />
           </Field>
-        </div>
-        <Field label={t('Admissão', 'Hire date')}>
-          <DateField value={form.admission} onChange={(v) => setForm((f) => ({ ...f, admission: v }))} />
-        </Field>
-        <Field label={t('Carteira para receber em USDC (opcional)', 'Wallet to receive USDC (optional)')} hint={walletOk ? undefined : t('Endereço inválido.', 'Invalid address.')}>
-          <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
-        </Field>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            {t('Cancelar', 'Cancel')}
-          </Button>
-          <Button
-            disabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission)}
-            onClick={() => {
-              const payload = { name: form.name.trim(), role: form.role.trim(), salary, wallet: form.wallet.trim(), admission: form.admission }
-              if (editing) updateEmployee(editing.id, payload)
-              else addEmployee({ ...payload, active: true })
-              onClose()
-            }}
-          >
-            {t('Salvar', 'Save')}
-          </Button>
-        </div>
+        </FormSection>
+
+        <FormSection title={t('Pagamento digital', 'Digital payment')} icon={<Wallet size={14} />}>
+          <Field label={t('Carteira para receber em USDC (opcional)', 'Wallet to receive USDC (optional)')} hint={walletOk ? t('Usada para pagar o salário em USDC pela tesouraria.', 'Used to pay the salary in USDC through the treasury.') : t('Endereço inválido.', 'Invalid address.')}>
+            <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
+          </Field>
+        </FormSection>
+
+        <FormFooter
+          left={<EnvironmentBadge />}
+          onCancel={onClose}
+          submitDisabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission)}
+          onSubmit={() => {
+            const payload = { name: form.name.trim(), role: form.role.trim(), salary, wallet: form.wallet.trim(), admission: form.admission }
+            if (editing) updateEmployee(editing.id, payload)
+            else addEmployee({ ...payload, active: true })
+            onClose()
+          }}
+        />
       </div>
     </Modal>
   )

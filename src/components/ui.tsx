@@ -48,10 +48,18 @@ export function Button({ variant = 'primary', small, className, ...rest }: BtnPr
 export const inputCls =
   'w-full min-h-11 rounded-xl border border-line bg-fill/5 px-3 text-sm text-ink placeholder:text-subtle outline-none focus:border-accent focus:ring-2 focus:ring-accent/30'
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({ label, hint, required, children }: { label: string; hint?: string; required?: boolean; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="label mb-1.5 block">{label}</span>
+      <span className="label mb-1.5 block">
+        {label}
+        {required ? (
+          <span className="text-bad" aria-hidden="true">
+            {' '}
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
       {hint ? <span className="mt-1 block text-xs text-subtle">{hint}</span> : null}
     </label>
@@ -119,7 +127,26 @@ export function Empty({ icon, title, text, action }: { icon: ReactNode; title: s
   )
 }
 
-export function Modal({ open, title, onClose, children, wide }: { open: boolean; title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({
+  open,
+  title,
+  subtitle,
+  icon,
+  onClose,
+  children,
+  wide,
+  size,
+}: {
+  open: boolean
+  title: string
+  subtitle?: ReactNode
+  icon?: ReactNode
+  onClose: () => void
+  children: ReactNode
+  wide?: boolean
+  /** Largura do modal. `form` = formulário empresarial (~720px). */
+  size?: 'md' | 'lg' | 'form'
+}) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -128,6 +155,8 @@ export function Modal({ open, title, onClose, children, wide }: { open: boolean;
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  const maxW = size === 'form' ? 'sm:max-w-[720px]' : size === 'lg' ? 'sm:max-w-2xl' : wide ? 'sm:max-w-2xl' : 'sm:max-w-md'
 
   return (
     <AnimatePresence>
@@ -147,16 +176,22 @@ export function Modal({ open, title, onClose, children, wide }: { open: boolean;
             aria-label={title}
             className={clsx(
               'max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-line bg-panel p-5 shadow-2xl sm:rounded-3xl sm:p-6',
-              wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
+              maxW,
             )}
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 40, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
           >
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="display text-xl font-semibold">{title}</h2>
-              <button onClick={onClose} aria-label={t('Fechar', 'Close')} className="flex size-10 items-center justify-center rounded-xl text-muted hover:bg-surface-strong">
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                {icon ? <span className="mt-0.5 flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">{icon}</span> : null}
+                <div className="min-w-0">
+                  <h2 className="display text-xl font-semibold leading-tight">{title}</h2>
+                  {subtitle ? <p className="mt-0.5 text-sm text-muted text-pretty">{subtitle}</p> : null}
+                </div>
+              </div>
+              <button onClick={onClose} aria-label={t('Fechar', 'Close')} className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-surface-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
                 <X size={18} />
               </button>
             </div>
