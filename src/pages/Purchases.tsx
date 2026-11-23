@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, inputCls } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -10,6 +10,7 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { PurchaseReconciliationPanel } from '@/components/accounting/PurchaseReconciliationPanel'
 import { useStore } from '@/lib/store'
+import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountsForEnvironment, contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment } from '@/lib/selectors'
 import { addDays, daysUntil, fmtDate, money, parseNum, today } from '@/lib/format'
@@ -27,6 +28,7 @@ let seq = 1
 
 export function Purchases() {
   const { data, recordPurchase } = useStore()
+  const { profileIntent, clearProfileIntent } = useNav()
   const network = useNetwork()
   const suppliers = contactsForEnvironment(data, network).filter((c) => c.kind === 'supplier')
   const products = productsForEnvironment(data, network)
@@ -37,6 +39,23 @@ export function Purchases() {
   const [dueDate, setDueDate] = useState(addDays(today(), 15))
   const [lines, setLines] = useState<Line[]>([{ key: seq++, productId: '', qty: '', cost: '' }])
   const [limit, setLimit] = useState(15)
+  const [supplierFilter, setSupplierFilter] = useState<{ id: string; name: string } | null>(null)
+
+  // Consome a intenção de navegação vinda de um perfil (uma única vez por navegação).
+  const [seenIntent, setSeenIntent] = useState<ProfileIntent | null>(null)
+  if (profileIntent && profileIntent !== seenIntent) {
+    setSeenIntent(profileIntent)
+    if (profileIntent.kind === 'purchase') {
+      if (suppliers.some((s) => s.id === profileIntent.supplierId)) setSupplierId(profileIntent.supplierId)
+    } else if (profileIntent.kind === 'purchases') {
+      setSupplierFilter({ id: profileIntent.supplierId, name: profileIntent.supplierName })
+    }
+  } else if (!profileIntent && seenIntent) {
+    setSeenIntent(null)
+  }
+  useEffect(() => {
+    if (profileIntent) clearProfileIntent()
+  }, [profileIntent, clearProfileIntent])
 
   const patch = (key: number, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)))
   const parsed = lines.map((l) => ({ ...l, q: parseNum(l.qty), c: parseNum(l.cost) }))
@@ -58,12 +77,13 @@ export function Purchases() {
   }
 
   const history = [
-    ...data.entries.filter((e) => e.category === CAT_PURCHASE).map((e) => ({ id: e.id, date: e.date, desc: e.description, amount: e.amount, paid: true })),
+    ...data.entries.filter((e) => e.category === CAT_PURCHASE).map((e) => ({ id: e.id, date: e.date, desc: e.description, amount: e.amount, paid: true, contactId: undefined as string | undefined })),
     ...scopedAccounts
       .filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
-      .map((a) => ({ id: a.id, date: a.dueDate, desc: a.description, amount: a.amount, paid: false })),
+      .map((a) => ({ id: a.id, date: a.dueDate, desc: a.description, amount: a.amount, paid: false, contactId: a.contactId })),
   ].sort((a, b) => b.date.localeCompare(a.date))
-  const shown = history.slice(0, limit)
+  const filteredHistory = supplierFilter ? history.filter((h) => h.contactId === supplierFilter.id) : history
+  const shown = filteredHistory.slice(0, limit)
 
   const month = monthPeriod(0)
   const paidMonth = data.entries.filter((e) => e.category === CAT_PURCHASE && e.type === 'out' && inPeriod(e.date, month))
@@ -206,9 +226,17 @@ export function Purchases() {
 
         <TCard className="overflow-hidden">
           <div className="border-b border-line p-4 sm:px-5">
-            <PanelTitle icon={<Truck size={18} />} title={t('Compras recentes', 'Recent purchases')} subtitle={count(history.length, t('registro', 'record'), t('registros', 'records'))} />
+            <PanelTitle icon={<Truck size={18} />} title={t('Compras recentes', 'Recent purchases')} subtitle={count(filteredHistory.length, t('registro', 'record'), t('registros', 'records'))} />
+            {supplierFilter ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge tone="accent">{t('Fornecedor', 'Supplier')}: {supplierFilter.name}</Badge>
+                <Button small variant="ghost" onClick={() => setSupplierFilter(null)}>
+                  <X size={14} /> {t('Limpar filtro', 'Clear filter')}
+                </Button>
+              </div>
+            ) : null}
           </div>
-          {history.length === 0 ? (
+          {filteredHistory.length === 0 ? (
             <Empty icon={<ShoppingBag size={22} />} title={t('Nenhuma compra registrada', 'No purchases recorded')} />
           ) : (
             <>
@@ -229,10 +257,10 @@ export function Purchases() {
                   </li>
                 ))}
               </ul>
-              {history.length > shown.length ? (
+              {filteredHistory.length > shown.length ? (
                 <div className="border-t border-line p-3 text-center">
                   <Button variant="ghost" small onClick={() => setLimit((l) => l + 15)}>
-                    {t('Ver mais', 'View more')} ({history.length - shown.length})
+                    {t('Ver mais', 'View more')} ({filteredHistory.length - shown.length})
                   </Button>
                 </div>
               ) : null}

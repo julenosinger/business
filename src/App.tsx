@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Layout } from '@/components/Layout'
-import { NavContext, type Intent, type Nav, type PageId } from '@/lib/nav'
+import { NavContext, type Intent, type Nav, type PageId, type ProfileIntent } from '@/lib/nav'
 import { StoreProvider } from '@/lib/store'
 import { I18nProvider, useLang } from '@/lib/i18n'
 import { readInvoiceFromLocation } from '@/lib/invoice'
@@ -73,6 +73,13 @@ function Workspace() {
   const [payAccountId, setPayAccountId] = useState<string | null>(null)
   const [intent, setIntent] = useState<Intent | null>(null)
   const [ledgerFocus, setLedgerFocus] = useState<string | null>(null)
+  const [profileIntent, setProfileIntent] = useState<ProfileIntent | null>(null)
+
+  const pageFor = (i: ProfileIntent): PageId => {
+    if (i.kind === 'sale' || i.kind === 'sales') return 'sales'
+    if (i.kind === 'purchase' || i.kind === 'purchases') return 'purchases'
+    return 'finance'
+  }
 
   const nav = useMemo<Nav>(
     () => ({
@@ -104,8 +111,15 @@ function Workspace() {
         window.scrollTo({ top: 0 })
       },
       clearLedgerFocus: () => setLedgerFocus(null),
+      profileIntent,
+      openProfileIntent: (i) => {
+        setProfileIntent(i)
+        setPage(pageFor(i))
+        window.scrollTo({ top: 0 })
+      },
+      clearProfileIntent: () => setProfileIntent(null),
     }),
-    [page, payAccountId, intent, ledgerFocus],
+    [page, payAccountId, intent, ledgerFocus, profileIntent],
   )
 
   return (

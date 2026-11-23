@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Search, Tag, Trash2, UserRound } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Search, Tag, Trash2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -10,7 +10,7 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
-import { useNav } from '@/lib/nav'
+import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment, contactsForEnvironment } from '@/lib/selectors'
 import { useDraft } from '@/lib/draft'
@@ -19,7 +19,7 @@ import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/forma
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
 
-function AccountModal({ target, onClose }: { target: Account | 'new' | null; onClose: () => void }) {
+function AccountModal({ target, preset, onClose }: { target: Account | 'new' | null; preset?: { kind: Account['kind']; contactId: string } | null; onClose: () => void }) {
   const { data, addAccount, updateAccount } = useStore()
   const network = useNetwork()
   const editing = target && target !== 'new' ? target : null
@@ -61,12 +61,12 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   }
   const draft = useDraft('account', editing?.id ?? null, accountForm, accountInitial)
 
-  const key = target === null ? null : editing ? editing.id : 'new'
+  const key = target === null ? null : editing ? editing.id : preset ? `new:${preset.kind}:${preset.contactId}` : 'new'
   if (key !== loaded) {
     setLoaded(key)
-    setKind(editing?.kind ?? 'payable')
+    setKind(editing?.kind ?? preset?.kind ?? 'payable')
     setDescription(editing?.description ?? '')
-    setContactId(editing?.contactId ?? '')
+    setContactId(editing?.contactId ?? preset?.contactId ?? '')
     setAmount(editing ? String(editing.amount) : '')
     setDueDate(editing?.dueDate ?? addDays(today(), 15))
     setCategory(editing?.category ?? EXPENSE_CATEGORIES[2])
@@ -297,13 +297,33 @@ type Tab = 'open' | 'payable' | 'receivable' | 'paid'
 
 export function Finance() {
   const { data, settleAccount, cancelAccount } = useStore()
-  const { requestPay, requestIntent } = useNav()
+  const { requestPay, requestIntent, profileIntent, clearProfileIntent } = useNav()
   const network = useNetwork()
   const [tab, setTab] = useState<Tab>('open')
   const [target, setTarget] = useState<Account | 'new' | null>(null)
   const [partial, setPartial] = useState<Account | null>(null)
   const [limit, setLimit] = useState(30)
   const totals = accountTotalsForEnvironment(data, network)
+
+  const [accountPreset, setAccountPreset] = useState<{ kind: Account['kind']; contactId: string } | null>(null)
+  const [accountFilter, setAccountFilter] = useState<{ contactId?: string; employeeId?: string; label: string } | null>(null)
+
+  // Consome a intenção de navegação vinda de um perfil (uma única vez por navegação).
+  const [seenIntent, setSeenIntent] = useState<ProfileIntent | null>(null)
+  if (profileIntent && profileIntent !== seenIntent) {
+    setSeenIntent(profileIntent)
+    if (profileIntent.kind === 'account') {
+      setAccountPreset({ kind: profileIntent.accountKind, contactId: profileIntent.contactId })
+      setTarget('new')
+    } else if (profileIntent.kind === 'accounts') {
+      setAccountFilter({ contactId: profileIntent.contactId, employeeId: profileIntent.employeeId, label: profileIntent.label })
+    }
+  } else if (!profileIntent && seenIntent) {
+    setSeenIntent(null)
+  }
+  useEffect(() => {
+    if (profileIntent) clearProfileIntent()
+  }, [profileIntent, clearProfileIntent])
 
   const scoped = data.accounts.filter((a) => a.environment === network)
   const openAll = scoped.filter((a) => a.status === 'open' && !a.canceledAt)
@@ -313,6 +333,7 @@ export function Finance() {
   const plural = (n: number) => (n === 1 ? t('conta', 'bill') : t('contas', 'bills'))
 
   const list = scoped
+    .filter((a) => (accountFilter ? (accountFilter.employeeId ? a.employeeId === accountFilter.employeeId : a.contactId === accountFilter.contactId) : true))
     .filter((a) => (tab === 'open' ? a.status === 'open' && !a.canceledAt : tab === 'paid' ? a.status === 'paid' : a.kind === tab && a.status === 'open' && !a.canceledAt))
     .sort((a, b) => (tab === 'paid' ? (b.paidAt ?? '').localeCompare(a.paidAt ?? '') : a.dueDate.localeCompare(b.dueDate)))
   const shown = list.slice(0, limit)
@@ -455,6 +476,15 @@ export function Finance() {
           />
         </div>
 
+        {accountFilter ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2 sm:px-5">
+            <Badge tone="accent">{accountFilter.label}</Badge>
+            <Button small variant="ghost" onClick={() => setAccountFilter(null)}>
+              <X size={14} /> {t('Limpar filtro', 'Clear filter')}
+            </Button>
+          </div>
+        ) : null}
+
         {list.length === 0 ? (
           <Empty icon={<Receipt size={22} />} title={t('Nenhuma conta aqui', 'No bills here')} text={t('Compras a prazo, vendas a prazo e folha de pagamento geram contas automaticamente.', 'Credit purchases, credit sales and payroll create bills automatically.')} />
         ) : (
@@ -524,7 +554,7 @@ export function Finance() {
         )}
       </TCard>
 
-      <AccountModal target={target} onClose={() => setTarget(null)} />
+      <AccountModal target={target} preset={target === 'new' ? accountPreset : null} onClose={() => { setTarget(null); setAccountPreset(null) }} />
       <PartialPaymentModal account={partial} onClose={() => setPartial(null)} />
     </div>
   )

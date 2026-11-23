@@ -11,6 +11,7 @@ try {
 const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { StoreProvider, useStore } = await import('../src/lib/store')
+const { NavContext } = await import('../src/lib/nav')
 const { ContactProfile } = await import('../src/components/profiles/ContactProfile')
 const { EmployeeProfile } = await import('../src/components/profiles/EmployeeProfile')
 const { setNetwork } = await import('../src/lib/network')
@@ -25,21 +26,46 @@ function Capture(): null {
   return null
 }
 
-function render(component: React.ReactElement): { container: HTMLElement; store: () => Store; unmount: () => void } {
+// Stub do contexto de navegação: registra a última intenção de perfil disparada.
+let capturedIntent: Record<string, unknown> | null = null
+function makeNav(overrides: Record<string, unknown> = {}) {
+  return {
+    page: 'dashboard',
+    go: () => {},
+    payAccountId: null,
+    requestPay: () => {},
+    intent: null,
+    requestIntent: () => {},
+    ledgerFocus: null,
+    focusLedger: () => {},
+    clearLedgerFocus: () => {},
+    profileIntent: null,
+    openProfileIntent: (i: Record<string, unknown>) => {
+      capturedIntent = i
+    },
+    clearProfileIntent: () => {},
+    ...overrides,
+  }
+}
+
+function render(component: React.ReactElement, nav: Record<string, unknown> = makeNav()): { container: HTMLElement; store: () => Store; intent: () => Record<string, unknown> | null; unmount: () => void } {
   captured = null
+  capturedIntent = null
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   React.act(() => {
-    root.render(React.createElement(StoreProvider, null, React.createElement(Capture), component))
+    root.render(React.createElement(NavContext.Provider, { value: nav }, React.createElement(StoreProvider, null, React.createElement(Capture), component)))
   })
   return {
     container,
     store: () => captured!,
+    intent: () => capturedIntent,
     unmount: () => {
       React.act(() => root.unmount())
       container.remove()
       captured = null
+      capturedIntent = null
     },
   }
 }
@@ -47,6 +73,14 @@ function render(component: React.ReactElement): { container: HTMLElement; store:
 function clickTab(container: HTMLElement, label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
   if (!btn) throw new Error(`aba não encontrada: ${label}`)
+  React.act(() => {
+    btn.click()
+  })
+}
+
+function clickLabel(container: HTMLElement, label: string): void {
+  const btn = [...container.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes(label))
+  if (!btn) throw new Error(`botão não encontrado: ${label}`)
   React.act(() => {
     btn.click()
   })
@@ -247,6 +281,92 @@ describe('Integridade financeira dos perfis (moeda e valor)', () => {
     expect(li).toBeDefined()
     expect(li!.textContent).toContain('1.234,56')
     expect(li!.textContent).not.toContain('0,00 USDC')
+    unmount()
+  })
+})
+
+describe('Ações rápidas (perfil → módulo, pré-seleção por ID)', () => {
+  test('cliente: Nova venda dispara intenção com o ID do cliente', () => {
+    let id = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact(customerInput())
+        id = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, intent, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickLabel(container, 'Nova venda')
+    expect(intent()).toEqual({ kind: 'sale', customerId: id })
+    unmount()
+  })
+
+  test('cliente: Nova conta a receber dispara conta com tipo e contato', () => {
+    let id = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact(customerInput())
+        id = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, intent, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickLabel(container, 'Nova conta a receber')
+    expect(intent()).toEqual({ kind: 'account', accountKind: 'receivable', contactId: id, contactName: 'Fulano Silva' })
+    unmount()
+  })
+
+  test('cliente: Ver vendas e Ver contas disparam filtros por ID', () => {
+    let id = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact(customerInput())
+        id = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, intent, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickLabel(container, 'Ver vendas')
+    expect(intent()).toEqual({ kind: 'sales', customerId: id, customerName: 'Fulano Silva' })
+    clickLabel(container, 'Ver contas')
+    expect(intent()).toEqual({ kind: 'accounts', contactId: id, label: 'Fulano Silva' })
+    unmount()
+  })
+
+  test('fornecedor: Nova compra e Nova conta a pagar usam o fornecedor, nunca o cliente', () => {
+    let id = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact({ kind: 'supplier', name: 'Fornecedor LTDA', doc: '', email: '', phone: '', wallet: '' })
+        id = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, intent, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'supplier', onBack: () => {}, onEdit: () => {} }))
+    clickLabel(container, 'Nova compra')
+    expect(intent()).toEqual({ kind: 'purchase', supplierId: id })
+    clickLabel(container, 'Nova conta a pagar')
+    expect(intent()).toEqual({ kind: 'account', accountKind: 'payable', contactId: id, contactName: 'Fornecedor LTDA' })
+    unmount()
+  })
+
+  test('funcionário: Ver contas dispara filtro por employeeId', () => {
+    let id = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const r = store().addEmployee({ name: 'Maria', role: 'Gerente', salary: 5000, wallet: '', admission: '2025-01-01', active: true })
+        id = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, intent, unmount } = render(React.createElement(EmployeeProfile, { employeeId: id, onBack: () => {}, onEdit: () => {} }))
+    clickLabel(container, 'Ver contas')
+    expect(intent()).toEqual({ kind: 'accounts', employeeId: id, label: 'Maria' })
     unmount()
   })
 })

@@ -19,6 +19,18 @@ export type PageId =
 
 export type Intent = { kind: 'batch'; ids: string[] } | { kind: 'charge'; accountId: string | null }
 
+/**
+ * Intenção de navegação originada em um perfil (Cliente/Fornecedor/Funcionário).
+ * A página de destino consome e limpa; nunca executa operações automaticamente.
+ */
+export type ProfileIntent =
+  | { kind: 'sale'; customerId: string }
+  | { kind: 'sales'; customerId: string; customerName: string }
+  | { kind: 'purchase'; supplierId: string }
+  | { kind: 'purchases'; supplierId: string; supplierName: string }
+  | { kind: 'account'; accountKind: 'receivable' | 'payable'; contactId: string; contactName: string }
+  | { kind: 'accounts'; contactId?: string; employeeId?: string; label: string }
+
 export interface Nav {
   page: PageId
   go: (page: PageId) => void
@@ -34,6 +46,12 @@ export interface Nav {
   focusLedger: (query: string) => void
   /** Limpa o foco do Razão (chamado pela página ao consumir). */
   clearLedgerFocus: () => void
+  /** Intenção de navegação originada em um perfil. */
+  profileIntent: ProfileIntent | null
+  /** Navega para o módulo de destino e entrega a intenção do perfil. */
+  openProfileIntent: (i: ProfileIntent) => void
+  /** Limpa a intenção do perfil (chamado pela página destino ao consumir). */
+  clearProfileIntent: () => void
 }
 
 export const NavContext = createContext<Nav | null>(null)

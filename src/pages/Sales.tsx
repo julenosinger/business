@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { BarChart3, CalendarDays, Check, Coins, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { BarChart3, CalendarDays, Check, Coins, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -9,6 +9,7 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
+import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment, salesForEnvironment } from '@/lib/selectors'
 import { addDays, fmtDate, money, num, today } from '@/lib/format'
@@ -25,6 +26,7 @@ const methods = (): { id: PayMethod; label: string }[] => [
 
 export function Sales() {
   const { data, recordSale, cancelSale } = useStore()
+  const { profileIntent, clearProfileIntent } = useNav()
   const network = useNetwork()
   const catalogProducts = productsForEnvironment(data, network)
   const scopedSales = salesForEnvironment(data, network)
@@ -35,8 +37,26 @@ export function Sales() {
   const [customerId, setCustomerId] = useState('')
   const [method, setMethod] = useState<PayMethod>('pix')
   const [dueDate, setDueDate] = useState(addDays(today(), 30))
+  const [salesFilter, setSalesFilter] = useState<{ id: string; name: string } | null>(null)
 
   const customers = contactsForEnvironment(data, network).filter((c) => c.kind === 'customer')
+
+  // Consome a intenção de navegação vinda de um perfil (uma única vez por navegação).
+  const [seenIntent, setSeenIntent] = useState<ProfileIntent | null>(null)
+  if (profileIntent && profileIntent !== seenIntent) {
+    setSeenIntent(profileIntent)
+    if (profileIntent.kind === 'sale') {
+      if (customers.some((c) => c.id === profileIntent.customerId)) setCustomerId(profileIntent.customerId)
+    } else if (profileIntent.kind === 'sales') {
+      setSalesFilter({ id: profileIntent.customerId, name: profileIntent.customerName })
+    }
+  } else if (!profileIntent && seenIntent) {
+    setSeenIntent(null)
+  }
+  useEffect(() => {
+    if (profileIntent) clearProfileIntent()
+  }, [profileIntent, clearProfileIntent])
+
   const categories = useMemo(() => [...new Set(catalogProducts.map((p) => p.category).filter(Boolean))].sort(), [catalogProducts])
   const products = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -52,6 +72,8 @@ export function Sales() {
   const itemCount = lines.reduce((s, l) => s + l.qty, 0)
 
   const live = scopedSales.filter((s) => !s.canceledAt)
+  // Vendas exibidas na lista (filtro opcional por cliente, vindo do perfil).
+  const shownSales = salesFilter ? scopedSales.filter((s) => s.customerId === salesFilter.id) : scopedSales
   const day = today()
   const todaySales = live.filter((s) => s.date === day)
   const month = monthPeriod(0)
@@ -228,9 +250,17 @@ export function Sales() {
 
       <TCard className="overflow-hidden">
         <div className="border-b border-line p-4 sm:px-5">
-          <PanelTitle icon={<Receipt size={18} />} title={t('Vendas recentes', 'Recent sales')} subtitle={`${scopedSales.length} ${scopedSales.length === 1 ? t('venda registrada', 'recorded sale') : t('vendas registradas', 'recorded sales')}`} />
+          <PanelTitle icon={<Receipt size={18} />} title={t('Vendas recentes', 'Recent sales')} subtitle={`${shownSales.length} ${shownSales.length === 1 ? t('venda registrada', 'recorded sale') : t('vendas registradas', 'recorded sales')}`} />
+          {salesFilter ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge tone="accent">{t('Cliente', 'Customer')}: {salesFilter.name}</Badge>
+              <Button small variant="ghost" onClick={() => setSalesFilter(null)}>
+                <X size={14} /> {t('Limpar filtro', 'Clear filter')}
+              </Button>
+            </div>
+          ) : null}
         </div>
-        {scopedSales.length === 0 ? (
+        {shownSales.length === 0 ? (
           <Empty icon={<Receipt size={22} />} title={t('Nenhuma venda ainda', 'No sales yet')} />
         ) : (
           <>
@@ -248,7 +278,7 @@ export function Sales() {
                   </tr>
                 </thead>
                 <tbody>
-                  {scopedSales.slice(0, limit).map((s) => (
+                  {shownSales.slice(0, limit).map((s) => (
                     <tr key={s.id} className={`transition hover:bg-fill/5 ${s.canceledAt ? 'opacity-60' : ''}`}>
                       <td className={td}>{fmtDate(s.date)}</td>
                       <td className={td}>{s.customerName}</td>
@@ -266,7 +296,7 @@ export function Sales() {
             </div>
 
             <ul className="divide-y divide-line md:hidden">
-              {scopedSales.slice(0, limit).map((s) => (
+              {shownSales.slice(0, limit).map((s) => (
                 <li key={s.id} className={`space-y-2 p-4 ${s.canceledAt ? 'opacity-60' : ''}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -288,7 +318,7 @@ export function Sales() {
             </ul>
           </>
         )}
-        {scopedSales.length > limit ? (
+        {shownSales.length > limit ? (
           <div className="border-t border-line p-3 text-center">
             <Button variant="ghost" small onClick={() => setLimit((l) => l + 30)}>
               {t('Ver mais vendas', 'Show more sales')}

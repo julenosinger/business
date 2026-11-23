@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { ArrowLeft, ClipboardList, Copy, Info, MapPin, Pencil, Receipt, Wallet } from 'lucide-react'
+import { ArrowLeft, ClipboardList, Copy, Eye, Info, MapPin, Pencil, Plus, Receipt, ShoppingBag, ShoppingCart, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty } from '@/components/ui'
 import { TCard, PanelTitle } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
+import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountIsPartial, accountOutstanding, accountsForEnvironment, contactsForEnvironment, purchasesForEnvironment, salesForEnvironment } from '@/lib/selectors'
 import { groupMoneyByCurrency, formatMoneyGroup, formatValue } from '@/lib/profile-money'
@@ -51,6 +52,7 @@ function AccountRow({ a, kind }: { a: Account; kind: 'customer' | 'supplier' }) 
 
 export function ContactProfile({ contactId, kind, onBack, onEdit }: { contactId: string; kind: Contact['kind']; onBack: () => void; onEdit: (c: Contact) => void }) {
   const { data } = useStore()
+  const { openProfileIntent } = useNav()
   const network = useNetwork()
   const [tab, setTab] = useState<Tab>('overview')
 
@@ -115,6 +117,21 @@ export function ContactProfile({ contactId, kind, onBack, onEdit }: { contactId:
 
   const summaryGroups = isCustomer ? openReceivableGroups : openPayableGroups
 
+  // Ações rápidas: entradas para os fluxos existentes dos módulos, transportando apenas o ID estável.
+  const quickActions = isCustomer
+    ? [
+        { key: 'sale', icon: <ShoppingCart size={15} />, label: t('Nova venda', 'New sale'), run: () => openProfileIntent({ kind: 'sale', customerId: contact.id }) },
+        { key: 'receivable', icon: <Plus size={15} />, label: t('Nova conta a receber', 'New receivable'), run: () => openProfileIntent({ kind: 'account', accountKind: 'receivable', contactId: contact.id, contactName: contact.name }) },
+        { key: 'sales', icon: <Eye size={15} />, label: t('Ver vendas', 'View sales'), run: () => openProfileIntent({ kind: 'sales', customerId: contact.id, customerName: contact.name }) },
+        { key: 'accounts', icon: <ClipboardList size={15} />, label: t('Ver contas', 'View bills'), run: () => openProfileIntent({ kind: 'accounts', contactId: contact.id, label: contact.name }) },
+      ]
+    : [
+        { key: 'purchase', icon: <ShoppingBag size={15} />, label: t('Nova compra', 'New purchase'), run: () => openProfileIntent({ kind: 'purchase', supplierId: contact.id }) },
+        { key: 'payable', icon: <Plus size={15} />, label: t('Nova conta a pagar', 'New payable'), run: () => openProfileIntent({ kind: 'account', accountKind: 'payable', contactId: contact.id, contactName: contact.name }) },
+        { key: 'purchases', icon: <Eye size={15} />, label: t('Ver compras', 'View purchases'), run: () => openProfileIntent({ kind: 'purchases', supplierId: contact.id, supplierName: contact.name }) },
+        { key: 'accounts', icon: <ClipboardList size={15} />, label: t('Ver contas', 'View bills'), run: () => openProfileIntent({ kind: 'accounts', contactId: contact.id, label: contact.name }) },
+      ]
+
   return (
     <div className="space-y-4">
       {/* Cabeçalho compacto */}
@@ -142,6 +159,18 @@ export function ContactProfile({ contactId, kind, onBack, onEdit }: { contactId:
               <Pencil size={15} /> {t('Editar', 'Edit')}
             </Button>
           </div>
+        </div>
+      </TCard>
+
+      {/* Ações rápidas */}
+      <TCard className="p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">{t('Ações rápidas', 'Quick actions')}</span>
+          {quickActions.map((a) => (
+            <Button key={a.key} small variant="subtle" onClick={a.run}>
+              {a.icon} {a.label}
+            </Button>
+          ))}
         </div>
       </TCard>
 

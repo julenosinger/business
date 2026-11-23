@@ -5,6 +5,7 @@ import { Badge, Button, Empty } from '@/components/ui'
 import { TCard, PanelTitle } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
+import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountOutstanding, accountsForEnvironment, employeesForEnvironment } from '@/lib/selectors'
 import { groupMoneyByCurrency, formatMoneyGroup, formatValue } from '@/lib/profile-money'
@@ -26,6 +27,7 @@ function InfoItem({ label, value }: { label: string; value?: string }) {
 
 export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: string; onBack: () => void; onEdit: (e: Employee) => void }) {
   const { data } = useStore()
+  const { openProfileIntent } = useNav()
   const network = useNetwork()
   const [tab, setTab] = useState<Tab>('overview')
 
@@ -62,6 +64,11 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
     { id: 'payroll' as const, label: t('Folha', 'Payroll') },
   ]
 
+  // Ações rápidas: navega para o Financeiro filtrado pelas obrigações deste funcionário.
+  const quickActions = [
+    { key: 'accounts', icon: <Coins size={15} />, label: t('Ver contas', 'View bills'), run: () => openProfileIntent({ kind: 'accounts', employeeId: employee.id, label: employee.name }) },
+  ]
+
   return (
     <div className="space-y-4">
       <TCard className="p-4 sm:p-5">
@@ -88,6 +95,18 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
               <Pencil size={15} /> {t('Editar', 'Edit')}
             </Button>
           </div>
+        </div>
+      </TCard>
+
+      {/* Ações rápidas */}
+      <TCard className="p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">{t('Ações rápidas', 'Quick actions')}</span>
+          {quickActions.map((a) => (
+            <Button key={a.key} small variant="subtle" onClick={a.run}>
+              {a.icon} {a.label}
+            </Button>
+          ))}
         </div>
       </TCard>
 
