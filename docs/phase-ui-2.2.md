@@ -1,6 +1,6 @@
 # Fase UI 2.2: Business Profiles & Management
 
-**HEAD inicial:** `f55ef14` (Fase UI 2.1.5) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `f55ef14` (Fase UI 2.1.5) · **HEAD final:** `5217fdf`
 
 Resultado: **377 testes passando** (eram 372), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração em fluxos financeiros, contábeis ou blockchain.
 
