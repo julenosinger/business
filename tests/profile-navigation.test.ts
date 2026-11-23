@@ -88,6 +88,42 @@ function customerInput(): Parameters<Store['addContact']>[0] {
   return { kind: 'customer', name: 'Fulano Silva', doc: '111.444.777-35', email: 'f@x.com', phone: '', wallet: '' }
 }
 
+function clickLabel(container: HTMLElement, label: string): void {
+  const btn = [...container.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes(label))
+  if (!btn) throw new Error(`botão não encontrado: ${label}`)
+  React.act(() => {
+    btn.click()
+  })
+}
+
+// Monta a página com controle da intenção, para testar intenções consecutivas sem remontar.
+function renderPageWithIntent(component: React.ReactElement): { container: HTMLElement; store: () => Store; setIntent: (i: Record<string, unknown> | null) => void; unmount: () => void } {
+  captured = null
+  let current: Record<string, unknown> | null = null
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const apply = () => {
+    React.act(() => {
+      root.render(React.createElement(NavContext.Provider, { value: makeNav(current) }, React.createElement(StoreProvider, null, React.createElement(Capture), component)))
+    })
+  }
+  apply()
+  return {
+    container,
+    store: () => captured!,
+    setIntent: (i) => {
+      current = i
+      apply()
+    },
+    unmount: () => {
+      React.act(() => root.unmount())
+      container.remove()
+      captured = null
+    },
+  }
+}
+
 beforeEach(() => {
   localStorage.clear()
   setNetwork('mainnet')
@@ -214,6 +250,164 @@ describe('Navegação perfil → módulo (integração real)', () => {
     const tbody = container.querySelector('tbody')
     expect(tbody?.textContent).toContain('Salário Maria')
     expect(tbody?.textContent).not.toContain('Conta Manual')
+    unmount()
+  })
+
+  test('Financeiro abre nova conta a pagar com fornecedor válido', () => {
+    let supplierId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact({ kind: 'supplier', name: 'Fornecedor LTDA', doc: '', email: '', phone: '', wallet: '' })
+        supplierId = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'payable', contactId: supplierId, contactName: 'Fornecedor LTDA' })
+    const dialog = container.querySelector('[role="dialog"]')
+    expect(dialog).toBeDefined()
+    const payableBtn = [...dialog!.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('A pagar'))
+    expect(payableBtn?.getAttribute('aria-pressed')).toBe('true')
+    const selects = [...dialog!.querySelectorAll('select')]
+    expect(selects.some((s) => s.value === supplierId)).toBe(true)
+    unmount()
+  })
+
+  test('Financeiro rejeita tipo de contato incorreto (receber com fornecedor)', () => {
+    let supplierId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact({ kind: 'supplier', name: 'Fornecedor LTDA', doc: '', email: '', phone: '', wallet: '' })
+        supplierId = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: supplierId, contactName: 'Fornecedor LTDA' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    unmount()
+  })
+
+  test('Financeiro rejeita tipo de contato incorreto (pagar com cliente)', () => {
+    let customerId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact(customerInput())
+        customerId = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'payable', contactId: customerId, contactName: 'Fulano Silva' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    unmount()
+  })
+
+  test('Financeiro rejeita contato inexistente (não abre o formulário)', () => {
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: 'nao-existe', contactName: 'Fulano Silva' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    unmount()
+  })
+
+  test('Financeiro rejeita contato de outro ambiente', () => {
+    let testnetId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        setNetwork('testnet')
+        const r = store().addContact(customerInput())
+        testnetId = r.ok ? r.id : ''
+        setNetwork('mainnet')
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: testnetId, contactName: 'Fulano Silva' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    unmount()
+  })
+
+  test('abrir conta via perfil não grava automaticamente', () => {
+    let customerId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const r = store().addContact(customerInput())
+        customerId = r.ok ? r.id : ''
+      })
+      unmount()
+    }
+    const { container, store, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: customerId, contactName: 'Fulano Silva' })
+    expect(container.querySelector('[role="dialog"]')).toBeDefined()
+    expect(store().data.accounts.length).toBe(0)
+    unmount()
+  })
+
+  test('filtro permite alternar para contas liquidadas', () => {
+    let contactId = ''
+    let accId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const c = store().addContact(customerInput())
+        contactId = c.ok ? c.id : ''
+        accId = store().addAccount({ kind: 'receivable', description: 'Conta A', contactId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+      })
+      React.act(() => {
+        store().settleAccount(accId)
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'accounts', contactId, label: 'Fulano Silva' })
+    // Aba "Em aberto" (padrão): sem contas, mas sem dizer que não há histórico.
+    expect(container.textContent).toContain('Nenhuma conta nesta situação')
+    clickLabel(container, 'Liquidadas')
+    expect(container.querySelector('tbody')?.textContent).toContain('Conta A')
+    unmount()
+  })
+
+  test('limpeza de filtro restaura a lista completa', () => {
+    let aId = ''
+    let bId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const a = store().addContact(customerInput())
+        const b = store().addContact({ kind: 'customer', name: 'Outro Cliente', doc: '', email: '', phone: '', wallet: '' })
+        aId = a.ok ? a.id : ''
+        bId = b.ok ? b.id : ''
+        store().addAccount({ kind: 'receivable', description: 'Conta A', contactId: aId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+        store().addAccount({ kind: 'receivable', description: 'Conta B', contactId: bId, contactName: 'Outro Cliente', amount: 50, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+      })
+      unmount()
+    }
+    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'accounts', contactId: aId, label: 'Fulano Silva' })
+    expect(container.querySelector('tbody')?.textContent).toContain('Conta A')
+    expect(container.querySelector('tbody')?.textContent).not.toContain('Conta B')
+    clickLabel(container, 'Limpar filtro')
+    expect(container.querySelector('tbody')?.textContent).toContain('Conta A')
+    expect(container.querySelector('tbody')?.textContent).toContain('Conta B')
+    unmount()
+  })
+
+  test('duas intenções consecutivas não reutilizam o ID anterior', () => {
+    let aId = ''
+    let bId = ''
+    {
+      const { store, unmount } = renderPage(React.createElement('div'))
+      React.act(() => {
+        const a = store().addContact(customerInput())
+        const b = store().addContact({ kind: 'customer', name: 'Cliente B', doc: '', email: '', phone: '', wallet: '' })
+        aId = a.ok ? a.id : ''
+        bId = b.ok ? b.id : ''
+      })
+      unmount()
+    }
+    const { container, setIntent, unmount } = renderPageWithIntent(React.createElement(Sales))
+    setIntent({ kind: 'sale', customerId: aId })
+    expect([...container.querySelectorAll('select')].some((s) => s.value === aId)).toBe(true)
+    setIntent({ kind: 'sale', customerId: bId })
+    expect([...container.querySelectorAll('select')].some((s) => s.value === bId)).toBe(true)
+    expect([...container.querySelectorAll('select')].some((s) => s.value === aId)).toBe(false)
     unmount()
   })
 })

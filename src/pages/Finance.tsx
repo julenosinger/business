@@ -295,6 +295,8 @@ function PartialPaymentModal({ account, onClose }: { account: Account | null; on
 
 type Tab = 'open' | 'payable' | 'receivable' | 'paid'
 
+type Rejection = 'not_found' | 'wrong_kind'
+
 export function Finance() {
   const { data, settleAccount, cancelAccount } = useStore()
   const { requestPay, requestIntent, profileIntent, clearProfileIntent } = useNav()
@@ -307,23 +309,40 @@ export function Finance() {
 
   const [accountPreset, setAccountPreset] = useState<{ kind: Account['kind']; contactId: string } | null>(null)
   const [accountFilter, setAccountFilter] = useState<{ contactId?: string; employeeId?: string; label: string } | null>(null)
+  const [rejection, setRejection] = useState<Rejection | null>(null)
 
   // Consome a intenção de navegação vinda de um perfil (uma única vez por navegação).
   const [seenIntent, setSeenIntent] = useState<ProfileIntent | null>(null)
   if (profileIntent && profileIntent !== seenIntent) {
     setSeenIntent(profileIntent)
     if (profileIntent.kind === 'account') {
-      setAccountPreset({ kind: profileIntent.accountKind, contactId: profileIntent.contactId })
-      setTarget('new')
+      // Valida o contato antes de abrir o formulário: existência, ambiente e tipo (cliente × fornecedor).
+      const contact = contactsForEnvironment(data, network).find((c) => c.id === profileIntent.contactId)
+      const expectedKind = profileIntent.accountKind === 'receivable' ? 'customer' : 'supplier'
+      if (!contact || contact.kind !== expectedKind) {
+        setRejection(contact ? 'wrong_kind' : 'not_found')
+      } else {
+        setAccountPreset({ kind: profileIntent.accountKind, contactId: profileIntent.contactId })
+        setTarget('new')
+      }
     } else if (profileIntent.kind === 'accounts') {
       setAccountFilter({ contactId: profileIntent.contactId, employeeId: profileIntent.employeeId, label: profileIntent.label })
     }
   } else if (!profileIntent && seenIntent) {
     setSeenIntent(null)
+    setRejection(null)
   }
   useEffect(() => {
     if (profileIntent) clearProfileIntent()
   }, [profileIntent, clearProfileIntent])
+  useEffect(() => {
+    if (!rejection) return
+    toast.error(
+      rejection === 'not_found'
+        ? t('Cadastro não encontrado neste ambiente. A conta não foi aberta.', 'Record not found in this environment. The bill was not opened.')
+        : t('O contato não corresponde ao tipo de conta (cliente para receber, fornecedor para pagar).', 'The contact does not match the account type (customer to receive, supplier to pay).'),
+    )
+  }, [rejection])
 
   const scoped = data.accounts.filter((a) => a.environment === network)
   const openAll = scoped.filter((a) => a.status === 'open' && !a.canceledAt)
@@ -486,7 +505,20 @@ export function Finance() {
         ) : null}
 
         {list.length === 0 ? (
-          <Empty icon={<Receipt size={22} />} title={t('Nenhuma conta aqui', 'No bills here')} text={t('Compras a prazo, vendas a prazo e folha de pagamento geram contas automaticamente.', 'Credit purchases, credit sales and payroll create bills automatically.')} />
+          accountFilter ? (
+            <Empty
+              icon={<Receipt size={22} />}
+              title={t('Nenhuma conta nesta situação', 'No bills in this status')}
+              text={t('Nada em aberto para este filtro. Veja a aba "Liquidadas" ou limpe o filtro para consultar todo o histórico.', 'Nothing open for this filter. Check the "Settled" tab or clear the filter to see the full history.')}
+              action={
+                <Button variant="ghost" small onClick={() => setAccountFilter(null)}>
+                  <X size={14} /> {t('Limpar filtro', 'Clear filter')}
+                </Button>
+              }
+            />
+          ) : (
+            <Empty icon={<Receipt size={22} />} title={t('Nenhuma conta aqui', 'No bills here')} text={t('Compras a prazo, vendas a prazo e folha de pagamento geram contas automaticamente.', 'Credit purchases, credit sales and payroll create bills automatically.')} />
+          )
         ) : (
           <>
             <div className="hidden md:block">

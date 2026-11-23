@@ -48,7 +48,7 @@ export function Sales() {
     if (profileIntent.kind === 'sale') {
       if (customers.some((c) => c.id === profileIntent.customerId)) setCustomerId(profileIntent.customerId)
     } else if (profileIntent.kind === 'sales') {
-      setSalesFilter({ id: profileIntent.customerId, name: profileIntent.customerName })
+      if (customers.some((c) => c.id === profileIntent.customerId)) setSalesFilter({ id: profileIntent.customerId, name: profileIntent.customerName })
     }
   } else if (!profileIntent && seenIntent) {
     setSeenIntent(null)

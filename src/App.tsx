@@ -86,6 +86,8 @@ function Workspace() {
       page,
       go: (p) => {
         setPage(p)
+        // Descarta intenção de perfil ainda pendente ao navegar por outra via (sidebar/dashboard).
+        setProfileIntent(null)
         window.scrollTo({ top: 0 })
       },
       payAccountId,

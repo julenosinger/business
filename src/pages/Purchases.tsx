@@ -48,7 +48,7 @@ export function Purchases() {
     if (profileIntent.kind === 'purchase') {
       if (suppliers.some((s) => s.id === profileIntent.supplierId)) setSupplierId(profileIntent.supplierId)
     } else if (profileIntent.kind === 'purchases') {
-      setSupplierFilter({ id: profileIntent.supplierId, name: profileIntent.supplierName })
+      if (suppliers.some((s) => s.id === profileIntent.supplierId)) setSupplierFilter({ id: profileIntent.supplierId, name: profileIntent.supplierName })
     }
   } else if (!profileIntent && seenIntent) {
     setSeenIntent(null)
