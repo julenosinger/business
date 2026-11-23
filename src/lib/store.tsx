@@ -286,6 +286,9 @@ export type CancelResult = { ok: true } | { ok: false; reason: string }
 export type BatchCancelResult = { canceled: string[]; refused: { id: string; reason: string }[] }
 export type ClassifyResult = { ok: true } | { ok: false; reason: string }
 
+/** Resultado explícito de gravação de cadastro (fase UI 2.1.1). */
+export type SaveResult = { ok: true; id: string } | { ok: false; code: 'invalid_document' | 'duplicate' | 'not_found' | 'wrong_environment'; message: string }
+
 export type EntityKind = 'product' | 'sale' | 'purchase' | 'contact' | 'employee' | 'shipment' | 'carrier' | 'return' | 'receipt'
 
 export interface SaleInput {
@@ -313,8 +316,8 @@ export interface Store {
   updateProduct: (id: string, patch: Partial<Product>) => void
   removeProduct: (id: string) => void
   moveStock: (productId: string, kind: 'in' | 'out' | 'adjust', qty: number, note: string) => void
-  addContact: (c: Omit<Contact, 'id'>) => void
-  updateContact: (id: string, patch: Partial<Contact>) => void
+  addContact: (c: Omit<Contact, 'id'>) => SaveResult
+  updateContact: (id: string, patch: Partial<Contact>) => SaveResult
   removeContact: (id: string) => void
   addEntry: (e: Omit<Entry, 'id'>) => void
   /** Liga/desliga um adaptador do razão contábil. Cada um só trata registros criados DEPOIS de ligado. */
@@ -355,8 +358,8 @@ export interface Store {
   recordSale: (input: SaleInput) => void
   cancelSale: (id: string) => void
   recordPurchase: (input: PurchaseInput) => void
-  addEmployee: (e: Omit<Employee, 'id'>) => void
-  updateEmployee: (id: string, patch: Partial<Employee>) => void
+  addEmployee: (e: Omit<Employee, 'id'>) => SaveResult
+  updateEmployee: (id: string, patch: Partial<Employee>) => SaveResult
   removeEmployee: (id: string) => void
   runPayroll: (month: string, dueDate: string) => number
   addRequest: (r: Omit<PaymentRequest, 'id' | 'status' | 'createdAt'>) => string
@@ -563,32 +566,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         }),
       addContact: (c) => {
+        const env = getNetwork()
         if (!docValidForSubmit(c.doc, c.personType ?? 'fisica')) {
-          toast.error(t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.'))
-          return
+          return { ok: false, code: 'invalid_document', message: t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.') }
         }
-        const dup = findContactDuplicates(data.contacts.filter((x) => x.kind === c.kind && x.environment === getNetwork()), { doc: c.doc, internalCode: c.internalCode ?? '', name: c.name, email: c.email, kind: c.kind })
-        if (dup.exact.length > 0) {
-          toast.error(t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.'))
-          return
+        const dupInput = { doc: c.doc, internalCode: c.internalCode ?? '', name: c.name, email: c.email, kind: c.kind }
+        if (findContactDuplicates(data.contacts.filter((x) => x.kind === c.kind && x.environment === env), dupInput).exact.length > 0) {
+          return { ok: false, code: 'duplicate', message: t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.') }
         }
-        set((d) => ({ ...d, contacts: [{ ...c, id: uid(), environment: getNetwork() }, ...d.contacts] }))
+        const id = uid()
+        // Gravação atômica com revalidação sobre o estado mais recente (defesa contra corrida).
+        setData((d) => {
+          if (findContactDuplicates(d.contacts.filter((x) => x.kind === c.kind && x.environment === env), dupInput).exact.length > 0) return d
+          return { ...d, contacts: [{ ...c, id, environment: env }, ...d.contacts] }
+        })
+        return { ok: true, id }
       },
       updateContact: (id, patch) => {
+        const env = getNetwork()
         const cur = data.contacts.find((x) => x.id === id)
-        const next = cur ? { ...cur, ...patch } : undefined
-        if (next) {
-          if (!docValidForSubmit(next.doc, next.personType ?? 'fisica')) {
-            toast.error(t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.'))
-            return
-          }
-          const dup = findContactDuplicates(data.contacts.filter((x) => x.kind === next.kind && x.environment === getNetwork()), { doc: next.doc, internalCode: next.internalCode ?? '', name: next.name, email: next.email, kind: next.kind }, id)
-          if (dup.exact.length > 0) {
-            toast.error(t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.'))
-            return
-          }
+        if (!cur) {
+          return { ok: false, code: 'not_found', message: t('Cadastro não encontrado.', 'Record not found.') }
         }
-        set((d) => ({ ...d, contacts: d.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) }))
+        if (cur.environment !== env) {
+          return { ok: false, code: 'wrong_environment', message: t('Este cadastro pertence a outro ambiente.', 'This record belongs to another environment.') }
+        }
+        // O payload NÃO pode alterar o ambiente do registro.
+        const next = { ...cur, ...patch, environment: cur.environment }
+        if (!docValidForSubmit(next.doc, next.personType ?? 'fisica')) {
+          return { ok: false, code: 'invalid_document', message: t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.') }
+        }
+        const dupInput = { doc: next.doc, internalCode: next.internalCode ?? '', name: next.name, email: next.email, kind: next.kind }
+        if (findContactDuplicates(data.contacts.filter((x) => x.kind === next.kind && x.environment === env), dupInput, id).exact.length > 0) {
+          return { ok: false, code: 'duplicate', message: t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.') }
+        }
+        setData((d) => {
+          const c = d.contacts.find((x) => x.id === id)
+          if (!c || c.environment !== env) return d
+          const n = { ...c, ...patch, environment: c.environment }
+          if (!docValidForSubmit(n.doc, n.personType ?? 'fisica')) return d
+          const din = { doc: n.doc, internalCode: n.internalCode ?? '', name: n.name, email: n.email, kind: n.kind }
+          if (findContactDuplicates(d.contacts.filter((x) => x.kind === n.kind && x.environment === env), din, id).exact.length > 0) return d
+          return { ...d, contacts: d.contacts.map((x) => (x.id === id ? n : x)) }
+        })
+        return { ok: true, id }
       },
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
@@ -953,24 +974,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       },
       addEmployee: (e) => {
-        const dup = findEmployeeDuplicates(data.employees.filter((x) => x.environment === getNetwork()), { registration: e.registration ?? '', email: e.email ?? '', name: e.name })
-        if (dup.exact.length > 0) {
-          toast.error(t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.'))
-          return
+        const env = getNetwork()
+        const dupInput = { registration: e.registration ?? '', email: e.email ?? '', name: e.name }
+        if (findEmployeeDuplicates(data.employees.filter((x) => x.environment === env), dupInput).exact.length > 0) {
+          return { ok: false, code: 'duplicate', message: t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.') }
         }
-        set((d) => ({ ...d, employees: [{ ...e, id: uid(), environment: getNetwork() }, ...d.employees] }))
+        const id = uid()
+        setData((d) => {
+          if (findEmployeeDuplicates(d.employees.filter((x) => x.environment === env), dupInput).exact.length > 0) return d
+          return { ...d, employees: [{ ...e, id, environment: env }, ...d.employees] }
+        })
+        return { ok: true, id }
       },
       updateEmployee: (id, patch) => {
+        const env = getNetwork()
         const cur = data.employees.find((x) => x.id === id)
-        const next = cur ? { ...cur, ...patch } : undefined
-        if (next) {
-          const dup = findEmployeeDuplicates(data.employees.filter((x) => x.environment === getNetwork()), { registration: next.registration ?? '', email: next.email ?? '', name: next.name }, id)
-          if (dup.exact.length > 0) {
-            toast.error(t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.'))
-            return
-          }
+        if (!cur) {
+          return { ok: false, code: 'not_found', message: t('Funcionário não encontrado.', 'Employee not found.') }
         }
-        set((d) => ({ ...d, employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) }))
+        if (cur.environment !== env) {
+          return { ok: false, code: 'wrong_environment', message: t('Este funcionário pertence a outro ambiente.', 'This employee belongs to another environment.') }
+        }
+        const next = { ...cur, ...patch, environment: cur.environment }
+        const dupInput = { registration: next.registration ?? '', email: next.email ?? '', name: next.name }
+        if (findEmployeeDuplicates(data.employees.filter((x) => x.environment === env), dupInput, id).exact.length > 0) {
+          return { ok: false, code: 'duplicate', message: t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.') }
+        }
+        setData((d) => {
+          const c = d.employees.find((x) => x.id === id)
+          if (!c || c.environment !== env) return d
+          const n = { ...c, ...patch, environment: c.environment }
+          const din = { registration: n.registration ?? '', email: n.email ?? '', name: n.name }
+          if (findEmployeeDuplicates(d.employees.filter((x) => x.environment === env), din, id).exact.length > 0) return d
+          return { ...d, employees: d.employees.map((x) => (x.id === id ? n : x)) }
+        })
+        return { ok: true, id }
       },
       removeEmployee: (id) => undoable((d) => ({ ...d, employees: d.employees.filter((e) => e.id !== id) }), t('Funcionário removido.', 'Employee removed.')),
       runPayroll: (month, dueDate) => {

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AlertTriangle, ClipboardList, Copy, Loader2, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
 import { Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
@@ -74,8 +74,16 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const setAddress = (k: keyof typeof blankAddress) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, address: { ...f.address, [k]: e.target.value } }))
 
-  const setDoc = (raw: string) => setForm((f) => ({ ...f, doc: f.personType === 'fisica' ? maskCpf(raw) : maskCnpj(raw) }))
-  const setPersonType = (pt: PersonType) => setForm((f) => ({ ...f, personType: pt, doc: pt === 'fisica' ? maskCpf(f.doc) : maskCnpj(f.doc) }))
+  const setDoc = (raw: string) => {
+    cnpjAbort.current?.abort()
+    setCnpjData(null)
+    setForm((f) => ({ ...f, doc: f.personType === 'fisica' ? maskCpf(raw) : maskCnpj(raw) }))
+  }
+  const setPersonType = (pt: PersonType) => {
+    cnpjAbort.current?.abort()
+    setCnpjData(null)
+    setForm((f) => ({ ...f, personType: pt, doc: pt === 'fisica' ? maskCpf(f.doc) : maskCnpj(f.doc) }))
+  }
 
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
   const docInvalid = docInvalidError(form.doc, form.personType)
@@ -96,6 +104,12 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const scopedContacts = contactsForEnvironment(data, network).filter((c) => c.kind === kind)
   const dup = findContactDuplicates(scopedContacts, { doc: form.doc, internalCode: form.internalCode, name: form.name, email: form.email, kind }, editing?.id)
 
+  // Referência ao documento atual, para descartar respostas assíncronas obsoletas.
+  const docRef = useRef(form.doc)
+  useEffect(() => {
+    docRef.current = form.doc
+  }, [form.doc])
+
   // --- Rascunho seguro ---
   const draft = useDraft(`contact-${kind}`, editing?.id ?? null, form, contactToForm(editing ?? undefined))
 
@@ -111,19 +125,25 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
     setCepBusy(true)
     try {
       const r = await lookupCep(cep, controller.signal)
-      setForm((f) => ({
-        ...f,
-        address: {
-          ...f.address,
-          street: f.address.street.trim() ? f.address.street : r.street,
-          neighborhood: f.address.neighborhood.trim() ? f.address.neighborhood : r.neighborhood,
-          city: f.address.city.trim() ? f.address.city : r.city,
-          state: f.address.state.trim() ? f.address.state : r.state,
-        },
-      }))
+      // Aplica somente se o CEP atual ainda for o consultado (descarta resposta obsoleta).
+      setForm((f) => {
+        if (f.address.cep.replace(/\D/g, '') !== cep) return f
+        return {
+          ...f,
+          address: {
+            ...f.address,
+            street: f.address.street.trim() ? f.address.street : r.street,
+            neighborhood: f.address.neighborhood.trim() ? f.address.neighborhood : r.neighborhood,
+            city: f.address.city.trim() ? f.address.city : r.city,
+            state: f.address.state.trim() ? f.address.state : r.state,
+          },
+        }
+      })
       toast.success(t('Endereço preenchido (revise antes de salvar).', 'Address filled (review before saving).'))
-    } catch {
-      toast.error(t('Não foi possível consultar o CEP. Preencha manualmente.', 'Could not look up the postal code. Fill in manually.'))
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error(t('Não foi possível consultar o CEP. Preencha manualmente.', 'Could not look up the postal code. Fill in manually.'))
+      }
     } finally {
       setCepBusy(false)
     }
@@ -131,13 +151,16 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
 
   const searchCnpj = async () => {
     if (!docValidForSubmit(form.doc, 'juridica')) return
+    const cnpj = form.doc.replace(/\D/g, '')
     cnpjAbort.current?.abort()
     const controller = new AbortController()
     cnpjAbort.current = controller
     setCnpjBusy(true)
     setCnpjData(null)
     try {
-      const r = await lookupCnpj(form.doc, controller.signal)
+      const r = await lookupCnpj(cnpj, controller.signal)
+      // Descarta se o CNPJ atual mudou durante a consulta.
+      if (docRef.current.replace(/\D/g, '') !== cnpj) return
       if (r.legalName || r.tradeName || r.street) {
         setCnpjData(r)
         setCnpjApplied(false)
@@ -145,8 +168,10 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
       } else {
         toast.info(t('Nenhum dado confiável encontrado para este CNPJ.', 'No reliable data found for this CNPJ.'))
       }
-    } catch {
-      toast.error(t('Não foi possível consultar o CNPJ. Continue manualmente.', 'Could not look up the CNPJ. Continue manually.'))
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error(t('Não foi possível consultar o CNPJ. Continue manualmente.', 'Could not look up the CNPJ. Continue manually.'))
+      }
     } finally {
       setCnpjBusy(false)
     }
@@ -349,10 +374,14 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
           submitDisabled={!form.name.trim() || !walletOk || !docValidForSubmit(form.doc, form.personType) || emailInvalid}
           onSubmit={() => {
             const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim(), email: form.email.trim() }
-            if (editing) updateContact(editing.id, payload)
-            else addContact({ ...payload, kind })
-            draft.clear()
-            onClose()
+            const res = editing ? updateContact(editing.id, payload) : addContact({ ...payload, kind })
+            if (res.ok) {
+              draft.clear()
+              onClose()
+              toast.success(editing ? t('Cadastro atualizado.', 'Record updated.') : t('Cadastro criado.', 'Record created.'))
+            } else {
+              toast.error(res.message)
+            }
           }}
         />
       </div>

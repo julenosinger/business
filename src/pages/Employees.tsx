@@ -156,10 +156,14 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
           submitDisabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission) || emailInvalid}
           onSubmit={() => {
             const payload = { ...form, name: form.name.trim(), salary, wallet: form.wallet.trim(), email: form.email.trim() }
-            if (editing) updateEmployee(editing.id, payload)
-            else addEmployee({ ...payload, active: true })
-            draft.clear()
-            onClose()
+            const res = editing ? updateEmployee(editing.id, payload) : addEmployee({ ...payload, active: true })
+            if (res.ok) {
+              draft.clear()
+              onClose()
+              toast.success(editing ? t('Funcionário atualizado.', 'Employee updated.') : t('Funcionário criado.', 'Employee created.'))
+            } else {
+              toast.error(res.message)
+            }
           }}
         />
       </div>

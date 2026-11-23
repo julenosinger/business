@@ -29,6 +29,7 @@ async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   const onAbort = (): void => controller.abort()
+  if (signal?.aborted) controller.abort()
   signal?.addEventListener('abort', onAbort)
   try {
     const res = await fetch(url, { signal: controller.signal })

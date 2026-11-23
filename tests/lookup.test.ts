@@ -39,6 +39,16 @@ describe('lookupCep (ViaCEP)', () => {
     g.fetch = async () => new Response('erro', { status: 500 })
     await expect(lookupCep('01001-000')).rejects.toThrow()
   })
+
+  test('sinal de cancelamento (abort) rejeita sem dados', async () => {
+    g.fetch = async (_url: string, opts?: RequestInit) => {
+      if ((opts?.signal as AbortSignal | undefined)?.aborted) throw new DOMException('Aborted', 'AbortError')
+      return jsonResponse({ logradouro: 'Rua X' })
+    }
+    const controller = new AbortController()
+    controller.abort()
+    await expect(lookupCep('01001-000', controller.signal)).rejects.toThrow()
+  })
 })
 
 describe('lookupCnpj (BrasilAPI)', () => {
