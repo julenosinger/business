@@ -41,17 +41,19 @@ export function Toggles() {
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data } = useStore()
-  const { go } = useNav()
+  const { go, page } = useNav()
+  // O Chatbot é um workspace de tela cheia: sem margens, sem largura máxima e sem rolagem da página.
+  const bleed = page === 'chatbot'
   const { mobileOpen } = useSidebar()
   const width = useSidebarWidth()
 
   return (
-    <div className="min-h-dvh">
+    <div className={bleed ? 'h-dvh overflow-hidden' : 'min-h-dvh'}>
       <Sidebar />
       <MobileDrawer />
 
-      <div className="min-w-0 transition-[padding-left] duration-200 ease-out motion-reduce:transition-none" style={{ paddingLeft: width }}>
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-bg/80 px-4 py-3 backdrop-blur sm:px-6">
+      <div className={clsx('min-w-0 transition-[padding-left] duration-200 ease-out motion-reduce:transition-none', bleed && 'flex h-dvh flex-col')} style={{ paddingLeft: width }}>
+        <header className="sticky top-0 z-30 flex shrink-0 items-center gap-3 border-b border-line bg-bg/80 px-4 py-3 backdrop-blur sm:px-6">
           <button
             type="button"
             aria-label={t('Abrir menu', 'Open menu')}
@@ -83,7 +85,7 @@ export function Layout({ children }: { children: ReactNode }) {
             )}
           </ConnectKitButton.Custom>
         </header>
-        <main className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-6">{children}</main>
+        <main className={bleed ? 'flex min-h-0 w-full flex-1 flex-col' : 'mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-6'}>{children}</main>
       </div>
     </div>
   )
