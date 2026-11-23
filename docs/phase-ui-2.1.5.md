@@ -1,6 +1,6 @@
 # Fase UI 2.1.5: Logistics Result Integrity & Final Regression Hardening
 
-**HEAD inicial:** `f03652e` (Fase UI 2.1.4) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `f03652e` (Fase UI 2.1.4) · **HEAD final:** `cd987cd`
 
 Resultado: **372 testes passando** (eram 366), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração visual.
 
