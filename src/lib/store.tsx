@@ -502,15 +502,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const actor = (): string => data.settings.owner || 'user'
 
-    /** Valida no estado atual (para responder à interface) e reaplica no estado mais recente. */
+    /** Executa a operação de logística UMA vez contra o snapshot autoritativo e integra o resultado ao commit. */
     const runShipmentOp = <T,>(op: (d: AppData, now: string) => logistics.Outcome<T>): LogisticsResult<T> => {
       const now = new Date().toISOString()
-      const out = op(data, now)
+      const out = op(dataRef.current, now)
       if (!out.ok) return out
-      apply((d) => {
-        const again = op(d, now)
-        return again.ok ? again.data : d
-      })
+      // Integra o estado já calculado (com autoPost) — sem reexecutar a operação.
+      apply(() => out.data)
       return { ok: true, value: out.value }
     }
 
