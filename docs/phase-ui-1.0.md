@@ -1,6 +1,6 @@
 # Fase UI 1.0: Redesign empresarial dos formulários de cadastro
 
-**HEAD inicial:** `74eb3de` (Fase 3.3) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `74eb3de` (Fase 3.3) · **HEAD final:** `a98be2e`
 
 Resultado: **317 testes passando**, typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração de lógica/validação.
 
