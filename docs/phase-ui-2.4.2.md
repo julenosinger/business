@@ -1,6 +1,6 @@
 # Fase UI 2.4.2: AI Session Security & Runtime Reliability
 
-**HEAD inicial:** `b4841c5` (Fase UI 2.4.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `b4841c5` (Fase UI 2.4.1) · **HEAD final:** `591ce41`
 
 Resultado: **446 testes passando** (eram 433), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão em vendas, compras, folha, contabilidade, tesouraria, gateway ou blockchain.
 
