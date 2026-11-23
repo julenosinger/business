@@ -1,6 +1,6 @@
 # Fase UI 2.2.1: Financial Integrity & Business Profile UX Refinement
 
-**HEAD inicial:** `68c2e76` (Fase UI 2.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `68c2e76` (Fase UI 2.2) · **HEAD final:** `b23ddb6`
 
 Resultado: **381 testes passando** (eram 377), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração em fluxos financeiros, contábeis, logísticos ou blockchain.
 
