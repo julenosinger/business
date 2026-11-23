@@ -1,6 +1,6 @@
 # Fase 3.3: Isolamento completo Mainnet/Testnet — ERP
 
-**HEAD inicial:** `7685efe` (Fase AGENTS UI 1.0) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `06545c7` (referência) · **HEAD final:** `9fa646a`
 
 Resultado: **317 testes passando** (eram 312), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
