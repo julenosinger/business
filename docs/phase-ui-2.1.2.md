@@ -1,6 +1,6 @@
 # Fase UI 2.1.2: Save Result Consistency & Regression Hardening
 
-**HEAD inicial:** `795bc06` (Fase UI 2.1.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `795bc06` (Fase UI 2.1.1) · **HEAD final:** `4daac5f`
 
 Resultado: **351 testes passando** (eram 341), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração visual.
 
