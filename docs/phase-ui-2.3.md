@@ -1,6 +1,6 @@
 # Fase UI 2.3: Business Operations & Customer 360°
 
-**HEAD inicial:** `ab6c548` (Fase UI 2.2.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `ab6c548` (Fase UI 2.2.2) · **HEAD final:** `a01da18`
 
 Resultado: **398 testes passando** (eram 387), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração em contabilidade, estoque, pagamentos, tesouraria ou blockchain.
 
