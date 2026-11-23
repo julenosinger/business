@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { ArrowLeft, Briefcase, Coins, Info, Pencil, Receipt, Wallet } from 'lucide-react'
+import { ArrowLeft, Briefcase, ClipboardList, Coins, Copy, Info, Pencil, Wallet } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge, Button, Empty } from '@/components/ui'
 import { TCard, PanelTitle } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { accountsForEnvironment, employeesForEnvironment } from '@/lib/selectors'
+import { accountOutstanding, accountsForEnvironment, employeesForEnvironment } from '@/lib/selectors'
+import { groupMoneyByCurrency, formatMoneyGroup } from '@/lib/profile-money'
 import { fmtDate, money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Employee } from '@/lib/types'
@@ -43,10 +45,16 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
     )
   }
 
-  const payroll = accountsForEnvironment(data.accounts, network).filter((a) => a.source === 'payroll' && a.employeeId === employee.id).sort((a, b) => b.dueDate.localeCompare(a.dueDate))
-  const openPayroll = payroll.filter((a) => a.status === 'open')
-  const totalPaid = payroll.filter((a) => a.status === 'paid').reduce((s, a) => s + a.amount, 0)
-  const totalOpen = openPayroll.reduce((s, a) => s + a.amount, 0)
+  const payroll = accountsForEnvironment(data.accounts, network).filter((a) => a.source === 'payroll' && a.employeeId === employee.id && !a.canceledAt).sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+  const paidGroups = groupMoneyByCurrency(payroll.filter((a) => a.status === 'paid').map((a) => ({ amount: a.amount, currency: a.currency })))
+  const openGroups = groupMoneyByCurrency(payroll.filter((a) => a.status === 'open').map((a) => ({ amount: accountOutstanding(a), currency: a.currency })))
+
+  const copyWallet = () => {
+    void navigator.clipboard.writeText(employee.wallet).then(
+      () => toast.success(t('Endereço copiado.', 'Address copied.')),
+      () => toast.error(t('Não foi possível copiar.', 'Could not copy.')),
+    )
+  }
 
   const tabs = [
     { id: 'overview' as const, label: t('Visão geral', 'Overview') },
@@ -57,25 +65,20 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
   return (
     <div className="space-y-4">
       <TCard className="p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-sky/15 text-lg font-semibold text-sky" aria-hidden>
-              {employee.name.trim().charAt(0).toUpperCase() || '?'}
-            </span>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="display truncate text-lg font-semibold">{employee.name}</h2>
-                <Badge tone={employee.active ? 'ok' : 'neutral'}>{employee.active ? t('Ativo', 'Active') : t('Inativo', 'Inactive')}</Badge>
-              </div>
-              <p className="mt-0.5 text-sm text-muted">
-                {employee.role}
-                {employee.department ? ` · ${employee.department}` : ''}
-              </p>
-              <p className="mt-1 text-xs text-subtle">
-                {employee.registration ? `${t('Matrícula', 'Employee ID')}: ${employee.registration} · ` : ''}
-                {t('Admissão', 'Hired')}: {fmtDate(employee.admission)}
-              </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-sky/15 text-lg font-semibold text-sky" aria-hidden>
+            {employee.name.trim().charAt(0).toUpperCase() || '?'}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="display truncate text-lg font-semibold">{employee.name}</h2>
+              <Badge tone={employee.active ? 'ok' : 'neutral'}>{employee.active ? t('Ativo', 'Active') : t('Inativo', 'Inactive')}</Badge>
             </div>
+            <p className="mt-0.5 truncate text-sm text-muted">
+              {employee.role}
+              {employee.department ? ` · ${employee.department}` : ''}
+              {employee.registration ? ` · ${t('Matrícula', 'Employee ID')}: ${employee.registration}` : ''}
+            </p>
           </div>
           <div className="flex shrink-0 gap-2">
             <Button variant="ghost" small onClick={onBack}>
@@ -91,44 +94,93 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
       <PillTabs label={t('Seções do perfil', 'Profile sections')} value={tab} onChange={setTab} items={tabs} />
 
       {tab === 'overview' ? (
-        <div className="grid items-start gap-4 sm:gap-5 xl:grid-cols-2">
-          <TCard className="p-4 sm:p-5">
-            <PanelTitle icon={<Briefcase size={18} />} title={t('Dados profissionais', 'Professional details')} />
-            <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <InfoItem label={t('Cargo', 'Role')} value={employee.role} />
-              <InfoItem label={t('Departamento', 'Department')} value={employee.department} />
-              <InfoItem label={t('Matrícula', 'Employee ID')} value={employee.registration} />
-              <InfoItem label={t('Admissão', 'Hire date')} value={fmtDate(employee.admission)} />
-              <InfoItem label={t('Tipo de vínculo', 'Contract type')} value={employee.contractType} />
-              <InfoItem label={t('Centro de custo', 'Cost center')} value={employee.costCenter} />
-              <InfoItem label={t('Email', 'Email')} value={employee.email} />
-              <InfoItem label={t('Telefone', 'Phone')} value={employee.phone} />
-            </dl>
-            {employee.wallet ? (
-              <div className="mt-4 flex items-center gap-2 rounded-xl bg-fill/5 px-3 py-2 text-sm">
-                <Wallet size={14} className="text-subtle" />
-                <span className="mono text-xs">{shortAddr(employee.wallet)}</span>
-              </div>
-            ) : null}
-          </TCard>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
+            <TCard className="p-3.5 sm:p-4">
+              <div className="text-xs font-semibold text-muted">{t('Salário mensal', 'Monthly salary')}</div>
+              <div className="display num mt-1 text-lg font-semibold sm:text-xl">{money(employee.salary)}</div>
+            </TCard>
+            <TCard className="p-3.5 sm:p-4">
+              <div className="text-xs font-semibold text-muted">{t('Total pago', 'Total paid')}</div>
+              {paidGroups.length === 0 ? (
+                <div className="num mt-1 text-lg font-semibold text-subtle">{money(0)}</div>
+              ) : (
+                <div className="mt-1 space-y-0.5">
+                  {paidGroups.map((g) => (
+                    <div key={g.code} className="num text-sm font-semibold text-ok">{formatMoneyGroup(g)}</div>
+                  ))}
+                </div>
+              )}
+            </TCard>
+            <TCard className="p-3.5 sm:p-4">
+              <div className="text-xs font-semibold text-muted">{t('Em aberto', 'Open')}</div>
+              {openGroups.length === 0 ? (
+                <div className="num mt-1 text-lg font-semibold text-subtle">{money(0)}</div>
+              ) : (
+                <div className="mt-1 space-y-0.5">
+                  {openGroups.map((g) => (
+                    <div key={g.code} className="num text-sm font-semibold text-bad">{formatMoneyGroup(g)}</div>
+                  ))}
+                </div>
+              )}
+            </TCard>
+            <TCard className="p-3.5 sm:p-4">
+              <div className="text-xs font-semibold text-muted">{t('Registros de folha', 'Payroll records')}</div>
+              <div className="display num mt-1 text-lg font-semibold sm:text-xl">{payroll.length}</div>
+            </TCard>
+          </div>
 
-          <TCard className="p-4 sm:p-5">
-            <PanelTitle icon={<Coins size={18} />} title={t('Remuneração', 'Compensation')} />
-            <dl className="mt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">{t('Salário mensal', 'Monthly salary')}</dt>
-                <dd className="num font-semibold">{money(employee.salary)}</dd>
+          <div className="grid items-start gap-4 sm:gap-5 xl:grid-cols-2">
+            <TCard className="p-4 sm:p-5">
+              <PanelTitle icon={<Briefcase size={18} />} title={t('Dados profissionais', 'Professional details')} />
+              <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <InfoItem label={t('Cargo', 'Role')} value={employee.role} />
+                <InfoItem label={t('Departamento', 'Department')} value={employee.department} />
+                <InfoItem label={t('Matrícula', 'Employee ID')} value={employee.registration} />
+                <InfoItem label={t('Admissão', 'Hire date')} value={fmtDate(employee.admission)} />
+                <InfoItem label={t('Tipo de vínculo', 'Contract type')} value={employee.contractType} />
+                <InfoItem label={t('Centro de custo', 'Cost center')} value={employee.costCenter} />
+                <InfoItem label={t('Email', 'Email')} value={employee.email} />
+                <InfoItem label={t('Telefone', 'Phone')} value={employee.phone} />
+              </dl>
+              {employee.wallet ? (
+                <div className="mt-4 rounded-xl bg-fill/5 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+                      <Wallet size={13} /> {t('Carteira de pagamento', 'Payment wallet')}
+                    </span>
+                    <Button small variant="ghost" onClick={copyWallet}>
+                      <Copy size={13} /> {t('Copiar', 'Copy')}
+                    </Button>
+                  </div>
+                  <span className="mono mt-1 block truncate text-xs">{shortAddr(employee.wallet)}</span>
+                </div>
+              ) : null}
+            </TCard>
+
+            <TCard className="overflow-hidden">
+              <div className="border-b border-line p-4 sm:px-5">
+                <PanelTitle icon={<ClipboardList size={18} />} title={t('Atividade recente', 'Recent activity')} />
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">{t('Total pago', 'Total paid')}</dt>
-                <dd className="num font-semibold text-ok">{money(totalPaid)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">{t('Em aberto', 'Open')}</dt>
-                <dd className={`num font-semibold ${totalOpen > 0 ? 'text-bad' : 'text-subtle'}`}>{money(totalOpen)}</dd>
-              </div>
-            </dl>
-          </TCard>
+              {payroll.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted">{t('Nenhum registro de folha.', 'No payroll records.')}</p>
+              ) : (
+                <ul className="divide-y divide-line px-4 sm:px-5">
+                  {payroll.slice(0, 5).map((a) => (
+                    <li key={a.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{a.description}</p>
+                        <p className="text-xs text-subtle">{t('Vencimento', 'Due date')}: {fmtDate(a.dueDate)}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <span className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{a.currency ? formatMoneyGroup({ code: a.currency, total: accountOutstanding(a) }) : money(accountOutstanding(a))}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TCard>
+          </div>
         </div>
       ) : null}
 
@@ -147,7 +199,7 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
       {tab === 'payroll' ? (
         <TCard className="overflow-hidden">
           <div className="border-b border-line p-4 sm:px-5">
-            <PanelTitle icon={<Receipt size={18} />} title={t('Folha de pagamento', 'Payroll')} subtitle={t('Registros de salário vinculados a este funcionário', 'Salary records linked to this employee')} />
+            <PanelTitle icon={<Coins size={18} />} title={t('Folha de pagamento', 'Payroll')} subtitle={t('Registros de salário vinculados a este funcionário', 'Salary records linked to this employee')} />
           </div>
           {payroll.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted">{t('Nenhum registro de folha.', 'No payroll records.')}</p>
@@ -160,7 +212,7 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
                     <p className="text-xs text-subtle">{t('Vencimento', 'Due date')}: {fmtDate(a.dueDate)}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="num text-sm font-semibold">{money(a.amount)}</p>
+                    <p className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{a.currency ? formatMoneyGroup({ code: a.currency, total: a.amount }) : money(a.amount)}</p>
                     <Badge tone={a.status === 'paid' ? 'ok' : 'warn'}>{a.status === 'paid' ? t('Paga', 'Paid') : t('Pendente', 'Pending')}</Badge>
                   </div>
                 </li>
