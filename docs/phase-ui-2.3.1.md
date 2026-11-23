@@ -1,6 +1,6 @@
 # Fase UI 2.3.1: Navigation Intent Hardening & Context Integrity
 
-**HEAD inicial:** `ed10569` (Fase UI 2.3) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `ed10569` (Fase UI 2.3) · **HEAD final:** `232e7be`
 
 Resultado: **407 testes passando** (eram 398), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Fase exclusivamente corretiva — nenhuma alteração em contabilidade, estoque, pagamentos, tesouraria ou blockchain.
 
