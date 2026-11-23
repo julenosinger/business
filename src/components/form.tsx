@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { clsx } from 'clsx'
 import { Button } from '@/components/ui'
 import { networkInfo, useNetwork } from '@/lib/network'
 import { t } from '@/lib/i18n'
@@ -12,6 +14,46 @@ export function FormSection({ title, icon, children }: { title: string; icon?: R
         {title}
       </h3>
       {children}
+    </section>
+  )
+}
+
+/** Texto de apoio curto (explicações, sem substituir o label). */
+export function FormHelpText({ children }: { children: ReactNode }) {
+  return <p className="text-xs text-subtle text-pretty">{children}</p>
+}
+
+/** Mensagem de erro acessível, próxima ao campo. */
+export function FormFieldError({ children }: { children: ReactNode }) {
+  return (
+    <p role="alert" className="mt-1 text-xs text-bad">
+      {children}
+    </p>
+  )
+}
+
+/** Seção expansível para dados adicionais/opcionais (evita formulários longos). */
+export function FormAccordion({ title, icon, defaultOpen = false, children }: { title: string; icon?: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="rounded-xl border border-line">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex min-h-11 w-full items-center justify-between gap-3 px-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+      >
+        <span className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-subtle">
+          {icon ? <span className="text-sky">{icon}</span> : null}
+          <span className="truncate">{title}</span>
+        </span>
+        <ChevronDown size={16} className={clsx('shrink-0 text-subtle transition-transform duration-200 motion-reduce:transition-none', open && 'rotate-180')} aria-hidden="true" />
+      </button>
+      <div className={clsx('grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-3 border-t border-line p-3.5">{children}</div>
+        </div>
+      </div>
     </section>
   )
 }

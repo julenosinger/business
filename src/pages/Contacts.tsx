@@ -1,22 +1,41 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Copy, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Copy, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
 import { Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
-import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
+import { EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormHelpText, FormSection } from '@/components/form'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { accountsForEnvironment, contactsForEnvironment, salesForEnvironment } from '@/lib/selectors'
+import { isDocValid, isEmailValid, maskCnpj, maskCpf } from '@/lib/documents'
 import { isValidAddress } from '@/lib/gateway'
 import { money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
-import type { Contact } from '@/lib/types'
+import type { Contact, PersonType } from '@/lib/types'
 
 type Kind = Contact['kind']
 
-const blank = { name: '', doc: '', email: '', phone: '', wallet: '' }
+const blankAddress = { cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '', country: '' }
+
+const blank = {
+  name: '',
+  doc: '',
+  email: '',
+  phone: '',
+  wallet: '',
+  personType: 'fisica' as PersonType,
+  legalName: '',
+  internalCode: '',
+  secondaryPhone: '',
+  contactPersonName: '',
+  contactPersonRole: '',
+  address: { ...blankAddress },
+  notes: '',
+  paymentTerms: '',
+  active: true,
+}
 
 function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact | 'new' | null; onClose: () => void }) {
   const { addContact, updateContact } = useStore()
@@ -26,13 +45,40 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
     setLoaded(key)
-    setForm(editing ? { name: editing.name, doc: editing.doc, email: editing.email, phone: editing.phone, wallet: editing.wallet } : blank)
+    setForm(
+      editing
+        ? {
+            name: editing.name,
+            doc: editing.doc,
+            email: editing.email,
+            phone: editing.phone,
+            wallet: editing.wallet,
+            personType: editing.personType ?? 'fisica',
+            legalName: editing.legalName ?? '',
+            internalCode: editing.internalCode ?? '',
+            secondaryPhone: editing.secondaryPhone ?? '',
+            contactPersonName: editing.contactPersonName ?? '',
+            contactPersonRole: editing.contactPersonRole ?? '',
+            address: { ...blankAddress, ...(editing.address ?? {}) },
+            notes: editing.notes ?? '',
+            paymentTerms: editing.paymentTerms ?? '',
+            active: editing.active ?? true,
+          }
+        : blank,
+    )
   }
-  const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
-  const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
+  const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const setAddress = (k: keyof typeof blankAddress) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, address: { ...f.address, [k]: e.target.value } }))
 
+  const setDoc = (raw: string) => setForm((f) => ({ ...f, doc: f.personType === 'fisica' ? maskCpf(raw) : maskCnpj(raw) }))
+  const setPersonType = (pt: PersonType) => setForm((f) => ({ ...f, personType: pt, doc: pt === 'fisica' ? maskCpf(f.doc) : maskCnpj(f.doc) }))
+
+  const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
+  const docInvalid = !isDocValid(form.doc, form.personType)
+  const emailInvalid = !isEmailValid(form.email)
   const isCustomer = kind === 'customer'
   const icon = isCustomer ? <Users size={22} /> : <Truck size={22} />
+  const docLabel = form.personType === 'fisica' ? t('CPF', 'CPF') : t('CNPJ', 'CNPJ')
 
   return (
     <Modal
@@ -45,23 +91,31 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
     >
       <div className="space-y-5">
         <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-            <Field label={t('Nome', 'Name')} required>
-              <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome completo', 'Full name')} />
-            </Field>
-            <Field label={t('CPF / CNPJ', 'Tax ID')}>
-              <input className={inputCls} value={form.doc} onChange={set('doc')} placeholder="000.000.000-00" />
-            </Field>
+          <Field label={t('Nome', 'Name')} required>
+            <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome fantasia / nome de exibição', 'Trade / display name')} />
+          </Field>
+          <div className="flex gap-2" role="group" aria-label={t('Tipo de pessoa', 'Person type')}>
+            <button type="button" onClick={() => setPersonType('fisica')} aria-pressed={form.personType === 'fisica'} className={`flex min-h-11 flex-1 items-center justify-center rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${form.personType === 'fisica' ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'}`}>
+              {t('Pessoa física', 'Individual')}
+            </button>
+            <button type="button" onClick={() => setPersonType('juridica')} aria-pressed={form.personType === 'juridica'} className={`flex min-h-11 flex-1 items-center justify-center rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${form.personType === 'juridica' ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'}`}>
+              {t('Pessoa jurídica', 'Company')}
+            </button>
           </div>
+          <Field label={docLabel}>
+            <input className={`${inputCls} ${docInvalid ? 'border-bad/60' : ''}`} inputMode="numeric" value={form.doc} onChange={(e) => setDoc(e.target.value)} placeholder={form.personType === 'fisica' ? '000.000.000-00' : '00.000.000/0000-00'} />
+            {docInvalid ? <FormFieldError>{form.personType === 'fisica' ? t('CPF inválido.', 'Invalid CPF.') : t('CNPJ inválido.', 'Invalid CNPJ.')}</FormFieldError> : null}
+          </Field>
         </FormSection>
 
         <FormSection title={t('Contato', 'Contact')} icon={<Phone size={14} />}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label={t('Telefone', 'Phone')}>
+            <Field label={t('Telefone principal', 'Main phone')}>
               <input className={inputCls} value={form.phone} onChange={set('phone')} placeholder={t('(00) 00000-0000', '(00) 00000-0000')} />
             </Field>
             <Field label="Email">
-              <input className={inputCls} type="email" value={form.email} onChange={set('email')} placeholder="email@empresa.com" />
+              <input className={`${inputCls} ${emailInvalid ? 'border-bad/60' : ''}`} type="email" value={form.email} onChange={set('email')} placeholder="email@empresa.com" />
+              {emailInvalid ? <FormFieldError>{t('Email inválido.', 'Invalid email.')}</FormFieldError> : null}
             </Field>
           </div>
         </FormSection>
@@ -73,14 +127,83 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
           >
             <input className={`${inputCls} mono`} value={form.wallet} onChange={set('wallet')} placeholder="0x..." />
           </Field>
+          <FormHelpText>{t('Cadastrar uma carteira não autoriza pagamentos: as transferências sempre são confirmadas por você.', 'Adding a wallet does not authorize payments: transfers are always confirmed by you.')}</FormHelpText>
         </FormSection>
+
+        <FormAccordion title={t('Endereço', 'Address')} icon={<MapPin size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('CEP', 'Postal code')}>
+              <input className={inputCls} value={form.address.cep} onChange={setAddress('cep')} />
+            </Field>
+            <Field label={t('Logradouro', 'Street')}>
+              <input className={inputCls} value={form.address.street} onChange={setAddress('street')} />
+            </Field>
+            <Field label={t('Número', 'Number')}>
+              <input className={inputCls} value={form.address.number} onChange={setAddress('number')} />
+            </Field>
+            <Field label={t('Complemento', 'Complement')}>
+              <input className={inputCls} value={form.address.complement} onChange={setAddress('complement')} />
+            </Field>
+            <Field label={t('Bairro', 'Neighborhood')}>
+              <input className={inputCls} value={form.address.neighborhood} onChange={setAddress('neighborhood')} />
+            </Field>
+            <Field label={t('Cidade', 'City')}>
+              <input className={inputCls} value={form.address.city} onChange={setAddress('city')} />
+            </Field>
+            <Field label={t('Estado', 'State')}>
+              <input className={inputCls} value={form.address.state} onChange={setAddress('state')} />
+            </Field>
+            <Field label={t('País', 'Country')}>
+              <input className={inputCls} value={form.address.country} onChange={setAddress('country')} />
+            </Field>
+          </div>
+        </FormAccordion>
+
+        <FormAccordion title={t('Informações adicionais', 'Additional information')} icon={<ClipboardList size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Razão social', 'Legal name')}>
+              <input className={inputCls} value={form.legalName} onChange={set('legalName')} />
+            </Field>
+            <Field label={t('Código interno', 'Internal code')}>
+              <input className={inputCls} value={form.internalCode} onChange={set('internalCode')} />
+            </Field>
+            <Field label={t('Pessoa de contato', 'Contact person')}>
+              <input className={inputCls} value={form.contactPersonName} onChange={set('contactPersonName')} />
+            </Field>
+            <Field label={t('Cargo do contato', 'Contact role')}>
+              <input className={inputCls} value={form.contactPersonRole} onChange={set('contactPersonRole')} />
+            </Field>
+            <Field label={t('Telefone secundário', 'Secondary phone')}>
+              <input className={inputCls} value={form.secondaryPhone} onChange={set('secondaryPhone')} />
+            </Field>
+            <Field label={t('Condições de pagamento', 'Payment terms')}>
+              <input className={inputCls} value={form.paymentTerms} onChange={set('paymentTerms')} placeholder={t('Ex.: 30 dias', 'E.g. 30 days')} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label={t('Observações internas', 'Internal notes')}>
+                <textarea className={`${inputCls} min-h-20 resize-y py-2.5`} value={form.notes} onChange={set('notes')} />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <span className="label mb-1.5 block">{t('Status', 'Status')}</span>
+              <div className="flex gap-2" role="group" aria-label={t('Status', 'Status')}>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, active: true }))} aria-pressed={form.active} className={`flex min-h-10 flex-1 items-center justify-center rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${form.active ? 'bg-ok/20 text-ok ring-1 ring-ok/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'}`}>
+                  {t('Ativo', 'Active')}
+                </button>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, active: false }))} aria-pressed={!form.active} className={`flex min-h-10 flex-1 items-center justify-center rounded-xl text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 ${!form.active ? 'bg-bad/20 text-bad ring-1 ring-bad/40' : 'border border-line text-muted hover:bg-fill/10 hover:text-ink'}`}>
+                  {t('Inativo', 'Inactive')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </FormAccordion>
 
         <FormFooter
           left={<EnvironmentBadge />}
           onCancel={onClose}
-          submitDisabled={!form.name.trim() || !walletOk}
+          submitDisabled={!form.name.trim() || !walletOk || docInvalid || emailInvalid}
           onSubmit={() => {
-            const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim() }
+            const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim(), email: form.email.trim() }
             if (editing) updateContact(editing.id, payload)
             else addContact({ ...payload, kind })
             onClose()

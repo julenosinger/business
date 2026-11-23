@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Tag, Trash2, UserRound } from 'lucide-react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Tag, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
-import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
+import { EnvironmentBadge, FormAccordion, FormFooter, FormSection } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -12,7 +12,7 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
-import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment } from '@/lib/selectors'
+import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment, contactsForEnvironment } from '@/lib/selectors'
 import { AccountEnvironmentReview } from '@/components/AccountEnvironmentReview'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
@@ -20,6 +20,7 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types
 
 function AccountModal({ target, onClose }: { target: Account | 'new' | null; onClose: () => void }) {
   const { data, addAccount, updateAccount } = useStore()
+  const network = useNetwork()
   const editing = target && target !== 'new' ? target : null
   const [loaded, setLoaded] = useState<string | null>(null)
   const [kind, setKind] = useState<Account['kind']>('payable')
@@ -28,8 +29,14 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   const [amount, setAmount] = useState('')
   const [dueDate, setDueDate] = useState(addDays(today(), 15))
   const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[2])
+  const [documentNumber, setDocumentNumber] = useState('')
+  const [issuedAt, setIssuedAt] = useState('')
+  const [competence, setCompetence] = useState('')
+  const [notes, setNotes] = useState('')
+  const [externalRef, setExternalRef] = useState('')
+  const [recurring, setRecurring] = useState(false)
   const value = parseNum(amount)
-  const contacts = data.contacts.filter((c) => c.kind === (kind === 'payable' ? 'supplier' : 'customer'))
+  const contacts = contactsForEnvironment(data, network).filter((c) => c.kind === (kind === 'payable' ? 'supplier' : 'customer'))
   const cats: readonly string[] = kind === 'payable' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
 
   const key = target === null ? null : editing ? editing.id : 'new'
@@ -41,6 +48,12 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
     setAmount(editing ? String(editing.amount) : '')
     setDueDate(editing?.dueDate ?? addDays(today(), 15))
     setCategory(editing?.category ?? EXPENSE_CATEGORIES[2])
+    setDocumentNumber(editing?.documentNumber ?? '')
+    setIssuedAt(editing?.issuedAt ?? '')
+    setCompetence(editing?.competence ?? '')
+    setNotes(editing?.notes ?? '')
+    setExternalRef(editing?.externalRef ?? '')
+    setRecurring(editing?.recurring ?? false)
   }
 
   const pick = (k: Account['kind']) => {
@@ -125,13 +138,55 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
           </div>
         </FormSection>
 
+        <FormAccordion title={t('Informações adicionais', 'Additional information')} icon={<ClipboardList size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Número do documento', 'Document number')}>
+              <input className={inputCls} value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder={t('Nº da nota ou referência', 'Invoice or reference number')} />
+            </Field>
+            <Field label={t('Referência externa', 'External reference')}>
+              <input className={inputCls} value={externalRef} onChange={(e) => setExternalRef(e.target.value)} placeholder={t('Ex.: código no sistema de origem', 'E.g. code in the source system')} />
+            </Field>
+            <Field label={t('Data de emissão', 'Issue date')}>
+              <DateField value={issuedAt} onChange={setIssuedAt} />
+            </Field>
+            <Field label={t('Competência', 'Competence')}>
+              <input className={inputCls} value={competence} onChange={(e) => setCompetence(e.target.value)} placeholder={t('Mês/ano (ex.: 2026-11)', 'Month/year (e.g. 2026-11)')} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label={t('Observações internas', 'Internal notes')}>
+                <textarea className={`${inputCls} min-h-20 resize-y py-2.5`} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </Field>
+            </div>
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line px-3 py-2.5 sm:col-span-2">
+              <input type="checkbox" className="mt-0.5 size-4 accent-violet" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
+              <span className="text-sm">
+                <span className="font-medium">{t('Obrigação recorrente', 'Recurring obligation')}</span>
+                <span className="block text-xs text-muted text-pretty">{t('Apenas um indicador informativo — nenhum agendamento automático é criado.', 'Informational only — no automatic scheduling is created.')}</span>
+              </span>
+            </label>
+          </div>
+        </FormAccordion>
+
         <FormFooter
           left={<EnvironmentBadge />}
           onCancel={onClose}
           submitDisabled={!(value > 0) || !description.trim() || !isValidIso(dueDate)}
           onSubmit={() => {
             const c = data.contacts.find((x) => x.id === contactId)
-            const payload = { description: description.trim(), contactId: c?.id, contactName: c?.name ?? t('Não informado', 'Not specified'), amount: value, dueDate, category }
+            const payload = {
+              description: description.trim(),
+              contactId: c?.id,
+              contactName: c?.name ?? t('Não informado', 'Not specified'),
+              amount: value,
+              dueDate,
+              category,
+              documentNumber: documentNumber.trim() || undefined,
+              issuedAt: issuedAt || undefined,
+              competence: competence.trim() || undefined,
+              notes: notes.trim() || undefined,
+              externalRef: externalRef.trim() || undefined,
+              recurring: recurring || undefined,
+            }
             if (editing) updateAccount(editing.id, payload)
             else addAccount({ kind, ...payload })
             onClose()

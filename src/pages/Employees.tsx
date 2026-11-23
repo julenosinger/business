@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Briefcase, CalendarCheck, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
+import { Briefcase, CalendarCheck, ClipboardList, Coins, Copy, Pencil, Plus, Receipt, Trash2, UserRound, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
-import { FormFooter, FormSection, EnvironmentBadge } from '@/components/form'
+import { EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormSection } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
+import { isEmailValid } from '@/lib/documents'
 import { Bar, C } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -18,7 +19,7 @@ import { addDays, fmtDate, money, monthTitle, parseNum, shortAddr, today } from 
 import { t } from '@/lib/i18n'
 import type { Employee } from '@/lib/types'
 
-const blank = { name: '', role: '', salary: '', wallet: '', admission: today() }
+const blank = { name: '', role: '', salary: '', wallet: '', admission: today(), registration: '', department: '', email: '', phone: '', contractType: '', costCenter: '', notes: '' }
 
 function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; onClose: () => void }) {
   const { addEmployee, updateEmployee } = useStore()
@@ -28,11 +29,29 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
     setLoaded(key)
-    setForm(editing ? { name: editing.name, role: editing.role, salary: String(editing.salary), wallet: editing.wallet, admission: editing.admission } : blank)
+    setForm(
+      editing
+        ? {
+            name: editing.name,
+            role: editing.role,
+            salary: String(editing.salary),
+            wallet: editing.wallet,
+            admission: editing.admission,
+            registration: editing.registration ?? '',
+            department: editing.department ?? '',
+            email: editing.email ?? '',
+            phone: editing.phone ?? '',
+            contractType: editing.contractType ?? '',
+            costCenter: editing.costCenter ?? '',
+            notes: editing.notes ?? '',
+          }
+        : blank,
+    )
   }
-  const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const salary = parseNum(form.salary)
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
+  const emailInvalid = !isEmailValid(form.email)
 
   return (
     <Modal
@@ -45,15 +64,23 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
     >
       <div className="space-y-5">
         <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
-          <Field label={t('Nome', 'Name')} required>
-            <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome completo', 'Full name')} />
-          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Nome', 'Name')} required>
+              <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome completo', 'Full name')} />
+            </Field>
+            <Field label={t('Matrícula interna', 'Employee ID')}>
+              <input className={inputCls} value={form.registration} onChange={set('registration')} placeholder={t('Ex.: MAT-001', 'E.g. EMP-001')} />
+            </Field>
+          </div>
         </FormSection>
 
         <FormSection title={t('Dados profissionais', 'Professional details')} icon={<Briefcase size={14} />}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label={t('Cargo', 'Role')}>
               <input className={inputCls} value={form.role} onChange={set('role')} placeholder={t('Ex.: Vendedor', 'E.g. Salesperson')} />
+            </Field>
+            <Field label={t('Departamento', 'Department')}>
+              <input className={inputCls} value={form.department} onChange={set('department')} placeholder={t('Ex.: Comercial', 'E.g. Sales')} />
             </Field>
             <Field label={t('Admissão', 'Hire date')} required>
               <DateField value={form.admission} onChange={(v) => setForm((f) => ({ ...f, admission: v }))} />
@@ -73,12 +100,35 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
           </Field>
         </FormSection>
 
+        <FormAccordion title={t('Informações adicionais', 'Additional information')} icon={<ClipboardList size={14} />}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label={t('Email profissional', 'Work email')}>
+              <input className={`${inputCls} ${emailInvalid ? 'border-bad/60' : ''}`} type="email" value={form.email} onChange={set('email')} placeholder="email@empresa.com" />
+              {emailInvalid ? <FormFieldError>{t('Email inválido.', 'Invalid email.')}</FormFieldError> : null}
+            </Field>
+            <Field label={t('Telefone', 'Phone')}>
+              <input className={inputCls} value={form.phone} onChange={set('phone')} placeholder={t('(00) 00000-0000', '(00) 00000-0000')} />
+            </Field>
+            <Field label={t('Tipo de vínculo', 'Contract type')}>
+              <input className={inputCls} value={form.contractType} onChange={set('contractType')} placeholder={t('Ex.: CLT, PJ, estágio', 'E.g. CLT, contractor, intern')} />
+            </Field>
+            <Field label={t('Centro de custo', 'Cost center')}>
+              <input className={inputCls} value={form.costCenter} onChange={set('costCenter')} placeholder={t('Referência informativa', 'Informational reference')} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label={t('Observações administrativas', 'Administrative notes')}>
+                <textarea className={`${inputCls} min-h-20 resize-y py-2.5`} value={form.notes} onChange={set('notes')} />
+              </Field>
+            </div>
+          </div>
+        </FormAccordion>
+
         <FormFooter
           left={<EnvironmentBadge />}
           onCancel={onClose}
-          submitDisabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission)}
+          submitDisabled={!form.name.trim() || !(salary > 0) || !walletOk || !isValidIso(form.admission) || emailInvalid}
           onSubmit={() => {
-            const payload = { name: form.name.trim(), role: form.role.trim(), salary, wallet: form.wallet.trim(), admission: form.admission }
+            const payload = { ...form, name: form.name.trim(), salary, wallet: form.wallet.trim(), email: form.email.trim() }
             if (editing) updateEmployee(editing.id, payload)
             else addEmployee({ ...payload, active: true })
             onClose()

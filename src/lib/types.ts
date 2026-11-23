@@ -26,6 +26,20 @@ export interface StockMove {
   environment?: Environment
 }
 
+/** Tipo de pessoa (física ou jurídica) — define a máscara/validação de CPF/CNPJ. */
+export type PersonType = 'fisica' | 'juridica'
+
+export interface ContactAddress {
+  cep: string
+  street: string
+  number: string
+  complement: string
+  neighborhood: string
+  city: string
+  state: string
+  country: string
+}
+
 export interface Contact {
   id: string
   kind: 'customer' | 'supplier'
@@ -36,6 +50,27 @@ export interface Contact {
   wallet: string
   /** Ambiente operacional do cadastro. */
   environment?: Environment
+  // --- Campos opcionais (fase UI 2.0) ---
+  /** Tipo de pessoa (física/jurídica). Ausente = legado (máscara não aplicada). */
+  personType?: PersonType
+  /** Razão social (pessoa jurídica). */
+  legalName?: string
+  /** Código interno de referência. */
+  internalCode?: string
+  /** Telefone secundário. */
+  secondaryPhone?: string
+  /** Nome da pessoa de contato. */
+  contactPersonName?: string
+  /** Cargo da pessoa de contato. */
+  contactPersonRole?: string
+  /** Endereço (preenchimento manual). */
+  address?: ContactAddress
+  /** Observações internas. */
+  notes?: string
+  /** Condições de pagamento (texto livre). */
+  paymentTerms?: string
+  /** Status ativo/inativo. Ausente = ativo (comportamento legado). */
+  active?: boolean
 }
 
 export interface Entry {
@@ -90,6 +125,19 @@ export interface Account {
   employeeId?: string
   /** Liquidações parciais. Vazio/ausente = nada pago (comportamento legado preservado). */
   settlements?: AccountSettlement[]
+  // --- Campos opcionais (fase UI 2.0) ---
+  /** Número do documento ou referência. */
+  documentNumber?: string
+  /** Data de emissão (YYYY-MM-DD). */
+  issuedAt?: string
+  /** Competência (mês/ano, ex.: "2026-11"). */
+  competence?: string
+  /** Observações internas. */
+  notes?: string
+  /** Referência externa (ex.: número no sistema de origem). */
+  externalRef?: string
+  /** Indicador INFORMATIVO de recorrência — não gera agendamento automático. */
+  recurring?: boolean
 }
 
 export type PayMethod = 'dinheiro' | 'pix' | 'cartao' | 'usdc' | 'prazo'
@@ -128,6 +176,21 @@ export interface Employee {
   active: boolean
   /** Ambiente operacional do funcionário. */
   environment?: Environment
+  // --- Campos opcionais (fase UI 2.0) ---
+  /** Matrícula interna. */
+  registration?: string
+  /** Departamento. */
+  department?: string
+  /** Email profissional. */
+  email?: string
+  /** Telefone. */
+  phone?: string
+  /** Tipo de vínculo (texto livre: CLT, PJ, estágio…). */
+  contractType?: string
+  /** Centro de custo (referência informativa, sem vínculo contábil nesta fase). */
+  costCenter?: string
+  /** Observações administrativas. */
+  notes?: string
 }
 
 export interface TreasuryOp {
