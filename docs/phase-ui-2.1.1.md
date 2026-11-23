@@ -1,6 +1,6 @@
 # Fase UI 2.1.1: Smart Forms Execution Integrity
 
-**HEAD inicial:** `982b0f4` (Fase UI 2.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `982b0f4` (Fase UI 2.1) · **HEAD final:** `814cb39`
 
 Resultado: **341 testes passando** (eram 340), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração visual.
 
