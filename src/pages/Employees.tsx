@@ -3,9 +3,11 @@ import { Briefcase, CalendarCheck, ClipboardList, Coins, Copy, Pencil, Plus, Rec
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
-import { EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormSection } from '@/components/form'
+import { DraftPrompt, EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormSection } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
 import { isEmailValid } from '@/lib/documents'
+import { findEmployeeDuplicates } from '@/lib/duplicates'
+import { useDraft } from '@/lib/draft'
 import { Bar, C } from '@/components/charts'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -21,37 +23,42 @@ import type { Employee } from '@/lib/types'
 
 const blank = { name: '', role: '', salary: '', wallet: '', admission: today(), registration: '', department: '', email: '', phone: '', contractType: '', costCenter: '', notes: '' }
 
+function employeeToForm(e?: Employee): typeof blank {
+  if (!e) return blank
+  return {
+    name: e.name,
+    role: e.role,
+    salary: String(e.salary),
+    wallet: e.wallet,
+    admission: e.admission,
+    registration: e.registration ?? '',
+    department: e.department ?? '',
+    email: e.email ?? '',
+    phone: e.phone ?? '',
+    contractType: e.contractType ?? '',
+    costCenter: e.costCenter ?? '',
+    notes: e.notes ?? '',
+  }
+}
+
 function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; onClose: () => void }) {
-  const { addEmployee, updateEmployee } = useStore()
+  const { data, addEmployee, updateEmployee } = useStore()
+  const network = useNetwork()
   const editing = target && target !== 'new' ? target : null
   const [form, setForm] = useState(blank)
   const [loaded, setLoaded] = useState<string | null>(null)
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
     setLoaded(key)
-    setForm(
-      editing
-        ? {
-            name: editing.name,
-            role: editing.role,
-            salary: String(editing.salary),
-            wallet: editing.wallet,
-            admission: editing.admission,
-            registration: editing.registration ?? '',
-            department: editing.department ?? '',
-            email: editing.email ?? '',
-            phone: editing.phone ?? '',
-            contractType: editing.contractType ?? '',
-            costCenter: editing.costCenter ?? '',
-            notes: editing.notes ?? '',
-          }
-        : blank,
-    )
+    setForm(employeeToForm(editing ?? undefined))
   }
   const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const salary = parseNum(form.salary)
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
   const emailInvalid = !isEmailValid(form.email)
+
+  const dup = findEmployeeDuplicates(employeesForEnvironment(data, network), { registration: form.registration, email: form.email, name: form.name }, editing?.id)
+  const draft = useDraft('employee', editing?.id ?? null, form, employeeToForm(editing ?? undefined))
 
   return (
     <Modal
@@ -63,6 +70,16 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
       size="form"
     >
       <div className="space-y-5">
+        <DraftPrompt
+          active={target !== null}
+          hasDraft={draft.hasDraft}
+          onRestore={() => {
+            const saved = draft.restore()
+            if (saved) setForm(saved)
+          }}
+          onDiscard={draft.discard}
+        />
+
         <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label={t('Nome', 'Name')} required>
@@ -123,6 +140,16 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
           </div>
         </FormAccordion>
 
+        {dup.exact.length > 0 ? (
+          <div className="rounded-xl border border-bad/40 bg-bad/10 p-3 text-sm text-bad" role="alert">
+            {t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.')}
+          </div>
+        ) : dup.possible.length > 0 ? (
+          <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn" role="status">
+            {t('Possível duplicidade por nome ou email. Revise antes de salvar.', 'Possible duplicate by name or email. Review before saving.')}
+          </div>
+        ) : null}
+
         <FormFooter
           left={<EnvironmentBadge />}
           onCancel={onClose}
@@ -131,6 +158,7 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
             const payload = { ...form, name: form.name.trim(), salary, wallet: form.wallet.trim(), email: form.email.trim() }
             if (editing) updateEmployee(editing.id, payload)
             else addEmployee({ ...payload, active: true })
+            draft.clear()
             onClose()
           }}
         />

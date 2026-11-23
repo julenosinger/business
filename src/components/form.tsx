@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Button } from '@/components/ui'
@@ -100,5 +100,56 @@ export function EnvironmentBadge() {
       <span aria-hidden="true" className={`size-1.5 rounded-full ${live ? 'bg-ok' : 'bg-warn'}`} />
       {info.label} · {live ? t('Produção', 'Production') : t('Testes', 'Testing')}
     </span>
+  )
+}
+
+/** Aviso discreto de rascunho não salvo, com opções de restaurar ou descartar. */
+export function DraftPrompt({
+  active,
+  hasDraft,
+  onRestore,
+  onDiscard,
+}: {
+  active: boolean
+  hasDraft: boolean
+  onRestore: () => void
+  onDiscard: () => void
+}) {
+  // Captura se havia rascunho no MOMENTO em que o modal abriu (não reage ao auto-save seguinte).
+  const [visible, setVisible] = useState(false)
+  const prevActive = useRef(false)
+  useEffect(() => {
+    if (active && !prevActive.current) setVisible(hasDraft)
+    prevActive.current = active
+  }, [active, hasDraft])
+
+  if (!active || !visible) return null
+
+  return (
+    <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm" role="status">
+      <p className="text-warn text-pretty">{t('Há um rascunho não salvo deste formulário.', 'There is an unsaved draft of this form.')}</p>
+      <div className="mt-2 flex gap-2">
+        <Button
+          small
+          variant="subtle"
+          onClick={() => {
+            onRestore()
+            setVisible(false)
+          }}
+        >
+          {t('Restaurar', 'Restore')}
+        </Button>
+        <Button
+          small
+          variant="ghost"
+          onClick={() => {
+            onDiscard()
+            setVisible(false)
+          }}
+        >
+          {t('Descartar', 'Discard')}
+        </Button>
+      </div>
+    </div>
   )
 }

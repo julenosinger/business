@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isDocValid, isEmailValid, isValidCnpj, isValidCpf, maskCnpj, maskCpf } from '../src/lib/documents'
+import { docInvalidError, docValidForSubmit, isDocValid, isEmailValid, isValidCnpj, isValidCpf, maskCnpj, maskCpf } from '../src/lib/documents'
 
 describe('máscaras de CPF/CNPJ', () => {
   test('maskCpf formata 11 dígitos', () => {
@@ -34,6 +34,20 @@ describe('validação de documentos', () => {
     expect(isDocValid('111.444.777-35', 'fisica')).toBe(true)
     expect(isDocValid('111.444.777-36', 'fisica')).toBe(false)
     expect(isDocValid('11.222.333/0001-82', 'juridica')).toBe(false)
+  })
+
+  test('docValidForSubmit: vazio ok; preenchido deve ser completo e válido', () => {
+    expect(docValidForSubmit('', 'fisica')).toBe(true)
+    expect(docValidForSubmit('111.444.777-35', 'fisica')).toBe(true)
+    expect(docValidForSubmit('111.444', 'fisica')).toBe(false) // incompleto bloqueia o salvamento
+    expect(docValidForSubmit('111.444.777-36', 'fisica')).toBe(false)
+  })
+
+  test('docInvalidError: só sinaliza quando completo e inválido (não incomoda durante a digitação)', () => {
+    expect(docInvalidError('', 'fisica')).toBe(false)
+    expect(docInvalidError('111.444', 'fisica')).toBe(false) // digitando
+    expect(docInvalidError('111.444.777-35', 'fisica')).toBe(false)
+    expect(docInvalidError('111.444.777-36', 'fisica')).toBe(true)
   })
 })
 

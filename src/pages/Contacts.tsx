@@ -1,15 +1,18 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, ClipboardList, Copy, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Copy, Loader2, MapPin, Pencil, Phone, Plus, Receipt, Search, Trash2, TrendingUp, Truck, UserRound, Users, Wallet } from 'lucide-react'
 import { Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
-import { EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormHelpText, FormSection } from '@/components/form'
+import { DraftPrompt, EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormHelpText, FormSection } from '@/components/form'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { accountsForEnvironment, contactsForEnvironment, salesForEnvironment } from '@/lib/selectors'
-import { isDocValid, isEmailValid, maskCnpj, maskCpf } from '@/lib/documents'
+import { docInvalidError, docValidForSubmit, isEmailValid, maskCnpj, maskCpf } from '@/lib/documents'
+import { findContactDuplicates } from '@/lib/duplicates'
+import { lookupCep, lookupCnpj, type CnpjResult } from '@/lib/lookup'
+import { useDraft } from '@/lib/draft'
 import { isValidAddress } from '@/lib/gateway'
 import { money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -37,35 +40,36 @@ const blank = {
   active: true,
 }
 
+function contactToForm(c?: Contact): typeof blank {
+  if (!c) return blank
+  return {
+    name: c.name,
+    doc: c.doc,
+    email: c.email,
+    phone: c.phone,
+    wallet: c.wallet,
+    personType: c.personType ?? 'fisica',
+    legalName: c.legalName ?? '',
+    internalCode: c.internalCode ?? '',
+    secondaryPhone: c.secondaryPhone ?? '',
+    contactPersonName: c.contactPersonName ?? '',
+    contactPersonRole: c.contactPersonRole ?? '',
+    address: { ...blankAddress, ...(c.address ?? {}) },
+    notes: c.notes ?? '',
+    paymentTerms: c.paymentTerms ?? '',
+    active: c.active ?? true,
+  }
+}
+
 function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact | 'new' | null; onClose: () => void }) {
-  const { addContact, updateContact } = useStore()
+  const { data, addContact, updateContact } = useStore()
   const editing = target && target !== 'new' ? target : null
   const [form, setForm] = useState(blank)
   const [loaded, setLoaded] = useState<string | null>(null)
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
     setLoaded(key)
-    setForm(
-      editing
-        ? {
-            name: editing.name,
-            doc: editing.doc,
-            email: editing.email,
-            phone: editing.phone,
-            wallet: editing.wallet,
-            personType: editing.personType ?? 'fisica',
-            legalName: editing.legalName ?? '',
-            internalCode: editing.internalCode ?? '',
-            secondaryPhone: editing.secondaryPhone ?? '',
-            contactPersonName: editing.contactPersonName ?? '',
-            contactPersonRole: editing.contactPersonRole ?? '',
-            address: { ...blankAddress, ...(editing.address ?? {}) },
-            notes: editing.notes ?? '',
-            paymentTerms: editing.paymentTerms ?? '',
-            active: editing.active ?? true,
-          }
-        : blank,
-    )
+    setForm(contactToForm(editing ?? undefined))
   }
   const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const setAddress = (k: keyof typeof blankAddress) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, address: { ...f.address, [k]: e.target.value } }))
@@ -74,11 +78,102 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const setPersonType = (pt: PersonType) => setForm((f) => ({ ...f, personType: pt, doc: pt === 'fisica' ? maskCpf(f.doc) : maskCnpj(f.doc) }))
 
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
-  const docInvalid = !isDocValid(form.doc, form.personType)
+  const docInvalid = docInvalidError(form.doc, form.personType)
   const emailInvalid = !isEmailValid(form.email)
   const isCustomer = kind === 'customer'
   const icon = isCustomer ? <Users size={22} /> : <Truck size={22} />
   const docLabel = form.personType === 'fisica' ? t('CPF', 'CPF') : t('CNPJ', 'CNPJ')
+
+  // --- Consultas externas (opcionais) ---
+  const network = useNetwork()
+  const cepAbort = useRef<AbortController | null>(null)
+  const cnpjAbort = useRef<AbortController | null>(null)
+  const [cepBusy, setCepBusy] = useState(false)
+  const [cnpjBusy, setCnpjBusy] = useState(false)
+  const [cnpjData, setCnpjData] = useState<CnpjResult | null>(null)
+  const [cnpjApplied, setCnpjApplied] = useState(false)
+
+  const scopedContacts = contactsForEnvironment(data, network).filter((c) => c.kind === kind)
+  const dup = findContactDuplicates(scopedContacts, { doc: form.doc, internalCode: form.internalCode, name: form.name, email: form.email, kind }, editing?.id)
+
+  // --- Rascunho seguro ---
+  const draft = useDraft(`contact-${kind}`, editing?.id ?? null, form, contactToForm(editing ?? undefined))
+
+  const searchCep = async () => {
+    const cep = form.address.cep.replace(/\D/g, '')
+    if (cep.length !== 8) {
+      toast.info(t('Informe um CEP com 8 dígitos.', 'Enter an 8-digit postal code.'))
+      return
+    }
+    cepAbort.current?.abort()
+    const controller = new AbortController()
+    cepAbort.current = controller
+    setCepBusy(true)
+    try {
+      const r = await lookupCep(cep, controller.signal)
+      setForm((f) => ({
+        ...f,
+        address: {
+          ...f.address,
+          street: f.address.street.trim() ? f.address.street : r.street,
+          neighborhood: f.address.neighborhood.trim() ? f.address.neighborhood : r.neighborhood,
+          city: f.address.city.trim() ? f.address.city : r.city,
+          state: f.address.state.trim() ? f.address.state : r.state,
+        },
+      }))
+      toast.success(t('Endereço preenchido (revise antes de salvar).', 'Address filled (review before saving).'))
+    } catch {
+      toast.error(t('Não foi possível consultar o CEP. Preencha manualmente.', 'Could not look up the postal code. Fill in manually.'))
+    } finally {
+      setCepBusy(false)
+    }
+  }
+
+  const searchCnpj = async () => {
+    if (!docValidForSubmit(form.doc, 'juridica')) return
+    cnpjAbort.current?.abort()
+    const controller = new AbortController()
+    cnpjAbort.current = controller
+    setCnpjBusy(true)
+    setCnpjData(null)
+    try {
+      const r = await lookupCnpj(form.doc, controller.signal)
+      if (r.legalName || r.tradeName || r.street) {
+        setCnpjData(r)
+        setCnpjApplied(false)
+        toast.success(t('Dados encontrados. Revise e aplique.', 'Data found. Review and apply.'))
+      } else {
+        toast.info(t('Nenhum dado confiável encontrado para este CNPJ.', 'No reliable data found for this CNPJ.'))
+      }
+    } catch {
+      toast.error(t('Não foi possível consultar o CNPJ. Continue manualmente.', 'Could not look up the CNPJ. Continue manually.'))
+    } finally {
+      setCnpjBusy(false)
+    }
+  }
+
+  const applyCnpj = () => {
+    if (!cnpjData) return
+    setForm((f) => ({
+      ...f,
+      name: f.name.trim() ? f.name : cnpjData.tradeName || cnpjData.legalName,
+      legalName: f.legalName.trim() ? f.legalName : cnpjData.legalName,
+      address: {
+        ...f.address,
+        cep: f.address.cep.trim() ? f.address.cep : cnpjData.cep,
+        street: f.address.street.trim() ? f.address.street : cnpjData.street,
+        number: f.address.number.trim() ? f.address.number : cnpjData.number,
+        complement: f.address.complement.trim() ? f.address.complement : cnpjData.complement,
+        neighborhood: f.address.neighborhood.trim() ? f.address.neighborhood : cnpjData.neighborhood,
+        city: f.address.city.trim() ? f.address.city : cnpjData.city,
+        state: f.address.state.trim() ? f.address.state : cnpjData.state,
+      },
+    }))
+    setCnpjApplied(true)
+    setCnpjData(null)
+  }
+
+  const cnpjReady = form.personType === 'juridica' && docValidForSubmit(form.doc, 'juridica')
 
   return (
     <Modal
@@ -90,6 +185,16 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
       size="form"
     >
       <div className="space-y-5">
+        <DraftPrompt
+          active={target !== null}
+          hasDraft={draft.hasDraft}
+          onRestore={() => {
+            const saved = draft.restore()
+            if (saved) setForm(saved)
+          }}
+          onDiscard={draft.discard}
+        />
+
         <FormSection title={t('Identificação', 'Identification')} icon={<UserRound size={14} />}>
           <Field label={t('Nome', 'Name')} required>
             <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Nome fantasia / nome de exibição', 'Trade / display name')} />
@@ -103,9 +208,32 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
             </button>
           </div>
           <Field label={docLabel}>
-            <input className={`${inputCls} ${docInvalid ? 'border-bad/60' : ''}`} inputMode="numeric" value={form.doc} onChange={(e) => setDoc(e.target.value)} placeholder={form.personType === 'fisica' ? '000.000.000-00' : '00.000.000/0000-00'} />
+            <div className="flex gap-2">
+              <input className={`${inputCls} ${docInvalid ? 'border-bad/60' : ''}`} inputMode="numeric" value={form.doc} onChange={(e) => setDoc(e.target.value)} placeholder={form.personType === 'fisica' ? '000.000.000-00' : '00.000.000/0000-00'} />
+              {cnpjReady ? (
+                <Button type="button" variant="ghost" className="shrink-0" onClick={() => void searchCnpj()} disabled={cnpjBusy}>
+                  {cnpjBusy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                  {t('Consultar', 'Look up')}
+                </Button>
+              ) : null}
+            </div>
             {docInvalid ? <FormFieldError>{form.personType === 'fisica' ? t('CPF inválido.', 'Invalid CPF.') : t('CNPJ inválido.', 'Invalid CNPJ.')}</FormFieldError> : null}
           </Field>
+          {cnpjData ? (
+            <div className="rounded-xl border border-sky/30 bg-sky/10 p-3 text-sm">
+              <p className="text-xs text-subtle">
+                {t('Dados consultados (BrasilAPI). Revise antes de aplicar.', 'Data looked up (BrasilAPI). Review before applying.')}
+              </p>
+              {cnpjData.legalName ? <p className="mt-1">{t('Razão social', 'Legal name')}: <b>{cnpjData.legalName}</b></p> : null}
+              {cnpjData.tradeName ? <p>{t('Nome fantasia', 'Trade name')}: <b>{cnpjData.tradeName}</b></p> : null}
+              {cnpjData.street ? <p className="text-xs text-muted">{cnpjData.street}, {cnpjData.number} · {cnpjData.city}/{cnpjData.state}</p> : null}
+              <div className="mt-2 flex gap-2">
+                <Button small variant="subtle" onClick={applyCnpj}>{t('Aplicar sugestões', 'Apply suggestions')}</Button>
+                <Button small variant="ghost" onClick={() => setCnpjData(null)}>{t('Descartar', 'Discard')}</Button>
+              </div>
+            </div>
+          ) : null}
+          {cnpjApplied ? <FormHelpText>{t('Sugestões aplicadas aos campos vazios. Revise antes de salvar.', 'Suggestions applied to empty fields. Review before saving.')}</FormHelpText> : null}
         </FormSection>
 
         <FormSection title={t('Contato', 'Contact')} icon={<Phone size={14} />}>
@@ -133,7 +261,14 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
         <FormAccordion title={t('Endereço', 'Address')} icon={<MapPin size={14} />}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label={t('CEP', 'Postal code')}>
-              <input className={inputCls} value={form.address.cep} onChange={setAddress('cep')} />
+              <div className="flex gap-2">
+                <input className={inputCls} inputMode="numeric" value={form.address.cep} onChange={setAddress('cep')} placeholder="00000-000" />
+                <Button type="button" variant="ghost" className="shrink-0" onClick={() => void searchCep()} disabled={cepBusy}>
+                  {cepBusy ? <Loader2 size={15} className="animate-spin" /> : <MapPin size={15} />}
+                  {t('Buscar', 'Search')}
+                </Button>
+              </div>
+              <FormHelpText>{t('Preenchimento assistido via ViaCEP. Número e complemento são manuais.', 'Assisted fill via ViaCEP. Number and complement are manual.')}</FormHelpText>
             </Field>
             <Field label={t('Logradouro', 'Street')}>
               <input className={inputCls} value={form.address.street} onChange={setAddress('street')} />
@@ -198,14 +333,25 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
           </div>
         </FormAccordion>
 
+        {dup.exact.length > 0 ? (
+          <div className="rounded-xl border border-bad/40 bg-bad/10 p-3 text-sm text-bad" role="alert">
+            {t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.')}
+          </div>
+        ) : dup.possible.length > 0 ? (
+          <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn" role="status">
+            {t('Possível duplicidade por nome ou email. Revise antes de salvar.', 'Possible duplicate by name or email. Review before saving.')}
+          </div>
+        ) : null}
+
         <FormFooter
           left={<EnvironmentBadge />}
           onCancel={onClose}
-          submitDisabled={!form.name.trim() || !walletOk || docInvalid || emailInvalid}
+          submitDisabled={!form.name.trim() || !walletOk || !docValidForSubmit(form.doc, form.personType) || emailInvalid}
           onSubmit={() => {
             const payload = { ...form, name: form.name.trim(), wallet: form.wallet.trim(), email: form.email.trim() }
             if (editing) updateContact(editing.id, payload)
             else addContact({ ...payload, kind })
+            draft.clear()
             onClose()
           }}
         />

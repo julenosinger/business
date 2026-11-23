@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Tag, Trash2, UserRound } from 'lucide-react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Search, Tag, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
-import { EnvironmentBadge, FormAccordion, FormFooter, FormSection } from '@/components/form'
+import { DraftPrompt, EnvironmentBadge, FormAccordion, FormFieldError, FormFooter, FormSection } from '@/components/form'
 import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
@@ -13,6 +13,7 @@ import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment, contactsForEnvironment } from '@/lib/selectors'
+import { useDraft } from '@/lib/draft'
 import { AccountEnvironmentReview } from '@/components/AccountEnvironmentReview'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
@@ -35,9 +36,30 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
   const [notes, setNotes] = useState('')
   const [externalRef, setExternalRef] = useState('')
   const [recurring, setRecurring] = useState(false)
+  const [contactQuery, setContactQuery] = useState('')
   const value = parseNum(amount)
   const contacts = contactsForEnvironment(data, network).filter((c) => c.kind === (kind === 'payable' ? 'supplier' : 'customer'))
+  const q = contactQuery.trim().toLowerCase()
+  const filteredContacts = q ? contacts.filter((c) => c.name.toLowerCase().includes(q) || c.doc.toLowerCase().includes(q) || (c.internalCode ?? '').toLowerCase().includes(q)) : contacts
   const cats: readonly string[] = kind === 'payable' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
+
+  // Rascunho seguro (objeto combinado dos estados individuais).
+  const accountForm = { kind, description, contactId, amount, dueDate, category, documentNumber, issuedAt, competence, notes, externalRef, recurring }
+  const accountInitial = {
+    kind: editing?.kind ?? ('payable'),
+    description: editing?.description ?? '',
+    contactId: editing?.contactId ?? '',
+    amount: editing ? String(editing.amount) : '',
+    dueDate: editing?.dueDate ?? addDays(today(), 15),
+    category: editing?.category ?? EXPENSE_CATEGORIES[2],
+    documentNumber: editing?.documentNumber ?? '',
+    issuedAt: editing?.issuedAt ?? '',
+    competence: editing?.competence ?? '',
+    notes: editing?.notes ?? '',
+    externalRef: editing?.externalRef ?? '',
+    recurring: editing?.recurring ?? false,
+  }
+  const draft = useDraft('account', editing?.id ?? null, accountForm, accountInitial)
 
   const key = target === null ? null : editing ? editing.id : 'new'
   if (key !== loaded) {
@@ -72,6 +94,28 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
       size="form"
     >
       <div className="space-y-5">
+        <DraftPrompt
+          active={target !== null}
+          hasDraft={draft.hasDraft}
+          onRestore={() => {
+            const s = draft.restore()
+            if (!s) return
+            setKind(s.kind)
+            setDescription(s.description)
+            setContactId(s.contactId)
+            setAmount(s.amount)
+            setDueDate(s.dueDate)
+            setCategory(s.category)
+            setDocumentNumber(s.documentNumber)
+            setIssuedAt(s.issuedAt)
+            setCompetence(s.competence)
+            setNotes(s.notes)
+            setExternalRef(s.externalRef)
+            setRecurring(s.recurring)
+          }}
+          onDiscard={draft.discard}
+        />
+
         {!editing ? (
           <FormSection title={t('Tipo de conta', 'Account type')} icon={<Repeat size={14} />}>
             <div className="grid grid-cols-2 gap-3">
@@ -104,14 +148,25 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
             <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('Ex.: Aluguel do mês', 'E.g. monthly rent')} />
           </Field>
           <Field label={kind === 'payable' ? t('Fornecedor / credor', 'Supplier / creditor') : t('Cliente', 'Customer')}>
-            <select className={inputCls} value={contactId} onChange={(e) => setContactId(e.target.value)}>
+            <div className="flex items-center gap-2 rounded-xl border border-line bg-fill/5 px-3 focus-within:ring-2 focus-within:ring-violet/50">
+              <Search size={15} className="text-subtle" />
+              <input
+                value={contactQuery}
+                onChange={(e) => setContactQuery(e.target.value)}
+                placeholder={t('Buscar por nome, documento ou código', 'Search by name, document or code')}
+                aria-label={t('Buscar contato', 'Search contact')}
+                className="min-h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-subtle"
+              />
+            </div>
+            <select className={`${inputCls} mt-2`} value={contactId} onChange={(e) => setContactId(e.target.value)}>
               <option value="">{t('Não informado', 'Not specified')}</option>
-              {contacts.map((c) => (
+              {filteredContacts.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
             </select>
+            {contacts.length === 0 ? <FormFieldError>{t('Nenhum contato deste tipo neste ambiente.', 'No contact of this type in this environment.')}</FormFieldError> : null}
           </Field>
         </FormSection>
 
@@ -189,6 +244,7 @@ function AccountModal({ target, onClose }: { target: Account | 'new' | null; onC
             }
             if (editing) updateAccount(editing.id, payload)
             else addAccount({ kind, ...payload })
+            draft.clear()
             onClose()
           }}
         />

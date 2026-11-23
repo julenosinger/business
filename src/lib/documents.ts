@@ -72,6 +72,33 @@ export function isDocValid(raw: string, personType: 'fisica' | 'juridica'): bool
   return personType === 'fisica' ? isValidCpf(d) : isValidCnpj(d)
 }
 
+/**
+ * Validação FINAL (para salvamento): documento vazio é opcional; se preenchido, deve estar
+ * completo e com dígitos verificadores corretos. Usada no formulário e no store.
+ */
+export function docValidForSubmit(raw: string, personType: 'fisica' | 'juridica'): boolean {
+  const d = onlyDigits(raw)
+  if (d.length === 0) return true
+  return personType === 'fisica' ? isValidCpf(d) : isValidCnpj(d)
+}
+
+/** true quando o documento está completo porém inválido (para exibir erro próximo ao campo). */
+export function docInvalidError(raw: string, personType: 'fisica' | 'juridica'): boolean {
+  const d = onlyDigits(raw)
+  if (d.length === 0) return false
+  const len = personType === 'fisica' ? 11 : 14
+  if (d.length < len) return false
+  return personType === 'fisica' ? !isValidCpf(d) : !isValidCnpj(d)
+}
+
+/** Normaliza um documento (somente dígitos) para comparação de duplicidade. */
+export const normalizeDoc = onlyDigits
+
+/** Normaliza um email (minúsculas, sem espaços) para comparação. Vazio permanece vazio. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
 /** Email válido (formato simples). Vazio → true (campo opcional). */
 export function isEmailValid(email: string): boolean {
   const e = email.trim()
