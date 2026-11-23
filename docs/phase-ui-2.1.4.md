@@ -1,6 +1,6 @@
 # Fase UI 2.1.4: Store Integration & Regression Certification
 
-**HEAD inicial:** `55d8759` (Fase UI 2.1.3) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `55d8759` (Fase UI 2.1.3) · **HEAD final:** `562e590`
 
 Resultado: **366 testes passando** (eram 353), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração visual.
 
