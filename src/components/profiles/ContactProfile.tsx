@@ -6,8 +6,8 @@ import { TCard, PanelTitle } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { accountOutstanding, accountsForEnvironment, contactsForEnvironment, purchasesForEnvironment, salesForEnvironment } from '@/lib/selectors'
-import { groupMoneyByCurrency, formatMoneyGroup } from '@/lib/profile-money'
+import { accountIsPartial, accountOutstanding, accountsForEnvironment, contactsForEnvironment, purchasesForEnvironment, salesForEnvironment } from '@/lib/selectors'
+import { groupMoneyByCurrency, formatMoneyGroup, formatValue } from '@/lib/profile-money'
 import { fmtDate, money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Contact, Account } from '@/lib/types'
@@ -25,17 +25,25 @@ function InfoItem({ label, value }: { label: string; value?: string }) {
 }
 
 function AccountRow({ a, kind }: { a: Account; kind: 'customer' | 'supplier' }) {
-  const open = a.status === 'open'
+  const settled = a.status === 'paid'
+  const partial = accountIsPartial(a)
   const outstanding = accountOutstanding(a)
   return (
     <li className="flex items-center justify-between gap-3 py-2.5">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{a.description}</p>
         <p className="text-xs text-subtle">{t('Vencimento', 'Due date')}: {fmtDate(a.dueDate)}</p>
+        {partial ? <p className="text-xs text-subtle">{t('Saldo pendente', 'Outstanding')}: {formatValue(outstanding, a.currency)}</p> : null}
       </div>
       <div className="shrink-0 text-right">
-        <p className={`num text-sm font-semibold ${open ? (kind === 'customer' ? 'text-ok' : 'text-bad') : 'text-subtle'}`}>{money(outstanding)}</p>
-        <Badge tone={open ? (kind === 'customer' ? 'ok' : 'warn') : 'neutral'}>{open ? t('Em aberto', 'Open') : t('Liquidada', 'Settled')}</Badge>
+        <p className={`num text-sm font-semibold ${settled ? 'text-subtle' : kind === 'customer' ? 'text-ok' : 'text-bad'}`}>{formatValue(a.amount, a.currency)}</p>
+        {settled ? (
+          <Badge tone="neutral">{t('Liquidada', 'Settled')}</Badge>
+        ) : partial ? (
+          <Badge tone="warn">{t('Parcial', 'Partial')}</Badge>
+        ) : (
+          <Badge tone={kind === 'customer' ? 'ok' : 'warn'}>{t('Em aberto', 'Open')}</Badge>
+        )}
       </div>
     </li>
   )
@@ -78,9 +86,9 @@ export function ContactProfile({ contactId, kind, onBack, onEdit }: { contactId:
 
   // Histórico cronológico por datas com significado correto (venda/compra/liquidação).
   const timeline = [
-    ...sales.map((s) => ({ id: `sale-${s.id}`, date: s.date, type: t('Venda', 'Sale'), desc: s.customerName || t('Venda', 'Sale'), amount: s.total, currency: undefined, canceled: !!s.canceledAt })),
-    ...purchases.map((p) => ({ id: `pur-${p.id}`, date: p.date, type: t('Compra', 'Purchase'), desc: p.supplierName, amount: p.total, currency: undefined, canceled: false })),
-    ...accounts.flatMap((a) => (a.settlements ?? []).map((st) => ({ id: `st-${st.id}`, date: st.date, type: t('Liquidação', 'Settlement'), desc: a.description, amount: st.amount, currency: a.currency, canceled: false }))),
+    ...sales.map((s) => ({ id: `sale-${s.id}`, date: s.date, type: t('Venda', 'Sale'), desc: s.customerName || t('Venda', 'Sale'), amount: s.total, currency: undefined, isAppCurrency: true, canceled: !!s.canceledAt })),
+    ...purchases.map((p) => ({ id: `pur-${p.id}`, date: p.date, type: t('Compra', 'Purchase'), desc: p.supplierName, amount: p.total, currency: undefined, isAppCurrency: true, canceled: false })),
+    ...accounts.flatMap((a) => (a.settlements ?? []).map((st) => ({ id: `st-${st.id}`, date: st.date, type: t('Liquidação', 'Settlement'), desc: a.description, amount: st.amount, currency: a.currency, isAppCurrency: false, canceled: false }))),
   ].sort((a, b) => b.date.localeCompare(a.date))
 
   // Atividade recente (até 5 registros reais por ID).
@@ -257,7 +265,7 @@ export function ContactProfile({ contactId, kind, onBack, onEdit }: { contactId:
                     <p className="truncate text-sm font-medium">{ev.type}</p>
                     <p className="truncate text-xs text-subtle">{ev.desc} · {fmtDate(ev.date)}</p>
                   </div>
-                  <span className={`num shrink-0 text-sm font-semibold ${ev.canceled ? 'text-subtle' : ''}`}>{ev.currency ? formatMoneyGroup({ code: ev.currency, total: ev.amount }) : money(ev.amount)}</span>
+                  <span className={`num shrink-0 text-sm font-semibold ${ev.canceled ? 'text-subtle' : ''}`}>{ev.isAppCurrency ? money(ev.amount) : formatValue(ev.amount, ev.currency)}</span>
                 </li>
               ))}
             </ul>

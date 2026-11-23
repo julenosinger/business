@@ -44,6 +44,14 @@ function render(component: React.ReactElement): { container: HTMLElement; store:
   }
 }
 
+function clickTab(container: HTMLElement, label: string): void {
+  const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
+  if (!btn) throw new Error(`aba não encontrada: ${label}`)
+  React.act(() => {
+    btn.click()
+  })
+}
+
 const customerInput = (over: Partial<Parameters<Store['addContact']>[0]> = {}): Parameters<Store['addContact']>[0] => ({
   kind: 'customer',
   name: 'Fulano Silva',
@@ -134,6 +142,111 @@ describe('Perfis empresariais (render real no StoreProvider)', () => {
     setNetwork('testnet')
     const { container, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
     expect(container.textContent).toContain('Cadastro não encontrado')
+    unmount()
+  })
+})
+
+describe('Integridade financeira dos perfis (moeda e valor)', () => {
+  test('conta BRL é apresentada como BRL (não a moeda do app)', () => {
+    let contactId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const c = store().addContact(customerInput())
+        contactId = c.ok ? c.id : ''
+        store().addAccount({ kind: 'receivable', description: 'Recebível', contactId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+      })
+      unmount()
+    }
+    const { container, unmount } = render(React.createElement(ContactProfile, { contactId, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickTab(container, 'Financeiro')
+    expect(container.textContent).toContain('R$')
+    expect(container.textContent).not.toContain('USDC')
+    unmount()
+  })
+
+  test('conta USDC é apresentada como USDC', () => {
+    let contactId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const c = store().addContact(customerInput())
+        contactId = c.ok ? c.id : ''
+        store().addAccount({ kind: 'receivable', description: 'Recebível', contactId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'USDC' })
+      })
+      unmount()
+    }
+    const { container, unmount } = render(React.createElement(ContactProfile, { contactId, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickTab(container, 'Financeiro')
+    expect(container.textContent).toContain('USDC')
+    expect(container.textContent).not.toContain('R$')
+    unmount()
+  })
+
+  test('moedas diferentes aparecem separadas (não somadas em uma única moeda)', () => {
+    let contactId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const c = store().addContact(customerInput())
+        contactId = c.ok ? c.id : ''
+        store().addAccount({ kind: 'receivable', description: 'A', contactId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+        store().addAccount({ kind: 'receivable', description: 'B', contactId, contactName: 'Fulano Silva', amount: 50, dueDate: '2026-12-01', category: 'Vendas', currency: 'USDC' })
+      })
+      unmount()
+    }
+    const { container, unmount } = render(React.createElement(ContactProfile, { contactId, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickTab(container, 'Financeiro')
+    expect(container.textContent).toContain('R$')
+    expect(container.textContent).toContain('USDC')
+    expect(container.textContent).toContain('100')
+    expect(container.textContent).toContain('50')
+    unmount()
+  })
+
+  test('conta sem moeda não recebe símbolo arbitrário', () => {
+    let contactId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const c = store().addContact(customerInput())
+        contactId = c.ok ? c.id : ''
+        const accId = store().addAccount({ kind: 'receivable', description: 'Sem moeda', contactId, contactName: 'Fulano Silva', amount: 100, dueDate: '2026-12-01', category: 'Vendas', currency: 'BRL' })
+        store().updateAccount(accId, { currency: undefined })
+      })
+      unmount()
+    }
+    const { container, unmount } = render(React.createElement(ContactProfile, { contactId, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    clickTab(container, 'Financeiro')
+    // A conta sem moeda não deve exibir nenhum símbolo de moeda (moeda não especificada).
+    expect(container.textContent).not.toContain('R$')
+    expect(container.textContent).not.toContain('USDC')
+    expect(container.textContent).not.toContain('USD')
+    expect(container.textContent).toContain('100')
+    unmount()
+  })
+
+  test('folha paga na atividade recente exibe o valor original (não zero)', () => {
+    let empId = ''
+    let payrollId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        const e = store().addEmployee({ name: 'Maria', role: 'Gerente', salary: 1234.56, wallet: '', admission: '2025-01-01', active: true })
+        empId = e.ok ? e.id : ''
+        store().runPayroll('2026-11', '2026-12-05')
+      })
+      React.act(() => {
+        payrollId = store().data.accounts.find((a) => a.employeeId === empId && a.source === 'payroll')?.id ?? ''
+        if (payrollId) store().settleAccount(payrollId)
+      })
+      unmount()
+    }
+    const { container, unmount } = render(React.createElement(EmployeeProfile, { employeeId: empId, onBack: () => {}, onEdit: () => {} }))
+    const li = [...container.querySelectorAll('li')].find((el) => el.textContent?.includes('Salário Maria'))
+    expect(li).toBeDefined()
+    expect(li!.textContent).toContain('1.234,56')
+    expect(li!.textContent).not.toContain('0,00 USDC')
     unmount()
   })
 })

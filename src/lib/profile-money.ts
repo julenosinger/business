@@ -27,3 +27,8 @@ export function formatMoneyGroup(g: MoneyGroup): string {
   if (g.code === 'unspecified') return num(g.total)
   return formatCurrency(g.total, g.code)
 }
+
+/** Formata um valor individual respeitando a moeda real do registro (ausente → não especificada). */
+export function formatValue(value: number, currency?: CurrencyCode): string {
+  return formatMoneyGroup({ code: currency ?? 'unspecified', total: value })
+}

@@ -7,7 +7,7 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { accountOutstanding, accountsForEnvironment, employeesForEnvironment } from '@/lib/selectors'
-import { groupMoneyByCurrency, formatMoneyGroup } from '@/lib/profile-money'
+import { groupMoneyByCurrency, formatMoneyGroup, formatValue } from '@/lib/profile-money'
 import { fmtDate, money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Employee } from '@/lib/types'
@@ -173,7 +173,8 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
                         <p className="text-xs text-subtle">{t('Vencimento', 'Due date')}: {fmtDate(a.dueDate)}</p>
                       </div>
                       <div className="shrink-0 text-right">
-                        <span className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{a.currency ? formatMoneyGroup({ code: a.currency, total: accountOutstanding(a) }) : money(accountOutstanding(a))}</span>
+                        <span className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{formatValue(a.amount, a.currency)}</span>
+                        <Badge tone={a.status === 'paid' ? 'ok' : 'warn'}>{a.status === 'paid' ? t('Paga', 'Paid') : t('Pendente', 'Pending')}</Badge>
                       </div>
                     </li>
                   ))}
@@ -212,7 +213,7 @@ export function EmployeeProfile({ employeeId, onBack, onEdit }: { employeeId: st
                     <p className="text-xs text-subtle">{t('Vencimento', 'Due date')}: {fmtDate(a.dueDate)}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{a.currency ? formatMoneyGroup({ code: a.currency, total: a.amount }) : money(a.amount)}</p>
+                    <p className={`num text-sm font-semibold ${a.status === 'open' ? 'text-bad' : 'text-ok'}`}>{formatValue(a.amount, a.currency)}</p>
                     <Badge tone={a.status === 'paid' ? 'ok' : 'warn'}>{a.status === 'paid' ? t('Paga', 'Paid') : t('Pendente', 'Pending')}</Badge>
                   </div>
                 </li>

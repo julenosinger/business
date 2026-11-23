@@ -6,7 +6,7 @@ g.navigator = { language: 'pt-BR' }
 g.document = { documentElement: { lang: '' } }
 g.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
 
-const { groupMoneyByCurrency, formatMoneyGroup } = await import('../src/lib/profile-money')
+const { groupMoneyByCurrency, formatMoneyGroup, formatValue } = await import('../src/lib/profile-money')
 
 describe('agrupamento monetário (integridade financeira)', () => {
   test('separa valores por moeda real', () => {
@@ -40,5 +40,15 @@ describe('agrupamento monetário (integridade financeira)', () => {
 
   test('lista vazia produz grupos vazios', () => {
     expect(groupMoneyByCurrency([])).toEqual([])
+  })
+
+  test('formatValue respeita a moeda real e trata ausência como não especificada', () => {
+    expect(formatValue(100, 'BRL')).toContain('R$')
+    expect(formatValue(100, 'USDC')).toContain('USDC')
+    // Moeda ausente: sem símbolo arbitrário.
+    const unspecified = formatValue(100, undefined)
+    expect(unspecified).not.toContain('R$')
+    expect(unspecified).not.toContain('$')
+    expect(unspecified).not.toContain('USDC')
   })
 })
