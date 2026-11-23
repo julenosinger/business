@@ -40,8 +40,7 @@ import { planPurchaseReconciliation, applyPurchaseReconciliation } from './accou
 import { reconcileTreasuryOp, allocationMinor, planAllocationMinor } from './settlement-service'
 import { fromNumber, toDisplayNumber } from './accounting/money'
 import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury-selectors'
-import { docValidForSubmit } from './documents'
-import { findContactDuplicates, findEmployeeDuplicates } from './duplicates'
+import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
@@ -212,6 +211,34 @@ function classifyReasonText(reason: string): string {
       return t('Há evidência on-chain de outro ambiente para esta obrigação.', 'There is on-chain evidence of another environment for this obligation.')
     default:
       return t('Não foi possível classificar a obrigação.', 'Could not classify the obligation.')
+  }
+}
+
+/** Mapeia o código de rejeição de gravação para uma mensagem localizada (contatos). */
+function contactSaveMessage(code: SaveCode): string {
+  switch (code) {
+    case 'invalid_document':
+      return t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.')
+    case 'duplicate':
+      return t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.')
+    case 'not_found':
+      return t('Cadastro não encontrado.', 'Record not found.')
+    default:
+      return t('Este cadastro pertence a outro ambiente.', 'This record belongs to another environment.')
+  }
+}
+
+/** Mapeia o código de rejeição de gravação para uma mensagem localizada (funcionários). */
+function employeeSaveMessage(code: SaveCode): string {
+  switch (code) {
+    case 'invalid_document':
+      return t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.')
+    case 'duplicate':
+      return t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.')
+    case 'not_found':
+      return t('Funcionário não encontrado.', 'Employee not found.')
+    default:
+      return t('Este funcionário pertence a outro ambiente.', 'This employee belongs to another environment.')
   }
 }
 
@@ -567,49 +594,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }),
       addContact: (c) => {
         const env = getNetwork()
-        if (!docValidForSubmit(c.doc, c.personType ?? 'fisica')) {
-          return { ok: false, code: 'invalid_document', message: t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.') }
-        }
-        const dupInput = { doc: c.doc, internalCode: c.internalCode ?? '', name: c.name, email: c.email, kind: c.kind }
-        if (findContactDuplicates(data.contacts.filter((x) => x.kind === c.kind && x.environment === env), dupInput).exact.length > 0) {
-          return { ok: false, code: 'duplicate', message: t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.') }
-        }
-        const id = uid()
-        // Gravação atômica com revalidação sobre o estado mais recente (defesa contra corrida).
+        const { result } = addContactTransition(data, c, env)
+        if (!result.ok) return { ok: false, code: result.code, message: contactSaveMessage(result.code) }
+        // Reexecuta a MESMA transição pura sobre o estado mais recente (gravação atômica, sem efeitos colaterais).
         setData((d) => {
-          if (findContactDuplicates(d.contacts.filter((x) => x.kind === c.kind && x.environment === env), dupInput).exact.length > 0) return d
-          return { ...d, contacts: [{ ...c, id, environment: env }, ...d.contacts] }
+          const t = addContactTransition(d, c, env)
+          return t.result.ok ? t.nextState : d
         })
-        return { ok: true, id }
+        return { ok: true, id: result.id }
       },
       updateContact: (id, patch) => {
         const env = getNetwork()
-        const cur = data.contacts.find((x) => x.id === id)
-        if (!cur) {
-          return { ok: false, code: 'not_found', message: t('Cadastro não encontrado.', 'Record not found.') }
-        }
-        if (cur.environment !== env) {
-          return { ok: false, code: 'wrong_environment', message: t('Este cadastro pertence a outro ambiente.', 'This record belongs to another environment.') }
-        }
-        // O payload NÃO pode alterar o ambiente do registro.
-        const next = { ...cur, ...patch, environment: cur.environment }
-        if (!docValidForSubmit(next.doc, next.personType ?? 'fisica')) {
-          return { ok: false, code: 'invalid_document', message: t('Documento inválido: revise o CPF/CNPJ.', 'Invalid document: review the CPF/CNPJ.') }
-        }
-        const dupInput = { doc: next.doc, internalCode: next.internalCode ?? '', name: next.name, email: next.email, kind: next.kind }
-        if (findContactDuplicates(data.contacts.filter((x) => x.kind === next.kind && x.environment === env), dupInput, id).exact.length > 0) {
-          return { ok: false, code: 'duplicate', message: t('Já existe um cadastro com este documento/código neste ambiente.', 'A record with this document/code already exists in this environment.') }
-        }
+        const { result } = updateContactTransition(data, id, patch, env)
+        if (!result.ok) return { ok: false, code: result.code, message: contactSaveMessage(result.code) }
         setData((d) => {
-          const c = d.contacts.find((x) => x.id === id)
-          if (!c || c.environment !== env) return d
-          const n = { ...c, ...patch, environment: c.environment }
-          if (!docValidForSubmit(n.doc, n.personType ?? 'fisica')) return d
-          const din = { doc: n.doc, internalCode: n.internalCode ?? '', name: n.name, email: n.email, kind: n.kind }
-          if (findContactDuplicates(d.contacts.filter((x) => x.kind === n.kind && x.environment === env), din, id).exact.length > 0) return d
-          return { ...d, contacts: d.contacts.map((x) => (x.id === id ? n : x)) }
+          const t = updateContactTransition(d, id, patch, env)
+          return t.result.ok ? t.nextState : d
         })
-        return { ok: true, id }
+        return { ok: true, id: result.id }
       },
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
@@ -975,40 +977,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addEmployee: (e) => {
         const env = getNetwork()
-        const dupInput = { registration: e.registration ?? '', email: e.email ?? '', name: e.name }
-        if (findEmployeeDuplicates(data.employees.filter((x) => x.environment === env), dupInput).exact.length > 0) {
-          return { ok: false, code: 'duplicate', message: t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.') }
-        }
-        const id = uid()
+        const { result } = addEmployeeTransition(data, e, env)
+        if (!result.ok) return { ok: false, code: result.code, message: employeeSaveMessage(result.code) }
         setData((d) => {
-          if (findEmployeeDuplicates(d.employees.filter((x) => x.environment === env), dupInput).exact.length > 0) return d
-          return { ...d, employees: [{ ...e, id, environment: env }, ...d.employees] }
+          const t = addEmployeeTransition(d, e, env)
+          return t.result.ok ? t.nextState : d
         })
-        return { ok: true, id }
+        return { ok: true, id: result.id }
       },
       updateEmployee: (id, patch) => {
         const env = getNetwork()
-        const cur = data.employees.find((x) => x.id === id)
-        if (!cur) {
-          return { ok: false, code: 'not_found', message: t('Funcionário não encontrado.', 'Employee not found.') }
-        }
-        if (cur.environment !== env) {
-          return { ok: false, code: 'wrong_environment', message: t('Este funcionário pertence a outro ambiente.', 'This employee belongs to another environment.') }
-        }
-        const next = { ...cur, ...patch, environment: cur.environment }
-        const dupInput = { registration: next.registration ?? '', email: next.email ?? '', name: next.name }
-        if (findEmployeeDuplicates(data.employees.filter((x) => x.environment === env), dupInput, id).exact.length > 0) {
-          return { ok: false, code: 'duplicate', message: t('Já existe um funcionário com esta matrícula neste ambiente.', 'An employee with this ID already exists in this environment.') }
-        }
+        const { result } = updateEmployeeTransition(data, id, patch, env)
+        if (!result.ok) return { ok: false, code: result.code, message: employeeSaveMessage(result.code) }
         setData((d) => {
-          const c = d.employees.find((x) => x.id === id)
-          if (!c || c.environment !== env) return d
-          const n = { ...c, ...patch, environment: c.environment }
-          const din = { registration: n.registration ?? '', email: n.email ?? '', name: n.name }
-          if (findEmployeeDuplicates(d.employees.filter((x) => x.environment === env), din, id).exact.length > 0) return d
-          return { ...d, employees: d.employees.map((x) => (x.id === id ? n : x)) }
+          const t = updateEmployeeTransition(d, id, patch, env)
+          return t.result.ok ? t.nextState : d
         })
-        return { ok: true, id }
+        return { ok: true, id: result.id }
       },
       removeEmployee: (id) => undoable((d) => ({ ...d, employees: d.employees.filter((e) => e.id !== id) }), t('Funcionário removido.', 'Employee removed.')),
       runPayroll: (month, dueDate) => {

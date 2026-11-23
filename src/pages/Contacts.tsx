@@ -104,11 +104,11 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   const scopedContacts = contactsForEnvironment(data, network).filter((c) => c.kind === kind)
   const dup = findContactDuplicates(scopedContacts, { doc: form.doc, internalCode: form.internalCode, name: form.name, email: form.email, kind }, editing?.id)
 
-  // Referência ao documento atual, para descartar respostas assíncronas obsoletas.
-  const docRef = useRef(form.doc)
+  // Referência ao formulário atual, para descartar respostas assíncronas obsoletas.
+  const formRef = useRef(form)
   useEffect(() => {
-    docRef.current = form.doc
-  }, [form.doc])
+    formRef.current = form
+  }, [form])
 
   // --- Rascunho seguro ---
   const draft = useDraft(`contact-${kind}`, editing?.id ?? null, form, contactToForm(editing ?? undefined))
@@ -125,19 +125,18 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
     setCepBusy(true)
     try {
       const r = await lookupCep(cep, controller.signal)
-      // Aplica somente se o CEP atual ainda for o consultado (descarta resposta obsoleta).
-      setForm((f) => {
-        if (f.address.cep.replace(/\D/g, '') !== cep) return f
-        return {
-          ...f,
-          address: {
-            ...f.address,
-            street: f.address.street.trim() ? f.address.street : r.street,
-            neighborhood: f.address.neighborhood.trim() ? f.address.neighborhood : r.neighborhood,
-            city: f.address.city.trim() ? f.address.city : r.city,
-            state: f.address.state.trim() ? f.address.state : r.state,
-          },
-        }
+      // Descarta resposta obsoleta (CEP mudou, registro/ambiente trocou ou modal fechou).
+      const current = formRef.current
+      if (current.address.cep.replace(/\D/g, '') !== cep) return
+      setForm({
+        ...current,
+        address: {
+          ...current.address,
+          street: current.address.street.trim() ? current.address.street : r.street,
+          neighborhood: current.address.neighborhood.trim() ? current.address.neighborhood : r.neighborhood,
+          city: current.address.city.trim() ? current.address.city : r.city,
+          state: current.address.state.trim() ? current.address.state : r.state,
+        },
       })
       toast.success(t('Endereço preenchido (revise antes de salvar).', 'Address filled (review before saving).'))
     } catch (err) {
@@ -160,7 +159,7 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
     try {
       const r = await lookupCnpj(cnpj, controller.signal)
       // Descarta se o CNPJ atual mudou durante a consulta.
-      if (docRef.current.replace(/\D/g, '') !== cnpj) return
+      if (formRef.current.doc.replace(/\D/g, '') !== cnpj) return
       if (r.legalName || r.tradeName || r.street) {
         setCnpjData(r)
         setCnpjApplied(false)
