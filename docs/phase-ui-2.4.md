@@ -1,6 +1,6 @@
 # Fase UI 2.4: Operational Intelligence & Integrated AI Chatbot
 
-**HEAD inicial:** `2488ccb` (Fase UI 2.3.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `2488ccb` (Fase UI 2.3.1) · **HEAD final:** `2b234dd`
 
 Resultado: **426 testes passando** (eram 407), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão em vendas, compras, folha, contabilidade, tesouraria, gateway ou blockchain.
 
