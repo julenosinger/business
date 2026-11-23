@@ -10,7 +10,8 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { PurchaseReconciliationPanel } from '@/components/accounting/PurchaseReconciliationPanel'
 import { useStore } from '@/lib/store'
-import { inPeriod, monthPeriod } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { accountsForEnvironment, contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment } from '@/lib/selectors'
 import { addDays, daysUntil, fmtDate, money, parseNum, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { CAT_PURCHASE } from '@/lib/types'
@@ -26,7 +27,10 @@ let seq = 1
 
 export function Purchases() {
   const { data, recordPurchase } = useStore()
-  const suppliers = data.contacts.filter((c) => c.kind === 'supplier')
+  const network = useNetwork()
+  const suppliers = contactsForEnvironment(data, network).filter((c) => c.kind === 'supplier')
+  const products = productsForEnvironment(data, network)
+  const scopedAccounts = accountsForEnvironment(data.accounts, network)
   const [supplierId, setSupplierId] = useState('')
   const [paidNow, setPaidNow] = useState(false)
   const [awaitReceipt, setAwaitReceipt] = useState(false)
@@ -55,7 +59,7 @@ export function Purchases() {
 
   const history = [
     ...data.entries.filter((e) => e.category === CAT_PURCHASE).map((e) => ({ id: e.id, date: e.date, desc: e.description, amount: e.amount, paid: true })),
-    ...data.accounts
+    ...scopedAccounts
       .filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
       .map((a) => ({ id: a.id, date: a.dueDate, desc: a.description, amount: a.amount, paid: false })),
   ].sort((a, b) => b.date.localeCompare(a.date))
@@ -63,7 +67,7 @@ export function Purchases() {
 
   const month = monthPeriod(0)
   const paidMonth = data.entries.filter((e) => e.category === CAT_PURCHASE && e.type === 'out' && inPeriod(e.date, month))
-  const openPurchases = data.accounts.filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
+  const openPurchases = scopedAccounts.filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
   const openTotal = openPurchases.reduce((s, a) => s + a.amount, 0)
   const soon = openPurchases.filter((a) => daysUntil(a.dueDate) <= 7)
   const soonTotal = soon.reduce((s, a) => s + a.amount, 0)
@@ -95,7 +99,7 @@ export function Purchases() {
         <TCard className="p-4 sm:p-5">
           <PanelTitle icon={<ShoppingBag size={18} />} title={t('Nova compra', 'New purchase')} subtitle={t('Entrada de mercadorias no estoque', 'Goods received into inventory')} />
           <div className="mt-4">
-            {data.products.length === 0 ? (
+            {products.length === 0 ? (
               <Empty icon={<ShoppingBag size={22} />} title={t('Cadastre produtos primeiro', 'Add products first')} text={t('Para comprar, os produtos precisam existir no estoque.', 'To buy, products must exist in inventory.')} />
             ) : (
               <div className="space-y-4">
@@ -120,12 +124,12 @@ export function Purchases() {
                           className={`${inputCls} col-span-3 sm:col-span-1`}
                           value={l.productId}
                           onChange={(e) => {
-                            const p = data.products.find((x) => x.id === e.target.value)
+                            const p = products.find((x) => x.id === e.target.value)
                             patch(l.key, { productId: e.target.value, cost: p && !l.cost ? String(p.cost) : l.cost })
                           }}
                         >
                           <option value="">{t('Produto', 'Product')}</option>
-                          {data.products.map((p) => (
+                          {products.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
                             </option>

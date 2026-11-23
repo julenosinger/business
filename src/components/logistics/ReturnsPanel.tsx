@@ -5,6 +5,8 @@ import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { returnsForEnvironment, shipmentsForEnvironment } from '@/lib/selectors'
 import { returnableQty, isReturnFinal } from '@/lib/returns'
 import { num, parseNum } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -40,7 +42,9 @@ const actionLabel = (a: string): string =>
 
 export function ReturnRequestModal({ open, shipmentId, onClose, onCreated }: { open: boolean; shipmentId: string | null; onClose: () => void; onCreated: () => void }) {
   const { data, requestReturn } = useStore()
-  const candidates = data.shipments.filter((s) => s.direction === 'outbound' && s.status === 'delivered' && s.items.some((i) => returnableQty(data, s.id, i.id) > 0))
+  const network = useNetwork()
+  const scopedShipments = shipmentsForEnvironment(data, network)
+  const candidates = scopedShipments.filter((s) => s.direction === 'outbound' && s.status === 'delivered' && s.items.some((i) => returnableQty(data, s.id, i.id) > 0))
   const [loaded, setLoaded] = useState<string | null>(null)
   const [sel, setSel] = useState('')
   const [qty, setQty] = useState<Record<string, string>>({})
@@ -54,7 +58,7 @@ export function ReturnRequestModal({ open, shipmentId, onClose, onCreated }: { o
     setReason('')
     setError('')
   }
-  const ship = data.shipments.find((s) => s.id === sel)
+  const ship = scopedShipments.find((s) => s.id === sel)
 
   const submit = () => {
     if (!ship) return
@@ -384,9 +388,11 @@ type Filter = 'all' | 'open' | 'closed'
 
 export function ReturnsPanel({ onNew, onOpenShipment }: { onNew: () => void; onOpenShipment: (id: string) => void }) {
   const { data } = useStore()
+  const network = useNetwork()
+  const returns = returnsForEnvironment(data, network)
   const [filter, setFilter] = useState<Filter>('open')
-  const open = data.returns.filter((r) => !isReturnFinal(r))
-  const list = filter === 'all' ? data.returns : filter === 'open' ? open : data.returns.filter(isReturnFinal)
+  const open = returns.filter((r) => !isReturnFinal(r))
+  const list = filter === 'all' ? returns : filter === 'open' ? open : returns.filter(isReturnFinal)
 
   return (
     <div className="space-y-4">

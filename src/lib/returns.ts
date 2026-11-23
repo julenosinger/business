@@ -6,6 +6,7 @@
 // - Itens danificados ou com defeito nunca são reestocados automaticamente.
 // - Reembolso e troca são apenas registrados aqui (com referência). Nenhum lançamento financeiro é feito automaticamente.
 import type { AppData, ReturnAuthorization, ReturnCondition, ReturnDecision, ReturnEvent, ReturnInspectionLine, StockMove } from './types'
+import type { NetworkId } from './network'
 import { DEFAULT_ORG, clean, createShipment, fail, round2, uid, type Outcome, type ShipmentInput } from './logistics'
 
 const ACTIVE_FOR_CAP: readonly ReturnAuthorization['status'][] = ['requested', 'authorized', 'inspected', 'closed']
@@ -42,7 +43,7 @@ export interface ReturnRequestInput {
   reason: string
 }
 
-export function requestReturn(d: AppData, input: ReturnRequestInput, now: string, actor: string): Outcome<{ id: string }> {
+export function requestReturn(d: AppData, input: ReturnRequestInput, now: string, actor: string, env: NetworkId = 'mainnet'): Outcome<{ id: string }> {
   const ship = d.shipments.find((s) => s.id === input.shipmentId)
   if (!ship) return fail('not_found')
   if (ship.direction !== 'outbound') return fail('not_outbound')
@@ -68,6 +69,7 @@ export function requestReturn(d: AppData, input: ReturnRequestInput, now: string
     reason,
     status: 'requested',
     events: [ev('requested', now, actor, reason)],
+    environment: ship.environment ?? env,
     createdAt: now,
     updatedAt: now,
   }
@@ -87,7 +89,7 @@ export const rejectReturn = (d: AppData, id: string, note: string, now: string, 
 export const cancelReturn = (d: AppData, id: string, note: string, now: string, actor: string) => move(d, id, ['requested', 'authorized'], 'cancelled', 'cancelled', note, now, actor, false)
 
 /** Cria a remessa de retorno (entrada) ligada à devolução, para acompanhar o transporte. Ela nunca passa pelo recebimento comum. */
-export function createReturnShipment(d: AppData, id: string, now: string, actor: string): Outcome<{ shipmentId: string }> {
+export function createReturnShipment(d: AppData, id: string, now: string, actor: string, env: NetworkId = 'mainnet'): Outcome<{ shipmentId: string }> {
   const cur = d.returns.find((r) => r.id === id)
   if (!cur) return fail('not_found')
   if (cur.status !== 'authorized' || cur.returnShipmentId) return fail('not_allowed')
@@ -109,7 +111,7 @@ export function createReturnShipment(d: AppData, id: string, now: string, actor:
     currency: orig.currency,
     freightCost: 0,
   }
-  const created = createShipment(d, input, now, actor)
+  const created = createShipment(d, input, now, actor, env)
   if (!created.ok) return created
   const shipmentId = created.value.id
   const withLink = { ...created.data, shipments: created.data.shipments.map((s) => (s.id === shipmentId ? { ...s, returnId: id } : s)) }

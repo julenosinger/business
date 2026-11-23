@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { carriersForEnvironment, shipmentsForEnvironment } from '@/lib/selectors'
 import { CURRENCIES } from '@/lib/logistics'
 import type { CarrierInput } from '@/lib/carriers'
 import { adapterFor } from '@/lib/carriers'
@@ -199,8 +201,11 @@ function CarrierModal({ target, onClose }: { target: Carrier | 'new' | null; onC
 /** Diretório de transportadoras. O adaptador atual é manual: guarda o modelo de link de rastreio e nada é consultado automaticamente. */
 export function CarriersPanel() {
   const { data, setCarrierActive, removeCarrier } = useStore()
+  const network = useNetwork()
+  const carriers = carriersForEnvironment(data, network)
+  const shipments = shipmentsForEnvironment(data, network)
   const [target, setTarget] = useState<Carrier | 'new' | null>(null)
-  const used = (c: Carrier) => data.shipments.filter((s) => s.carrierId === c.id).length
+  const used = (c: Carrier) => shipments.filter((s) => s.carrierId === c.id).length
 
   return (
     <div className="space-y-4">
@@ -216,13 +221,13 @@ export function CarriersPanel() {
         </p>
       </TCard>
 
-      {data.carriers.length === 0 ? (
+      {carriers.length === 0 ? (
         <TCard className="p-4">
           <Empty icon={<Truck size={22} />} title={t('Nenhuma transportadora cadastrada', 'No carriers yet')} text={t('Cadastre as que você usa para escolher nas remessas e comparar custos.', 'Add the ones you use to pick them in shipments and compare costs.')} action={<Button onClick={() => setTarget('new')}>{t('Nova transportadora', 'New carrier')}</Button>} />
         </TCard>
       ) : (
         <ul className="grid gap-4 lg:grid-cols-2">
-          {data.carriers.map((c) => {
+          {carriers.map((c) => {
             const n = used(c)
             return (
               <li key={c.id}>

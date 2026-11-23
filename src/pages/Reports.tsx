@@ -8,7 +8,8 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { periodFor, rangeTabs } from '@/pages/Accounting'
 import { useStore } from '@/lib/store'
-import { expensesByCategory, kpis, monthlySeries, topProducts } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { expensesByCategory, kpisForEnvironment, monthlySeriesForEnvironment, topProductsForEnvironment } from '@/lib/selectors'
 import { fmtDate, downloadCsv, money, num } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 
@@ -16,12 +17,13 @@ const COLORS = [C.accent, C.ok, C.warn, C.bad, '#8b7bd8', '#3aa6b0', '#d1679f']
 
 export function Reports() {
   const { data } = useStore()
+  const network = useNetwork()
   const [range, setRange] = useState<'month' | 'prev' | 'year'>('month')
   const period = periodFor(range)
-  const k = kpis(data, period)
+  const k = kpisForEnvironment(data, network, period)
   const cats = expensesByCategory(data, period)
-  const top = topProducts(data, period, 8)
-  const series = monthlySeries(data, 6)
+  const top = topProductsForEnvironment(data, network, period, 8)
+  const series = monthlySeriesForEnvironment(data, network, 6)
   const catTotal = cats.reduce((s, c) => s + c.total, 0)
   const margin = k.revenue > 0 ? (k.profit / k.revenue) * 100 : 0
   const topMax = Math.max(...top.map((p) => p.revenue), 1)

@@ -3,7 +3,7 @@ import { BarChart3, Boxes, Landmark, Send, Sparkles, Truck } from 'lucide-react'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { accountTotalsForEnvironment, cashBalance, dueSoonForEnvironment, kpis, lowStock, monthPeriod } from '@/lib/selectors'
+import { accountTotalsForEnvironment, cashBalance, dueSoonForEnvironment, kpisForEnvironment, lowStockForEnvironment, monthPeriod } from '@/lib/selectors'
 import { money, num } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { useNetwork } from '@/lib/network'
@@ -28,7 +28,7 @@ export function AssistantPanel() {
 
   const ask = (id: QuestionId, label: string) => {
     if (id === 'profit') {
-      const k = kpis(data, monthPeriod(0))
+      const k = kpisForEnvironment(data, network, monthPeriod(0))
       setAnswer({
         q: label,
         lines: [
@@ -39,7 +39,7 @@ export function AssistantPanel() {
         ],
       })
     } else if (id === 'restock') {
-      const low = lowStock(data)
+      const low = lowStockForEnvironment(data, network)
       setAnswer({
         q: label,
         lines: low.length

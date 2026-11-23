@@ -4,6 +4,7 @@
 // (DHL, FedEx, UPS, Correios, regionais) entrarão como novos adaptadores com credenciais e respostas verificadas: nenhuma
 // integração é simulada ou declarada aqui.
 import type { AppData, Carrier, CarrierAdapterId, CarrierCostStructure, CarrierServiceLevel, CurrencyCode } from './types'
+import type { NetworkId } from './network'
 import { CURRENCIES, DEFAULT_ORG, clean, fail, round2, uid, type ErrorCode, type Outcome } from './logistics'
 
 export interface CarrierAdapter {
@@ -111,11 +112,11 @@ export function nextCarrierId(carriers: readonly { id: string }[]): string {
   return `CAR-${String(max + 1).padStart(4, '0')}`
 }
 
-export function createCarrier(d: AppData, input: CarrierInput, now: string): Outcome<{ id: string }> {
+export function createCarrier(d: AppData, input: CarrierInput, now: string, env: NetworkId = 'mainnet'): Outcome<{ id: string }> {
   const r = normalize(d, input)
   if (!r.value) return fail(...r.errors)
   const id = nextCarrierId(d.carriers)
-  const carrier: Carrier = { id, orgId: DEFAULT_ORG, adapter: 'manual', ...r.value, createdAt: now, updatedAt: now }
+  const carrier: Carrier = { id, orgId: DEFAULT_ORG, adapter: 'manual', ...r.value, environment: env, createdAt: now, updatedAt: now }
   return { ok: true, data: { ...d, carriers: [carrier, ...d.carriers] }, value: { id } }
 }
 

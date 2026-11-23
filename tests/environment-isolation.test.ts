@@ -9,9 +9,9 @@ const el = () => ({ style: {}, appendChild() {}, setAttribute() {}, addEventList
 g.document = { documentElement: el(), head: el(), body: el(), createElement: el, createTextNode: () => ({}), getElementsByTagName: () => [el()], querySelector: () => null, addEventListener() {}, removeEventListener() {} }
 g.window = { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {}, localStorage: g.localStorage }
 
-const { emptyData, migrateAccountEnvironments } = await import('../src/lib/store')
-const { accountsForEnvironment, accountTotalsForEnvironment, upcomingForEnvironment, dueSoonForEnvironment } = await import('../src/lib/selectors')
-import type { Account, AppData, TreasuryOp } from '../src/lib/types'
+const { emptyData, migrateAccountEnvironments, migrateErpEnvironments } = await import('../src/lib/store')
+const { accountsForEnvironment, accountTotalsForEnvironment, contactsForEnvironment, employeesForEnvironment, productsForEnvironment, purchasesForEnvironment, salesForEnvironment, scopedByEnvironment, shipmentsForEnvironment, upcomingForEnvironment, dueSoonForEnvironment } = await import('../src/lib/selectors')
+import type { Account, AppData, Contact, Employee, Product, PurchaseRef, Sale, Shipment, TreasuryOp } from '../src/lib/types'
 
 const acc = (over: Partial<Account> = {}): Account => ({
   id: 'a',
@@ -120,5 +120,78 @@ describe('migração do ambiente financeiro (legado)', () => {
     expect(twice.accounts).toEqual(once.accounts)
     expect(twice.accounts.find((a) => a.id === 'a1')!.environment).toBe('mainnet')
     expect(twice.accounts.find((a) => a.id === 'a2')!.environment).toBe('testnet')
+  })
+})
+
+describe('isolamento operacional do ERP (fase 3.3)', () => {
+  const product = (id: string, env?: Product['environment']): Product => ({ id, sku: id, name: id, category: 'Geral', unit: 'un', cost: 10, price: 20, stock: 5, minStock: 1, environment: env })
+  const contact = (id: string, env?: Contact['environment']): Contact => ({ id, kind: 'customer', name: id, doc: '', email: '', phone: '', wallet: '', environment: env })
+  const employee = (id: string, env?: Employee['environment']): Employee => ({ id, name: id, role: 'r', salary: 1000, wallet: '', admission: '2026-01-01', active: true, environment: env })
+  const sale = (id: string, env?: Sale['environment'], accountId?: string): Sale => ({ id, date: '2026-11-20', customerName: 'c', items: [], total: 100, cogs: 50, method: 'pix', accountId, environment: env })
+  const purchase = (id: string, env?: PurchaseRef['environment']): PurchaseRef => ({ id, date: '2026-11-20', supplierName: 's', items: [], total: 100, stockPosted: true, createdAt: '2026-11-20', environment: env })
+  const shipment = (id: string, env?: Shipment['environment']): Shipment => ({ id, orgId: 'local', direction: 'outbound', status: 'draft', origin: { name: 'a', city: 'b', country: 'c' }, destination: { name: 'a', city: 'b', country: 'c' }, senderName: 's', recipientName: 'r', carrier: '', trackingNumber: '', method: '', packages: [], items: [], declaredValue: 0, currency: 'USDC', freightCost: 0, documents: [], events: [], createdAt: '2026-11-20', updatedAt: '2026-11-20', environment: env })
+
+  test('scopedByEnvironment separa por ambiente e exclui unassigned', () => {
+    const list = [product('m', 'mainnet'), product('t', 'testnet'), product('u', 'unassigned')]
+    expect(scopedByEnvironment(list, 'mainnet').map((p) => p.id)).toEqual(['m'])
+    expect(scopedByEnvironment(list, 'testnet').map((p) => p.id)).toEqual(['t'])
+  })
+
+  test('seletores por entidade respeitam o ambiente', () => {
+    const d: AppData = {
+      ...emptyData(),
+      products: [product('m', 'mainnet'), product('t', 'testnet')],
+      contacts: [contact('m', 'mainnet'), contact('t', 'testnet')],
+      employees: [employee('m', 'mainnet'), employee('t', 'testnet')],
+      sales: [sale('m', 'mainnet'), sale('t', 'testnet')],
+      purchases: [purchase('m', 'mainnet'), purchase('t', 'testnet')],
+      shipments: [shipment('m', 'mainnet'), shipment('t', 'testnet')],
+    }
+    expect(productsForEnvironment(d, 'mainnet').map((p) => p.id)).toEqual(['m'])
+    expect(contactsForEnvironment(d, 'testnet').map((c) => c.id)).toEqual(['t'])
+    expect(employeesForEnvironment(d, 'mainnet').map((e) => e.id)).toEqual(['m'])
+    expect(salesForEnvironment(d, 'testnet').map((s) => s.id)).toEqual(['t'])
+    expect(purchasesForEnvironment(d, 'mainnet').map((p) => p.id)).toEqual(['m'])
+    expect(shipmentsForEnvironment(d, 'testnet').map((s) => s.id)).toEqual(['t'])
+  })
+
+  test('migração ERP: venda herda ambiente da conta vinculada; demais ficam unassigned', () => {
+    const d: AppData = {
+      ...emptyData(),
+      accounts: [acc({ id: 'acc-m', environment: 'mainnet' }), acc({ id: 'acc-t', environment: 'testnet' })],
+      sales: [sale('s1', undefined, 'acc-m'), sale('s2', undefined, 'acc-t'), sale('s3', undefined, undefined)],
+      products: [product('p1', undefined)],
+      contacts: [contact('c1', undefined)],
+      employees: [employee('e1', undefined)],
+    }
+    const out = migrateErpEnvironments(d)
+    expect(out.sales.find((s) => s.id === 's1')!.environment).toBe('mainnet')
+    expect(out.sales.find((s) => s.id === 's2')!.environment).toBe('testnet')
+    expect(out.sales.find((s) => s.id === 's3')!.environment).toBe('unassigned')
+    expect(out.products.find((p) => p.id === 'p1')!.environment).toBe('unassigned')
+    expect(out.contacts.find((c) => c.id === 'c1')!.environment).toBe('unassigned')
+    expect(out.employees.find((e) => e.id === 'e1')!.environment).toBe('unassigned')
+  })
+
+  test('migração ERP é idempotente e não perde registros', () => {
+    const d: AppData = {
+      ...emptyData(),
+      sales: [sale('s1', undefined)],
+      products: [product('p1', undefined)],
+      contacts: [contact('c1', undefined)],
+    }
+    const once = migrateErpEnvironments(d)
+    const twice = migrateErpEnvironments(once)
+    expect(twice).toEqual(once)
+    expect(twice.sales).toHaveLength(1)
+    expect(twice.products).toHaveLength(1)
+    expect(twice.contacts).toHaveLength(1)
+    expect(twice.products[0]!.environment).toBe('unassigned')
+  })
+
+  test('registros já classificados são preservados pela migração', () => {
+    const d: AppData = { ...emptyData(), products: [product('p1', 'testnet')] }
+    const out = migrateErpEnvironments(d)
+    expect(out.products[0]!.environment).toBe('testnet')
   })
 })

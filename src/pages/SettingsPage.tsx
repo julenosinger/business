@@ -6,6 +6,7 @@ import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
+import { EnvironmentReview } from '@/components/EnvironmentReview'
 import { num, parseNum } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
 import { exportBackup, lastBackupAt, parseBackup } from '@/lib/backup'
@@ -70,6 +71,8 @@ export function SettingsPage() {
   return (
     <div className="space-y-4 sm:space-y-5">
       <PageTop title={t('Configurações', 'Settings')} subtitle={t('Dados da empresa, moeda e parâmetros da tesouraria.', 'Company details, currency and treasury parameters.')} />
+
+      <EnvironmentReview />
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="sky" icon={<Building2 size={20} />} label={t('Moeda do app', 'App currency')} value={s.currency} sub={s.company || '—'} />

@@ -1,3 +1,6 @@
+/** Ambiente operacional/financeiro de origem de um registro. `unassigned` = legado sem classificação. */
+export type Environment = NetworkId | 'unassigned'
+
 export interface Product {
   id: string
   sku: string
@@ -8,6 +11,8 @@ export interface Product {
   price: number
   stock: number
   minStock: number
+  /** Ambiente de origem do produto. Imutável após criação (salvo migração auditada). */
+  environment?: Environment
 }
 
 export interface StockMove {
@@ -17,6 +22,8 @@ export interface StockMove {
   qty: number
   date: string
   note: string
+  /** Ambiente da movimentação. Deve coincidir com o ambiente do produto. */
+  environment?: Environment
 }
 
 export interface Contact {
@@ -27,6 +34,8 @@ export interface Contact {
   email: string
   phone: string
   wallet: string
+  /** Ambiente operacional do cadastro. */
+  environment?: Environment
 }
 
 export interface Entry {
@@ -41,7 +50,7 @@ export interface Entry {
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'
 
 /** Ambiente financeiro de ORIGEM de uma obrigação. `unassigned` = legado sem classificação. */
-export type AccountEnvironment = NetworkId | 'unassigned'
+export type AccountEnvironment = Environment
 
 /** Liquidação parcial (ou total) de uma conta. Várias liquidações por conta são permitidas. */
 export interface AccountSettlement {
@@ -105,6 +114,8 @@ export interface Sale {
   accountId?: string
   /** Data do cancelamento (YYYY-MM-DD). Vendas canceladas não contam nos indicadores. */
   canceledAt?: string
+  /** Ambiente de origem da venda. Imutável após criação. */
+  environment?: Environment
 }
 
 export interface Employee {
@@ -115,6 +126,8 @@ export interface Employee {
   wallet: string
   admission: string
   active: boolean
+  /** Ambiente operacional do funcionário. */
+  environment?: Environment
 }
 
 export interface TreasuryOp {
@@ -296,6 +309,8 @@ export interface Carrier {
   serviceLevels: CarrierServiceLevel[]
   cost?: CarrierCostStructure
   active: boolean
+  /** Ambiente operacional da transportadora. */
+  environment?: Environment
   createdAt: string
   updatedAt: string
 }
@@ -361,6 +376,8 @@ export interface PurchaseRef {
   /** Recebimento que somou o estoque (só quando a compra aguardava recebimento). */
   receiptId?: string
   createdAt: string
+  /** Ambiente de origem da compra. Imutável após criação. */
+  environment?: Environment
 }
 
 /** Expedição de uma remessa de saída: separação, embalagem, conferência de estoque, comprovante e fechamento. */
@@ -420,6 +437,8 @@ export interface ReturnAuthorization {
   inspection?: { lines: ReturnInspectionLine[]; notes: string; at: string; by: string; restocked: { productId: string; qty: number }[] }
   resolution?: { kind: 'refund' | 'replacement' | 'none'; reference: string; note: string; at: string; by: string }
   events: ReturnEvent[]
+  /** Ambiente de origem da devolução. Imutável após criação. */
+  environment?: Environment
   createdAt: string
   updatedAt: string
 }
@@ -449,6 +468,8 @@ export interface GoodsReceipt {
   notes: string
   receivedAt: string
   receivedBy: string
+  /** Ambiente de origem do recebimento. Imutável após criação. */
+  environment?: Environment
 }
 
 export interface Shipment {
@@ -486,6 +507,8 @@ export interface Shipment {
   fulfillment?: Fulfillment
   /** Recebimento de mercadorias (só remessas de entrada). Impede receber duas vezes. */
   receiptId?: string
+  /** Ambiente de origem da remessa. Imutável após criação. */
+  environment?: Environment
   createdAt: string
   updatedAt: string
 }

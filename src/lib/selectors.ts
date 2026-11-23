@@ -1,4 +1,4 @@
-import { CAT_PURCHASE, CAT_SALES, type Account, type AppData } from './types'
+import { CAT_PURCHASE, CAT_SALES, type Account, type AppData, type Environment } from './types'
 import { addDays, daysUntil, iso, monthKey, monthLabel, round2, today } from './format'
 import { locale } from './i18n'
 import type { NetworkId } from './network'
@@ -145,6 +145,44 @@ export function dueSoon(data: AppData, kind: Account['kind'], days: number): Acc
 /** Obrigações a vencer em breve, isoladas por ambiente. */
 export function dueSoonForEnvironment(data: AppData, network: NetworkId, kind: Account['kind'], days: number): Account[] {
   return dueSoon({ ...data, accounts: accountsForEnvironment(data.accounts, network) }, kind, days)
+}
+
+// -----------------------------------------------------------------------------------------------------------
+// Isolamento operacional por ambiente (fase 3.3): entidades do ERP + indicadores derivados.
+// -----------------------------------------------------------------------------------------------------------
+
+/** Filtra uma lista de registros pelo ambiente de origem (exclui `unassigned`). */
+export function scopedByEnvironment<T extends { environment?: Environment }>(list: T[], network: NetworkId): T[] {
+  return list.filter((x) => x.environment === network)
+}
+
+export const productsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.products, network)
+export const movesForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.moves, network)
+export const salesForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.sales, network)
+export const purchasesForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.purchases, network)
+export const contactsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.contacts, network)
+export const employeesForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.employees, network)
+export const shipmentsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.shipments, network)
+export const carriersForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.carriers, network)
+export const returnsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.returns, network)
+export const receiptsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.receipts, network)
+
+/** KPIs com receita/custo/estoque isolados por ambiente (lançamentos do razão permanecem globais). */
+export function kpisForEnvironment(data: AppData, network: NetworkId, p: Period): Kpis {
+  return kpis({ ...data, sales: salesForEnvironment(data, network) }, p)
+}
+
+export const stockValueForEnvironment = (data: AppData, network: NetworkId): number =>
+  stockValue({ ...data, products: productsForEnvironment(data, network) })
+
+export const lowStockForEnvironment = (data: AppData, network: NetworkId) => lowStock({ ...data, products: productsForEnvironment(data, network) })
+
+export function topProductsForEnvironment(data: AppData, network: NetworkId, p: Period, limit = 8): Ranked[] {
+  return topProducts({ ...data, sales: salesForEnvironment(data, network) }, p, limit)
+}
+
+export function monthlySeriesForEnvironment(data: AppData, network: NetworkId, months = 6): MonthPoint[] {
+  return monthlySeries({ ...data, sales: salesForEnvironment(data, network) }, months)
 }
 
 export interface Ranked {

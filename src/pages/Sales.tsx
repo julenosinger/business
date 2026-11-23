@@ -9,7 +9,8 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
-import { inPeriod, monthPeriod } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment, salesForEnvironment } from '@/lib/selectors'
 import { addDays, fmtDate, money, num, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { PayMethod } from '@/lib/types'
@@ -24,6 +25,9 @@ const methods = (): { id: PayMethod; label: string }[] => [
 
 export function Sales() {
   const { data, recordSale, cancelSale } = useStore()
+  const network = useNetwork()
+  const catalogProducts = productsForEnvironment(data, network)
+  const scopedSales = salesForEnvironment(data, network)
   const [limit, setLimit] = useState(20)
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('all')
@@ -32,22 +36,22 @@ export function Sales() {
   const [method, setMethod] = useState<PayMethod>('pix')
   const [dueDate, setDueDate] = useState(addDays(today(), 30))
 
-  const customers = data.contacts.filter((c) => c.kind === 'customer')
-  const categories = useMemo(() => [...new Set(data.products.map((p) => p.category).filter(Boolean))].sort(), [data.products])
+  const customers = contactsForEnvironment(data, network).filter((c) => c.kind === 'customer')
+  const categories = useMemo(() => [...new Set(catalogProducts.map((p) => p.category).filter(Boolean))].sort(), [catalogProducts])
   const products = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return data.products.filter((p) => (category === 'all' || p.category === category) && (!s || p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s)))
-  }, [data.products, q, category])
+    return catalogProducts.filter((p) => (category === 'all' || p.category === category) && (!s || p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s)))
+  }, [catalogProducts, q, category])
 
   const lines = Object.entries(cart).flatMap(([id, qty]) => {
-    const p = data.products.find((x) => x.id === id)
+    const p = catalogProducts.find((x) => x.id === id)
     return p ? [{ p, qty }] : []
   })
   const total = lines.reduce((s, l) => s + l.qty * l.p.price, 0)
   const overStock = lines.some((l) => l.qty > l.p.stock)
   const itemCount = lines.reduce((s, l) => s + l.qty, 0)
 
-  const live = data.sales.filter((s) => !s.canceledAt)
+  const live = scopedSales.filter((s) => !s.canceledAt)
   const day = today()
   const todaySales = live.filter((s) => s.date === day)
   const month = monthPeriod(0)
@@ -58,7 +62,7 @@ export function Sales() {
   const saleCount = (n: number) => `${n} ${n === 1 ? t('venda', 'sale') : t('vendas', 'sales')}`
 
   const add = (id: string) => {
-    const p = data.products.find((x) => x.id === id)
+    const p = catalogProducts.find((x) => x.id === id)
     if (!p) return
     setCart((c) => ({ ...c, [id]: Math.min(p.stock, (c[id] ?? 0) + 1) }))
   }
@@ -224,9 +228,9 @@ export function Sales() {
 
       <TCard className="overflow-hidden">
         <div className="border-b border-line p-4 sm:px-5">
-          <PanelTitle icon={<Receipt size={18} />} title={t('Vendas recentes', 'Recent sales')} subtitle={`${data.sales.length} ${data.sales.length === 1 ? t('venda registrada', 'recorded sale') : t('vendas registradas', 'recorded sales')}`} />
+          <PanelTitle icon={<Receipt size={18} />} title={t('Vendas recentes', 'Recent sales')} subtitle={`${scopedSales.length} ${scopedSales.length === 1 ? t('venda registrada', 'recorded sale') : t('vendas registradas', 'recorded sales')}`} />
         </div>
-        {data.sales.length === 0 ? (
+        {scopedSales.length === 0 ? (
           <Empty icon={<Receipt size={22} />} title={t('Nenhuma venda ainda', 'No sales yet')} />
         ) : (
           <>
@@ -244,7 +248,7 @@ export function Sales() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.sales.slice(0, limit).map((s) => (
+                  {scopedSales.slice(0, limit).map((s) => (
                     <tr key={s.id} className={`transition hover:bg-fill/5 ${s.canceledAt ? 'opacity-60' : ''}`}>
                       <td className={td}>{fmtDate(s.date)}</td>
                       <td className={td}>{s.customerName}</td>
@@ -262,7 +266,7 @@ export function Sales() {
             </div>
 
             <ul className="divide-y divide-line md:hidden">
-              {data.sales.slice(0, limit).map((s) => (
+              {scopedSales.slice(0, limit).map((s) => (
                 <li key={s.id} className={`space-y-2 p-4 ${s.canceledAt ? 'opacity-60' : ''}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -284,7 +288,7 @@ export function Sales() {
             </ul>
           </>
         )}
-        {data.sales.length > limit ? (
+        {scopedSales.length > limit ? (
           <div className="border-t border-line p-3 text-center">
             <Button variant="ghost" small onClick={() => setLimit((l) => l + 30)}>
               {t('Ver mais vendas', 'Show more sales')}

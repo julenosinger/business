@@ -11,7 +11,7 @@ import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useGatewayBalances } from '@/lib/gateway'
 import { useNetwork } from '@/lib/network'
-import { accountTotalsForEnvironment, cashBalance, delta, kpis, monthPeriod, monthlySeries, stockValue, upcomingForEnvironment } from '@/lib/selectors'
+import { accountTotalsForEnvironment, cashBalance, delta, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
 import { fmtDate, daysUntil, money, moneyCompact, pct, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { daysSinceBackup, exportBackup } from '@/lib/backup'
@@ -36,9 +36,9 @@ export function Dashboard() {
 
   const now = monthPeriod(0)
   const prev = monthPeriod(-1)
-  const cur = kpis(data, now)
-  const old = kpis(data, prev)
-  const series = monthlySeries(data, 6)
+  const cur = kpisForEnvironment(data, network, now)
+  const old = kpisForEnvironment(data, network, prev)
+  const series = monthlySeriesForEnvironment(data, network, 6)
   const totals = accountTotalsForEnvironment(data, network)
   const next = upcomingForEnvironment(data, network, 5)
   const hasData = data.sales.length + data.entries.length + data.products.length + data.accounts.length > 0
@@ -114,8 +114,8 @@ export function Dashboard() {
           tone="sky"
           icon={<Boxes size={20} />}
           label={t('Valor em estoque', 'Inventory value')}
-          value={money(stockValue(data))}
-          sub={t(`${data.products.length} produtos`, `${data.products.length} products`)}
+          value={money(stockValueForEnvironment(data, network))}
+          sub={t(`${productsForEnvironment(data, network).length} produtos`, `${productsForEnvironment(data, network).length} products`)}
         />
       </div>
 

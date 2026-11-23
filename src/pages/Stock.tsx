@@ -7,7 +7,8 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
-import { lowStock, stockValue } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { lowStockForEnvironment, productsForEnvironment, stockValueForEnvironment } from '@/lib/selectors'
 import { fmtDate, money, num, parseNum, pct } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import type { Product } from '@/lib/types'
@@ -208,6 +209,8 @@ type View = 'all' | 'low'
 
 export function Stock() {
   const { data, removeProduct } = useStore()
+  const network = useNetwork()
+  const products = productsForEnvironment(data, network)
   const [q, setQ] = useState('')
   const [view, setView] = useState<View>('all')
   const [limit, setLimit] = useState(30)
@@ -215,17 +218,17 @@ export function Stock() {
   const [move, setMove] = useState<{ product: Product; kind: 'in' | 'out' | 'adjust' } | null>(null)
   const [history, setHistory] = useState<Product | null>(null)
 
-  const low = lowStock(data)
+  const low = lowStockForEnvironment(data, network)
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return data.products.filter(
+    return products.filter(
       (p) => (view === 'all' || p.stock <= p.minStock) && (!s || p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s) || p.category.toLowerCase().includes(s)),
     )
-  }, [data.products, q, view])
+  }, [products, q, view])
   const shown = list.slice(0, limit)
-  const potential = data.products.reduce((s, p) => s + p.stock * p.price, 0)
-  const cost = stockValue(data)
-  const categories = new Set(data.products.map((p) => p.category)).size
+  const potential = products.reduce((s, p) => s + p.stock * p.price, 0)
+  const cost = stockValueForEnvironment(data, network)
+  const categories = new Set(products.map((p) => p.category)).size
   const potentialMargin = potential > 0 ? ((potential - cost) / potential) * 100 : null
 
   const iconBtn = 'flex size-9 items-center justify-center rounded-lg hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60'
@@ -278,7 +281,7 @@ export function Stock() {
           value={money(potential)}
           sub={potentialMargin === null ? t('a preço de tabela', 'at list price') : `${t('a preço de tabela', 'at list price')} · ${potentialMargin.toFixed(1).replace('.', t(',', '.'))}%`}
         />
-        <KpiTile tone="sky" icon={<Layers size={20} />} label={t('Produtos', 'Products')} value={String(data.products.length)} sub={`${categories} ${categories === 1 ? t('categoria', 'category') : t('categorias', 'categories')}`} />
+        <KpiTile tone="sky" icon={<Layers size={20} />} label={t('Produtos', 'Products')} value={String(products.length)} sub={`${categories} ${categories === 1 ? t('categoria', 'category') : t('categorias', 'categories')}`} />
         <KpiTile
           tone="warn"
           icon={<AlertTriangle size={20} />}
@@ -326,7 +329,7 @@ export function Stock() {
               setLimit(30)
             }}
             items={[
-              { id: 'all', label: `${t('Todos', 'All')} (${data.products.length})` },
+              { id: 'all', label: `${t('Todos', 'All')} (${products.length})` },
               { id: 'low', label: `${t('Abaixo do mínimo', 'Below minimum')} (${low.length})` },
             ]}
           />
@@ -348,10 +351,10 @@ export function Stock() {
         {list.length === 0 ? (
           <Empty
             icon={<Boxes size={22} />}
-            title={data.products.length ? t('Nada encontrado', 'Nothing found') : t('Nenhum produto cadastrado', 'No products yet')}
+            title={products.length ? t('Nada encontrado', 'Nothing found') : t('Nenhum produto cadastrado', 'No products yet')}
             text={t('Cadastre seus produtos para controlar estoque, custo e margem.', 'Add your products to track stock, cost and margin.')}
             action={
-              !data.products.length ? (
+              !products.length ? (
                 <Button onClick={() => setEditing('new')}>
                   <Plus size={16} /> {t('Cadastrar produto', 'Add product')}
                 </Button>

@@ -10,6 +10,7 @@ import {
   type Contact,
   type Employee,
   type Entry,
+  type Environment,
   type PayMethod,
   type PaymentRequest,
   type Product,
@@ -143,6 +144,33 @@ export function migrateAccountEnvironments(data: AppData): AppData {
   return changed ? { ...data, accounts } : data
 }
 
+/**
+ * Migração versionada/idempotente do ambiente OPERACIONAL (fase 3.3): produtos, movimentações, vendas,
+ * compras, contatos, funcionários, remessas, transportadoras, devoluções e recebimentos.
+ * - Vendas herdam o ambiente da obrigação (conta a receber) quando esta foi classificada; senão `unassigned`.
+ * - Demais entidades sem evidência confiável ficam `unassigned` (nunca pela rede selecionada).
+ * Exportada para testes (pura e idempotente).
+ */
+export function migrateErpEnvironments(data: AppData): AppData {
+  const accountEnv = new Map<string, Environment | undefined>(data.accounts.map((a) => [a.id, a.environment]))
+  let changed = false
+  const withEnv = <T extends { environment?: Environment }>(rec: T, env: Environment): T => {
+    changed = true
+    return { ...rec, environment: env }
+  }
+  const sales = data.sales.map((s) => (s.environment ? s : withEnv(s, (s.accountId ? accountEnv.get(s.accountId) : undefined) ?? 'unassigned')))
+  const products = data.products.map((p) => (p.environment ? p : withEnv(p, 'unassigned')))
+  const moves = data.moves.map((m) => (m.environment ? m : withEnv(m, 'unassigned')))
+  const contacts = data.contacts.map((c) => (c.environment ? c : withEnv(c, 'unassigned')))
+  const employees = data.employees.map((e) => (e.environment ? e : withEnv(e, 'unassigned')))
+  const purchases = data.purchases.map((p) => (p.environment ? p : withEnv(p, 'unassigned')))
+  const shipments = data.shipments.map((s) => (s.environment ? s : withEnv(s, 'unassigned')))
+  const carriers = data.carriers.map((c) => (c.environment ? c : withEnv(c, 'unassigned')))
+  const returns = data.returns.map((r) => (r.environment ? r : withEnv(r, 'unassigned')))
+  const receipts = data.receipts.map((r) => (r.environment ? r : withEnv(r, 'unassigned')))
+  return changed ? { ...data, sales, products, moves, contacts, employees, purchases, shipments, carriers, returns, receipts } : data
+}
+
 /** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
 function accountOutstandingMinor(acc: Account): bigint | null {
   const currency = acc.currency
@@ -185,6 +213,54 @@ function classifyReasonText(reason: string): string {
   }
 }
 
+/** Busca um registro operacional (com campo `environment`) por tipo e id. */
+function entityRecord(d: AppData, kind: EntityKind, id: string): { environment?: Environment } | undefined {
+  switch (kind) {
+    case 'product':
+      return d.products.find((x) => x.id === id)
+    case 'sale':
+      return d.sales.find((x) => x.id === id)
+    case 'purchase':
+      return d.purchases.find((x) => x.id === id)
+    case 'contact':
+      return d.contacts.find((x) => x.id === id)
+    case 'employee':
+      return d.employees.find((x) => x.id === id)
+    case 'shipment':
+      return d.shipments.find((x) => x.id === id)
+    case 'carrier':
+      return d.carriers.find((x) => x.id === id)
+    case 'return':
+      return d.returns.find((x) => x.id === id)
+    case 'receipt':
+      return d.receipts.find((x) => x.id === id)
+  }
+}
+
+/** Aplica o ambiente a um registro operacional (retorna um novo AppData). */
+function setEntityRecord(d: AppData, kind: EntityKind, id: string, environment: NetworkId): AppData {
+  switch (kind) {
+    case 'product':
+      return { ...d, products: d.products.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'sale':
+      return { ...d, sales: d.sales.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'purchase':
+      return { ...d, purchases: d.purchases.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'contact':
+      return { ...d, contacts: d.contacts.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'employee':
+      return { ...d, employees: d.employees.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'shipment':
+      return { ...d, shipments: d.shipments.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'carrier':
+      return { ...d, carriers: d.carriers.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'return':
+      return { ...d, returns: d.returns.map((x) => (x.id === id ? { ...x, environment } : x)) }
+    case 'receipt':
+      return { ...d, receipts: d.receipts.map((x) => (x.id === id ? { ...x, environment } : x)) }
+  }
+}
+
 function load(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -192,7 +268,7 @@ function load(): AppData {
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
     const data: AppData = { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
-    return migrateAccountEnvironments(migrateAccountCurrencies(data))
+    return migrateErpEnvironments(migrateAccountEnvironments(migrateAccountCurrencies(data)))
   } catch {
     return emptyData()
   }
@@ -207,6 +283,8 @@ export type AccountingOutcome = { ok: true; status: AccountingStatus } | { ok: f
 export type CancelResult = { ok: true } | { ok: false; reason: string }
 export type BatchCancelResult = { canceled: string[]; refused: { id: string; reason: string }[] }
 export type ClassifyResult = { ok: true } | { ok: false; reason: string }
+
+export type EntityKind = 'product' | 'sale' | 'purchase' | 'contact' | 'employee' | 'shipment' | 'carrier' | 'return' | 'receipt'
 
 export interface SaleInput {
   customerId?: string
@@ -260,6 +338,8 @@ export interface Store {
   updateAccount: (id: string, patch: Partial<Account>) => void
   /** Reclassifica manualmente o ambiente de uma obrigação legada (`unassigned`), com auditoria. */
   setAccountEnvironment: (id: string, environment: NetworkId) => ClassifyResult
+  /** Reclassifica manualmente o ambiente de um registro operacional legado (`unassigned`), com auditoria. */
+  setRecordEnvironment: (kind: EntityKind, id: string, environment: NetworkId) => ClassifyResult
   settleAccount: (id: string, treasuryTx?: string) => void
   /** Liquidação parcial: reduz o saldo em aberto sem fechar a conta. Recusa valor acima do saldo. */
   settleAccountPartial: (id: string, amount: number, treasuryTx?: string) => void
@@ -463,8 +543,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addProduct: (p) =>
         set((d) => {
           const id = uid()
-          const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock') }] : []
-          return { ...d, products: [{ ...p, id }, ...d.products], moves: [...first, ...d.moves] }
+          const env = getNetwork()
+          const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock'), environment: env }] : []
+          return { ...d, products: [{ ...p, id, environment: env }, ...d.products], moves: [...first, ...d.moves] }
         }),
       updateProduct: (id, patch) => set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
       removeProduct: (id) => undoable((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) }), t('Produto removido.', 'Product removed.')),
@@ -476,10 +557,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             products: d.products.map((p) =>
               p.id === productId ? { ...p, stock: kind === 'adjust' ? qty : Math.max(0, p.stock + delta) } : p,
             ),
-            moves: [{ id: uid(), productId, kind, qty, date: today(), note }, ...d.moves],
+            moves: [{ id: uid(), productId, kind, qty, date: today(), note, environment: getNetwork() }, ...d.moves],
           }
         }),
-      addContact: (c) => set((d) => ({ ...d, contacts: [{ ...c, id: uid() }, ...d.contacts] })),
+      addContact: (c) => set((d) => ({ ...d, contacts: [{ ...c, id: uid(), environment: getNetwork() }, ...d.contacts] })),
       updateContact: (id, patch) => set((d) => ({ ...d, contacts: d.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) })),
       removeContact: (id) => undoable((d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== id) }), t('Cadastro removido.', 'Record removed.')),
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
@@ -565,6 +646,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ledger: withAudit(d.ledger, ledgerCtx(d), 'account.classified', `account ${id} classified as ${environment}`),
             accounts: d.accounts.map((a) => (a.id === id ? { ...a, environment } : a)),
           }
+        })
+        return { ok: true }
+      },
+      setRecordEnvironment: (kind, id, environment) => {
+        const record = entityRecord(data, kind, id)
+        if (!record) {
+          toast.error(t('Registro não encontrado.', 'Record not found.'))
+          return { ok: false, reason: 'not_found' }
+        }
+        if (record.environment && record.environment !== 'unassigned') {
+          toast.error(t('Este registro já tem ambiente definido.', 'This record already has an environment.'))
+          return { ok: false, reason: 'already_classified' }
+        }
+        // Evidência conflitante: venda vinculada a uma conta de outro ambiente.
+        if (kind === 'sale') {
+          const sale = record as Sale
+          const accEnv = sale.accountId ? data.accounts.find((a) => a.id === sale.accountId)?.environment : undefined
+          if (accEnv && accEnv !== 'unassigned' && accEnv !== environment) {
+            toast.error(t('Há evidência de outro ambiente para esta venda.', 'There is evidence of another environment for this sale.'))
+            return { ok: false, reason: 'conflicting_evidence' }
+          }
+        }
+        set((d) => {
+          const cur = entityRecord(d, kind, id)
+          if (!cur || (cur.environment && cur.environment !== 'unassigned')) return d
+          const next = setEntityRecord(d, kind, id, environment)
+          return { ...next, ledger: withAudit(next.ledger, ledgerCtx(next), 'record.classified', `${kind} ${id} classified as ${environment}`) }
         })
         return { ok: true }
       },
@@ -677,7 +785,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           return next
         }, t('Venda cancelada. Estoque e caixa foram ajustados.', 'Sale canceled. Stock and cash were adjusted.')),
-      recordSale: (input) =>
+      recordSale: (input) => {
+        const env = getNetwork()
+        const foreignProduct = input.items.some((it) => {
+          const p = data.products.find((x) => x.id === it.productId)
+          return !!p && !!p.environment && p.environment !== env
+        })
+        const customer = data.contacts.find((c) => c.id === input.customerId)
+        const foreignCustomer = !!customer && !!customer.environment && customer.environment !== env
+        if (foreignProduct || foreignCustomer) {
+          toast.error(t('Há produtos ou cliente de outro ambiente neste pedido. Revalide o carrinho.', 'This order has products or a customer from another environment. Revalidate the cart.'))
+          return
+        }
         set((d) => {
           const customer = d.contacts.find((c) => c.id === input.customerId)
           const date = today()
@@ -696,7 +815,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return it ? { ...p, stock: Math.max(0, p.stock - it.qty) } : p
             }),
             moves: [
-              ...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`) })),
+              ...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`), environment: getNetwork() })),
               ...d.moves,
             ],
           }
@@ -724,11 +843,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...d.entries,
             ]
           }
-          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId }
+          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: getNetwork() }
           next.sales = [sale, ...d.sales]
           return next
-        }),
-      recordPurchase: (input) =>
+        })
+      },
+      recordPurchase: (input) => {
+        const env = getNetwork()
+        const foreignProduct = input.items.some((it) => {
+          const p = data.products.find((x) => x.id === it.productId)
+          return !!p && !!p.environment && p.environment !== env
+        })
+        const supplier = data.contacts.find((c) => c.id === input.supplierId)
+        const foreignSupplier = !!supplier && !!supplier.environment && supplier.environment !== env
+        if (foreignProduct || foreignSupplier) {
+          toast.error(t('Há produtos ou fornecedor de outro ambiente nesta compra.', 'This purchase has products or a supplier from another environment.'))
+          return
+        }
         set((d) => {
           const supplier = d.contacts.find((c) => c.id === input.supplierId)
           const date = today()
@@ -747,7 +878,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             moves: awaiting
               ? d.moves
               : [
-                  ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`) })),
+                  ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`), environment: getNetwork() })),
                   ...d.moves,
                 ],
             purchases: [
@@ -763,6 +894,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 total,
                 stockPosted: !awaiting,
                 createdAt: new Date().toISOString(),
+                environment: getNetwork(),
               },
               ...d.purchases,
             ],
@@ -790,14 +922,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ]
           }
           return next
-        }),
-      addEmployee: (e) => set((d) => ({ ...d, employees: [{ ...e, id: uid() }, ...d.employees] })),
+        })
+      },
+      addEmployee: (e) => set((d) => ({ ...d, employees: [{ ...e, id: uid(), environment: getNetwork() }, ...d.employees] })),
       updateEmployee: (id, patch) => set((d) => ({ ...d, employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
       removeEmployee: (id) => undoable((d) => ({ ...d, employees: d.employees.filter((e) => e.id !== id) }), t('Funcionário removido.', 'Employee removed.')),
       runPayroll: (month, dueDate) => {
         const pending = (d: AppData) =>
           d.employees
-            .filter((e) => e.active)
+            .filter((e) => e.active && e.environment === getNetwork())
             .filter((e) => !d.accounts.some((a) => a.source === 'payroll' && a.employeeId === e.id && a.description.endsWith(month)))
         const created = pending(data).length
         apply((d) => {
@@ -846,7 +979,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }),
       // Logística: as regras ficam em lib/logistics.ts. Aqui só se valida no estado atual e aplica no próximo.
       // Remessas não alteram estoque nem financeiro.
-      createShipment: (input) => runShipmentOp((d, now) => logistics.createShipment(d, input, now, actor())),
+      createShipment: (input) => runShipmentOp((d, now) => logistics.createShipment(d, input, now, actor(), getNetwork())),
       updateShipment: (id, input) => runShipmentOp((d, now) => logistics.updateShipment(d, id, input, now, actor())),
       transitionShipment: (id, to, opts = {}) => runShipmentOp((d, now) => logistics.transitionShipment(d, id, to, opts, now, today(), actor())),
       addShipmentEvent: (id, input) => runShipmentOp((d, now) => logistics.addTrackingEvent(d, id, input, now, actor())),
@@ -856,8 +989,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       recordShipmentPod: (id, input) => runShipmentOp((d, now) => fulfillment.recordPod(d, id, input, now, actor())),
       closeShipmentFulfillment: (id) => runShipmentOp((d, now) => fulfillment.closeFulfillment(d, id, now, actor())),
       // Único ponto da logística que soma estoque: só depois da conferência do recebimento e uma única vez.
-      receiveShipmentGoods: (id, input) => runShipmentOp((d, now) => receiving.receiveGoods(d, id, input, now, today(), actor())),
-      createCarrier: (input) => runShipmentOp((d, now) => carriers.createCarrier(d, input, now)),
+      receiveShipmentGoods: (id, input) => runShipmentOp((d, now) => receiving.receiveGoods(d, id, input, now, today(), actor(), getNetwork())),
+      createCarrier: (input) => runShipmentOp((d, now) => carriers.createCarrier(d, input, now, getNetwork())),
       updateCarrier: (id, input) => runShipmentOp((d, now) => carriers.updateCarrier(d, id, input, now)),
       setCarrierActive: (id, active) => runShipmentOp((d, now) => carriers.setCarrierActive(d, id, active, now)),
       removeCarrier: (id) => runShipmentOp((d) => carriers.removeCarrier(d, id)),
@@ -865,11 +998,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Cria uma conta a pagar (Logística) uma única vez, na moeda do app. O pagamento segue pelo financeiro normal.
       postShipmentFreight: (id, dueDate) => runShipmentOp((d, now) => freight.postFreight(d, id, { dueDate }, now, d.settings.currency, actor())),
       setShipmentInternational: (id, input) => runShipmentOp((d, now) => international.setInternational(d, id, input, now, actor())),
-      requestReturn: (input) => runShipmentOp((d, now) => returns.requestReturn(d, input, now, actor())),
+      requestReturn: (input) => runShipmentOp((d, now) => returns.requestReturn(d, input, now, actor(), getNetwork())),
       authorizeReturn: (id, note = '') => runShipmentOp((d, now) => returns.authorizeReturn(d, id, note, now, actor())),
       rejectReturn: (id, note) => runShipmentOp((d, now) => returns.rejectReturn(d, id, note, now, actor())),
       cancelReturn: (id, note = '') => runShipmentOp((d, now) => returns.cancelReturn(d, id, note, now, actor())),
-      createReturnShipment: (id) => runShipmentOp((d, now) => returns.createReturnShipment(d, id, now, actor())),
+      createReturnShipment: (id) => runShipmentOp((d, now) => returns.createReturnShipment(d, id, now, actor(), getNetwork())),
       // Único ponto da devolução que mexe no estoque: só itens inspecionados em bom estado e com decisão de reestocar.
       inspectReturn: (id, input) => runShipmentOp((d, now) => returns.inspectReturn(d, id, input, now, today(), actor())),
       resolveReturn: (id, input) => runShipmentOp((d, now) => returns.resolveReturn(d, id, input, now, actor())),
@@ -942,6 +1075,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return {
               ...demo,
               accounts: demo.accounts.map((a) => ({ ...a, environment: env })),
+              products: demo.products.map((p) => ({ ...p, environment: env })),
+              moves: demo.moves.map((m) => ({ ...m, environment: env })),
+              contacts: demo.contacts.map((c) => ({ ...c, environment: env })),
+              sales: demo.sales.map((s) => ({ ...s, environment: env })),
+              employees: demo.employees.map((e) => ({ ...e, environment: env })),
+              purchases: demo.purchases.map((p) => ({ ...p, environment: env })),
+              shipments: demo.shipments.map((s) => ({ ...s, environment: env })),
+              carriers: demo.carriers.map((c) => ({ ...c, environment: env })),
+              returns: demo.returns.map((r) => ({ ...r, environment: env })),
+              receipts: demo.receipts.map((r) => ({ ...r, environment: env })),
               // Mantém a configuração do razão (plano de contas, flags, regras fiscais); os lançamentos antigos
               // pertencem aos dados substituídos e saem junto com eles (o Desfazer restaura tudo).
               ledger: { ...emptyLedger(d.ledger.orgId), flags: d.ledger.flags, chart: d.ledger.chart, categoryMap: d.ledger.categoryMap, taxRules: d.ledger.taxRules, fxRates: d.ledger.fxRates },

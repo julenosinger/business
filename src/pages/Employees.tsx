@@ -10,6 +10,8 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
+import { useNetwork } from '@/lib/network'
+import { accountsForEnvironment, employeesForEnvironment } from '@/lib/selectors'
 import { isValidAddress } from '@/lib/gateway'
 import { addDays, fmtDate, money, monthTitle, parseNum, shortAddr, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -75,12 +77,14 @@ function EmployeeModal({ target, onClose }: { target: Employee | 'new' | null; o
 export function Employees() {
   const { data, updateEmployee, removeEmployee, runPayroll } = useStore()
   const { requestPay, requestIntent } = useNav()
+  const network = useNetwork()
+  const employees = employeesForEnvironment(data, network)
   const [target, setTarget] = useState<Employee | 'new' | null>(null)
   const month = today().slice(0, 7)
-  const active = data.employees.filter((e) => e.active)
+  const active = employees.filter((e) => e.active)
   const payroll = active.reduce((s, e) => s + e.salary, 0)
-  const payrollAccounts = data.accounts.filter((a) => a.source === 'payroll' && a.description.endsWith(month))
-  const openPayroll = data.accounts.filter((a) => a.source === 'payroll' && a.status === 'open')
+  const payrollAccounts = accountsForEnvironment(data.accounts, network).filter((a) => a.source === 'payroll' && a.description.endsWith(month))
+  const openPayroll = accountsForEnvironment(data.accounts, network).filter((a) => a.source === 'payroll' && a.status === 'open')
   const openTotal = openPayroll.reduce((s, a) => s + a.amount, 0)
   const paidThisMonth = payrollAccounts.filter((a) => a.status === 'paid').length
   const complete = active.length > 0 && payrollAccounts.length >= active.length
@@ -176,7 +180,7 @@ export function Employees() {
       />
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
-        <KpiTile tone="sky" icon={<Users size={20} />} label={t('Funcionários ativos', 'Active employees')} value={String(active.length)} sub={`${data.employees.length - active.length} ${t('inativo(s)', 'inactive')}`} />
+        <KpiTile tone="sky" icon={<Users size={20} />} label={t('Funcionários ativos', 'Active employees')} value={String(active.length)} sub={`${employees.length - active.length} ${t('inativo(s)', 'inactive')}`} />
         <KpiTile tone="violet" icon={<Wallet size={20} />} label={t('Folha mensal', 'Monthly payroll')} value={money(payroll)} sub={t('soma dos salários ativos', 'sum of active salaries')} />
         <KpiTile
           tone="ok"
@@ -218,9 +222,9 @@ export function Employees() {
 
       <TCard className="overflow-hidden">
         <div className="border-b border-line p-4 sm:px-5">
-          <PanelTitle icon={<UserRound size={18} />} title={t('Equipe', 'Team')} subtitle={`${data.employees.length} ${data.employees.length === 1 ? t('funcionário', 'employee') : t('funcionários', 'employees')}`} />
+          <PanelTitle icon={<UserRound size={18} />} title={t('Equipe', 'Team')} subtitle={`${employees.length} ${employees.length === 1 ? t('funcionário', 'employee') : t('funcionários', 'employees')}`} />
         </div>
-        {data.employees.length === 0 ? (
+        {employees.length === 0 ? (
           <Empty
             icon={<UserRound size={22} />}
             title={t('Nenhum funcionário cadastrado', 'No employees yet')}
@@ -246,7 +250,7 @@ export function Employees() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.employees.map((e) => (
+                  {employees.map((e) => (
                     <tr key={e.id} className="transition hover:bg-fill/5">
                       <td className={td}>
                         <div className="flex items-center gap-3">
@@ -270,7 +274,7 @@ export function Employees() {
             </div>
 
             <ul className="divide-y divide-line md:hidden">
-              {data.employees.map((e) => (
+              {employees.map((e) => (
                 <li key={e.id} className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">

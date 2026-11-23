@@ -15,6 +15,7 @@ import type {
   ShipmentParty,
   ShipmentStatus,
 } from './types'
+import type { NetworkId } from './network'
 import { checkOrderCoverage, checkOutboundStock, allPicked, needsFulfillment } from './stock-checks'
 
 export const DEFAULT_ORG = 'local'
@@ -292,7 +293,7 @@ export const replace = (d: AppData, s: Shipment): AppData => ({ ...d, shipments:
 
 // ---------- Operações ----------
 
-export function createShipment(d: AppData, input: ShipmentInput, now: string, actor: string): Outcome<{ id: string }> {
+export function createShipment(d: AppData, input: ShipmentInput, now: string, actor: string, env: NetworkId = 'mainnet'): Outcome<{ id: string }> {
   const { errors, value } = normalizeInput(d, input)
   if (errors.length) return fail(...errors)
   const id = nextShipmentId(d.shipments)
@@ -305,6 +306,7 @@ export function createShipment(d: AppData, input: ShipmentInput, now: string, ac
     status: 'draft',
     documents: [],
     events: [event({ kind: 'created', at: now, toStatus: 'draft', description: '', actor: clean(actor, 60) })],
+    environment: env,
     createdAt: now,
     updatedAt: now,
   }

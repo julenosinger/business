@@ -6,6 +6,8 @@ import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { accountsForEnvironment, contactsForEnvironment, salesForEnvironment } from '@/lib/selectors'
 import { isValidAddress } from '@/lib/gateway'
 import { money, shortAddr } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -74,15 +76,16 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
 
 export function Contacts({ kind }: { kind: Kind }) {
   const { data, removeContact } = useStore()
+  const network = useNetwork()
   const [target, setTarget] = useState<Contact | 'new' | null>(null)
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(30)
   const isCustomer = kind === 'customer'
-  const all = data.contacts.filter((c) => c.kind === kind)
+  const all = contactsForEnvironment(data, network).filter((c) => c.kind === kind)
 
-  const volume = (c: Contact) => (isCustomer ? data.sales.filter((s) => s.customerId === c.id && !s.canceledAt).reduce((s, x) => s + x.total, 0) : 0)
+  const volume = (c: Contact) => (isCustomer ? salesForEnvironment(data, network).filter((s) => s.customerId === c.id && !s.canceledAt).reduce((s, x) => s + x.total, 0) : 0)
   const open = (c: Contact) =>
-    data.accounts.filter((a) => a.contactId === c.id && a.status === 'open' && a.kind === (isCustomer ? 'receivable' : 'payable')).reduce((s, a) => s + a.amount, 0)
+    accountsForEnvironment(data.accounts, network).filter((a) => a.contactId === c.id && a.status === 'open' && a.kind === (isCustomer ? 'receivable' : 'payable')).reduce((s, a) => s + a.amount, 0)
 
   const s = q.trim().toLowerCase()
   const list = all.filter((c) => !s || c.name.toLowerCase().includes(s) || c.doc.toLowerCase().includes(s) || c.email.toLowerCase().includes(s))

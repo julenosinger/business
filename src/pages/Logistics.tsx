@@ -18,6 +18,8 @@ import { isReturnFinal } from '@/lib/returns'
 import { ShipmentResults, type ResultFilters } from '@/components/logistics/ShipmentResults'
 import { StatusBadge, dateTimeText, eventDetail, eventTitle, formatAmount, statusColor, statusLabel } from '@/components/logistics/labels'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { carriersForEnvironment, returnsForEnvironment, shipmentsForEnvironment } from '@/lib/selectors'
 import { ALL_STATUSES, MOVING_STATUSES, alerts, eventFeed, isOverdue, kpiSet, kpis, statusCounts, upcoming, type AlertReason, type KpiKey } from '@/lib/logistics'
 import { addDays, fmtDate, num, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -38,6 +40,7 @@ const alertText = (r: AlertReason): string =>
 
 export function Logistics() {
   const { data } = useStore()
+  const network = useNetwork()
   const [period, setPeriod] = useState<PeriodId>('30')
   const [, refresh] = useState(0)
   const [kpi, setKpi] = useState<KpiKey | null>(null)
@@ -47,7 +50,9 @@ export function Logistics() {
   const [tab, setTab] = useState<'overview' | 'carriers' | 'freight' | 'returns' | 'insights'>('overview')
   const [returnModal, setReturnModal] = useState<{ open: boolean; shipmentId: string | null }>({ open: false, shipmentId: null })
 
-  const shipments = data.shipments
+  const shipments = shipmentsForEnvironment(data, network)
+  const carrierCount = carriersForEnvironment(data, network).length
+  const returnCount = returnsForEnvironment(data, network).filter((r) => !isReturnFinal(r)).length
   const todayStr = today()
   const days = period === 'all' ? 90 : Number(period)
   const from = period === 'all' ? '' : addDays(todayStr, -days)
@@ -158,9 +163,9 @@ export function Logistics() {
         onChange={(v) => setTab(v)}
         items={[
           { id: 'overview', label: t('Visão geral', 'Overview') },
-          { id: 'carriers', label: `${t('Transportadoras', 'Carriers')} (${data.carriers.length})` },
+          { id: 'carriers', label: `${t('Transportadoras', 'Carriers')} (${carrierCount})` },
           { id: 'freight', label: t('Custos de frete', 'Freight costs') },
-          { id: 'returns', label: `${t('Devoluções', 'Returns')} (${data.returns.filter((r) => !isReturnFinal(r)).length})` },
+          { id: 'returns', label: `${t('Devoluções', 'Returns')} (${returnCount})` },
           { id: 'insights', label: t('Análises', 'Insights') },
         ]}
       />
