@@ -70,7 +70,7 @@ export function ChatComposer({ value, onChange, onSend, focusTick = 0, disabled 
       </form>
       <p className="mx-auto mt-2 flex w-full max-w-5xl items-start gap-1.5 text-[11px] text-subtle">
         <Info size={12} className="mt-px shrink-0" />
-        <span>{t('O assistente de IA ainda não está conectado nesta fase — nenhuma resposta automática será gerada.', 'The AI assistant is not connected yet in this phase — no automated response will be generated.')}</span>
+        <span>{t('As respostas usam apenas os dados reais da sua empresa (somente leitura). Nenhuma operação é executada automaticamente.', 'Responses use only your real business data (read-only). No operation is performed automatically.')}</span>
       </p>
     </div>
   )

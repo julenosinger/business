@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, History, Info, PanelLeftOpen } from 'lucide-react'
-import { toast } from 'sonner'
 import { Badge } from '@/components/ui'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { ChatMessage } from '@/components/chat/ChatMessage'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState'
 import { useChat } from '@/lib/chat'
+import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { businessContext } from '@/lib/intelligence'
 import { useViewport } from '@/lib/sidebar'
 import { t } from '@/lib/i18n'
 
@@ -16,6 +18,8 @@ import { t } from '@/lib/i18n'
  */
 export function Chatbot() {
   const chat = useChat()
+  const { data } = useStore()
+  const network = useNetwork()
   const vp = useViewport()
   // Desktop: histórico fixo ao lado (recolhível). Tablet e celular: gaveta sobreposta.
   const inline = vp === 'desktop'
@@ -28,6 +32,7 @@ export function Chatbot() {
 
   const active = chat.active
   const count = active?.messages.length ?? 0
+  const responding = active?.messages.some((m) => m.status === 'responding') ?? false
 
   // Mantém a última mensagem à vista ao enviar ou trocar de conversa.
   useEffect(() => {
@@ -45,9 +50,9 @@ export function Chatbot() {
   }, [drawerOpen])
 
   const send = (text: string) => {
-    chat.send(text)
+    // Envia a mensagem + um contexto empresarial minimizado (somente leitura) para o backend de IA.
+    chat.send(text, businessContext(data, network))
     setComposer('')
-    toast.info(t('O assistente de IA ainda não está conectado — nenhuma resposta foi gerada.', 'The AI assistant is not connected yet — no response was generated.'))
   }
 
   const suggest = (text: string) => {
@@ -98,10 +103,10 @@ export function Chatbot() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="display truncate text-sm font-semibold sm:text-base">{t('Assistente geral', 'General assistant')}</h1>
-            <p className="truncate text-[11px] text-subtle">{t('Não conectado nesta fase', 'Not connected in this phase')}</p>
+            <p className="truncate text-[11px] text-subtle">{chat.configured ? t('Conectado ao backend de IA', 'Connected to the AI backend') : t('Não configurado', 'Not configured')}</p>
           </div>
           <span className="hidden sm:inline-flex">
-            <Badge tone="warn">{t('Não conectado', 'Not connected')}</Badge>
+            {chat.configured ? <Badge tone="ok">{t('Conectado', 'Connected')}</Badge> : <Badge tone="warn">{t('Não conectado', 'Not connected')}</Badge>}
           </span>
           <button
             type="button"
@@ -117,12 +122,17 @@ export function Chatbot() {
         {infoOpen ? (
           <div className="shrink-0 border-b border-warn/25 bg-warn/10 px-4 py-2.5 text-xs text-warn sm:px-5">
             <span className="sm:hidden">
-              <strong>{t('Não conectado. ', 'Not connected. ')}</strong>
+              <strong>{chat.configured ? '' : t('Não conectado. ', 'Not connected. ')}</strong>
             </span>
-            {t(
-              'Esta fase entrega apenas a interface. Suas mensagens ficam salvas neste navegador e nenhuma resposta automática é gerada.',
-              'This phase only delivers the interface. Your messages are saved in this browser and no automated response is generated.',
-            )}
+            {chat.configured
+              ? t(
+                  'O assistente responde com base nos dados reais da empresa (somente leitura) e nunca executa operações automaticamente.',
+                  'The assistant answers using your real business data (read-only) and never performs operations automatically.',
+                )
+              : t(
+                  'Configure o backend de IA no servidor para habilitar respostas reais. Suas mensagens ficam salvas neste navegador.',
+                  'Configure the AI backend on the server to enable real responses. Your messages are saved in this browser.',
+                )}
           </div>
         ) : null}
 
@@ -138,7 +148,7 @@ export function Chatbot() {
           )}
         </div>
 
-        <ChatComposer value={composer} onChange={setComposer} onSend={send} focusTick={focusTick} />
+        <ChatComposer value={composer} onChange={setComposer} onSend={send} focusTick={focusTick} disabled={responding} />
       </section>
 
       {/* Gaveta de histórico (tablet e celular). */}

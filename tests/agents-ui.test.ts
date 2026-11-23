@@ -56,15 +56,18 @@ describe('agentes criados (configuração preliminar, sem execução)', () => {
   })
 })
 
-describe('chat (sem backend de IA)', () => {
-  test('chatStore.send armazena apenas mensagens do usuário — nenhuma resposta fictícia', () => {
+describe('chat (sem backend de IA configurado)', () => {
+  test('chatStore.send registra o usuário e avisa indisponibilidade — nenhuma resposta fictícia', () => {
     chatStore.newConversation()
     chatStore.send('Show upcoming payments')
 
-    const convs = JSON.parse(storage.get('gbos:chat') ?? '[]') as { id: string; messages: { role: string }[] }[]
+    const convs = JSON.parse(storage.get('gbos:chat') ?? '[]') as { id: string; messages: { role: string; status?: string }[] }[]
     expect(convs).toHaveLength(1)
-    expect(convs[0]!.messages).toHaveLength(1)
-    expect(convs[0]!.messages.every((m) => m.role === 'user')).toBe(true)
+    const msgs = convs[0]!.messages
+    expect(msgs).toHaveLength(2)
+    expect(msgs[0]!.role).toBe('user')
+    expect(msgs[1]!.role).toBe('assistant')
+    expect(msgs[1]!.status).toBe('unavailable')
 
     chatStore.removeConversation(convs[0]!.id)
     expect(JSON.parse(storage.get('gbos:chat') ?? '[]')).toHaveLength(0)

@@ -10,6 +10,8 @@
  * Executar: `bun run server` (definido em package.json).
  */
 import { createApi, UnauthorizedError } from './api'
+import { createChatApi, type ChatRequest } from './chat'
+import { resolveProvider } from './ai'
 import { LedgerDb } from './db'
 
 const token = process.env.GBOS_API_TOKEN
@@ -29,6 +31,16 @@ if (!dbPath && !allowMemory) {
 
 const db = new LedgerDb(dbPath ?? ':memory:')
 const api = createApi(db, { token, orgId })
+const provider = resolveProvider({
+  provider: process.env.GBOS_AI_PROVIDER,
+  apiKey: process.env.GBOS_AI_API_KEY,
+  model: process.env.GBOS_AI_MODEL,
+  baseUrl: process.env.GBOS_AI_BASE_URL,
+})
+const chat = createChatApi({ token, provider })
+if (!provider) {
+  console.log('AI chat is unavailable: set GBOS_AI_PROVIDER and GBOS_AI_API_KEY to enable real responses.')
+}
 
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
@@ -41,6 +53,7 @@ Bun.serve({
       if (req.method === 'GET' && url.pathname === '/api/ledger') return json(api.getLedger(auth))
       if (req.method === 'POST' && url.pathname === '/api/ledger/events') return json(api.postEvent(auth, (await req.json()) as never))
       if (req.method === 'POST' && url.pathname === '/api/ledger/settle') return json(await api.settle(auth, (await req.json()) as never))
+      if (req.method === 'POST' && url.pathname === '/api/chat') return json(await chat.chat(auth, (await req.json()) as ChatRequest))
       return json({ error: 'not_found' }, 404)
     } catch (err) {
       if (err instanceof UnauthorizedError) return json({ error: 'unauthorized' }, 401)
