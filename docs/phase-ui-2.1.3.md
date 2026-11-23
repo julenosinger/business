@@ -1,6 +1,6 @@
 # Fase UI 2.1.3: Authoritative Commit & Save Integrity
 
-**HEAD inicial:** `5db639d` (Fase UI 2.1.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `5db639d` (Fase UI 2.1.2) · **HEAD final:** `e1bc175`
 
 Resultado: **353 testes passando** (eram 351), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma alteração visual.
 
