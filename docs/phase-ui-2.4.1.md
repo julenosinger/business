@@ -1,6 +1,6 @@
 # Fase UI 2.4.1: AI Runtime Activation & Security Hardening
 
-**HEAD inicial:** `44d99d0` (Fase UI 2.4) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `44d99d0` (Fase UI 2.4) · **HEAD final:** `4900d30`
 
 Resultado: **433 testes passando** (eram 426), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão em vendas, compras, folha, contabilidade, tesouraria, gateway ou blockchain.
 
