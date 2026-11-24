@@ -30,8 +30,17 @@ export interface FinancialCategory {
   group: FinancialGroup
   nature: FinancialNature
   accounting: AccountSubtype
+  /**
+   * O motor contábil suporta esta categoria corretamente? Categorias `false` (natureza de ativo/passivo
+   * ainda não certificada) NÃO aparecem nos seletores e devem ser rejeitadas no Store e no motor para novas operações.
+   */
   supported: boolean
+  /** Protegida contra exclusão/alteração (padrão do sistema). Categorias personalizadas terão `false`. */
   system: boolean
+  /** Aparece nos seletores de categoria? `false` reservado a categorias internas do sistema (ex.: Vendas). */
+  selectable?: boolean
+  /** Receita de mercadorias que exige CMV para apurar o lucro (venda de produtos/mercadorias fora do PDV). */
+  requiresCogs?: boolean
 }
 
 export const GROUP_LABELS: Record<FinancialGroup, { pt: string; en: string }> = {
@@ -48,8 +57,10 @@ export const GROUP_LABELS: Record<FinancialGroup, { pt: string; en: string }> = 
 
 export const FINANCIAL_CATEGORIES: FinancialCategory[] = [
   // --- Receitas operacionais ---
-  { id: 'Venda de mercadorias', labelEn: 'Merchandise sales', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_sales', supported: true, system: true },
-  { id: 'Venda de produtos', labelEn: 'Product sales', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_sales', supported: true, system: true },
+  { id: 'Venda de mercadorias', labelEn: 'Merchandise sales', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_sales', supported: true, system: true, requiresCogs: true },
+  { id: 'Venda de produtos', labelEn: 'Product sales', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_sales', supported: true, system: true, requiresCogs: true },
+  // Categoria interna do sistema (criada por recordSale/recordPurchase), não selecionável manualmente.
+  { id: 'Vendas', labelEn: 'Sales', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_sales', supported: true, system: true, selectable: false },
   { id: 'Serviços prestados', labelEn: 'Services rendered', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_other', supported: true, system: true },
   { id: 'Consultoria', labelEn: 'Consulting', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_other', supported: true, system: true },
   { id: 'Assinaturas e mensalidades', labelEn: 'Subscriptions and fees', kind: 'income', group: 'operational_revenue', nature: 'revenue', accounting: 'revenue_other', supported: true, system: true },
@@ -119,10 +130,26 @@ export const FINANCIAL_CATEGORIES: FinancialCategory[] = [
   { id: 'Logística', labelEn: 'Logistics', kind: 'expense', group: 'operational_cost', nature: 'expense', accounting: 'expense_freight', supported: true, system: true },
 ]
 
-export const categoriesFor = (kind: 'income' | 'expense'): FinancialCategory[] => FINANCIAL_CATEGORIES.filter((c) => c.kind === kind && c.supported)
+export const categoriesFor = (kind: 'income' | 'expense'): FinancialCategory[] => FINANCIAL_CATEGORIES.filter((c) => c.kind === kind && c.supported && c.selectable !== false)
 
 export const categoryById = (id: string): FinancialCategory | undefined => FINANCIAL_CATEGORIES.find((c) => c.id === id)
 
 export const groupLabelOf = (group: FinancialGroup, lang: 'pt' | 'en'): string => GROUP_LABELS[group][lang]
 
 export const supportedCategoryIds = (kind: 'income' | 'expense'): string[] => categoriesFor(kind).map((c) => c.id)
+
+/** Natureza financeira de uma categoria canônica (undefined para categorias históricas desconhecidas). */
+export const natureOfCategory = (category: string): FinancialNature | undefined => categoryById(category)?.nature
+
+/**
+ * Categoria KNOWN no catálogo e explicitamente marcada como `supported: false`.
+ * Só estas devem ser rejeitadas no Store/motor para novas operações; categorias desconhecidas
+ * (históricas/legadas) continuam preservadas e não são rejeitadas.
+ */
+export const isUnsupportedCategory = (category: string): boolean => {
+  const c = categoryById(category)
+  return !!c && c.supported === false
+}
+
+/** Categoria de receita que exige CMV para apurar o resultado (venda externa de mercadorias sem vínculo ao PDV). */
+export const categoryRequiresCogs = (category: string): boolean => categoryById(category)?.requiresCogs === true

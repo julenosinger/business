@@ -8,9 +8,10 @@
  */
 import type { CurrencyCode, Environment } from '../types'
 import { fromNumber, formatDecimal, isCurrency } from './money'
+import { isUnsupportedCategory } from '../financial-categories'
 import type { EventDraft, LedgerFlags, LedgerState, PayloadValue } from './types'
 
-export type SkipReason = 'adapter_disabled' | 'insufficient_data' | 'unverified_settlement' | 'invalid_amount' | 'unsupported_currency' | 'invalid_date'
+export type SkipReason = 'adapter_disabled' | 'insufficient_data' | 'unverified_settlement' | 'invalid_amount' | 'unsupported_currency' | 'invalid_date' | 'unsupported_category'
 export type AdapterResult = { ok: true; draft: EventDraft } | { ok: false; reason: SkipReason }
 
 export type AdapterName = keyof LedgerFlags['adapters']
@@ -50,6 +51,8 @@ export function cashBookEvent(
   if (!isCurrency(opts.currency)) return { ok: false, reason: 'unsupported_currency' }
   if (!row.id || !row.category) return { ok: false, reason: 'insufficient_data' }
   if (!DATE_RE.test(row.date)) return { ok: false, reason: 'invalid_date' }
+  // Categorias de natureza não certificada (supported: false) não podem ser contabilizadas silenciosamente.
+  if (isUnsupportedCategory(row.category)) return { ok: false, reason: 'unsupported_category' }
   const amountMinor = minorOf(row.amount, opts.currency)
   if (amountMinor === null) return { ok: false, reason: 'invalid_amount' }
   const payload: Record<string, PayloadValue> = { cashEntryId: row.id, category: row.category, description: (row.description ?? '').slice(0, 120), revision: opts.revision, imported: opts.imported === true }

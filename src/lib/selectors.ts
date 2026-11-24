@@ -1,6 +1,7 @@
-import { CAT_PURCHASE, CAT_SALES, type Account, type AppData, type Environment } from './types'
+import { CAT_SALES, type Account, type AppData, type Environment } from './types'
 import { addDays, daysUntil, iso, monthKey, monthLabel, round2, today } from './format'
 import { locale } from './i18n'
+import { categoryRequiresCogs, natureOfCategory } from './financial-categories'
 import type { NetworkId } from './network'
 
 export interface Period {
@@ -26,21 +27,33 @@ export interface Kpis {
   profit: number
   inflow: number
   outflow: number
+  /** Há receita de mercadorias (venda externa ao PDV) cujo CMV não foi apurado: o lucro não é definitivo. */
+  cogsIncomplete: boolean
 }
 
+/**
+ * Indicadores econômicos e de caixa por período.
+ *
+ * Distingue RESULTADO ECONÔMICO de FLUXO DE CAIXA:
+ * - `revenue`: vendas do PDV + entradas de NATUREZA "receita" (não toda entrada é receita).
+ * - `cogs`: custo das mercadorias vendidas, apenas das VENDAS (nunca inferido de pagamentos a fornecedores).
+ * - `opex`: saídas de NATUREZA "despesa" (compras de estoque/ativos e amortização de principal NÃO são despesa).
+ * - `inflow`/`outflow`: todas as entradas/saídas (caixa), independentemente da natureza.
+ * Categorias históricas desconhecidas seguem a regra legada (entrada=receita, saída=despesa) para não perder dados.
+ */
 export function kpis(data: AppData, p: Period): Kpis {
   const sales = data.sales.filter((s) => !s.canceledAt && inPeriod(s.date, p))
-  const otherIncome = data.entries.filter((e) => e.type === 'in' && e.category !== CAT_SALES && inPeriod(e.date, p))
+  const inRange = data.entries.filter((e) => inPeriod(e.date, p))
+  const otherIncome = inRange.filter((e) => e.type === 'in' && e.category !== CAT_SALES && (natureOfCategory(e.category) ?? 'revenue') === 'revenue')
   const revenue = round2(sales.reduce((s, x) => s + x.total, 0) + otherIncome.reduce((s, x) => s + x.amount, 0))
   const cogs = round2(sales.reduce((s, x) => s + x.cogs, 0))
-  const opex = round2(
-    data.entries.filter((e) => e.type === 'out' && e.category !== CAT_PURCHASE && e.category !== CAT_SALES && inPeriod(e.date, p)).reduce((s, x) => s + x.amount, 0),
-  )
-  const inRange = data.entries.filter((e) => inPeriod(e.date, p))
+  const opex = round2(inRange.filter((e) => e.type === 'out' && e.category !== CAT_SALES && (natureOfCategory(e.category) ?? 'expense') === 'expense').reduce((s, x) => s + x.amount, 0))
+  const cogsIncomplete = inRange.some((e) => e.type === 'in' && categoryRequiresCogs(e.category) && e.sourceKind !== 'sale')
   return {
     revenue,
     cogs,
     opex,
+    cogsIncomplete,
     grossProfit: round2(revenue - cogs),
     profit: round2(revenue - cogs - opex),
     inflow: round2(inRange.filter((e) => e.type === 'in').reduce((s, x) => s + x.amount, 0)),
@@ -223,7 +236,8 @@ export interface CategoryTotal {
 
 export function expensesByCategory(data: AppData, p: Period): CategoryTotal[] {
   const map = new Map<string, number>()
-  for (const e of data.entries.filter((x) => x.type === 'out' && x.category !== CAT_SALES && inPeriod(x.date, p))) {
+  // Apenas despesas de natureza "despesa": compras de estoque (cogs), ativos e amortização de principal não entram aqui.
+  for (const e of data.entries.filter((x) => x.type === 'out' && x.category !== CAT_SALES && (natureOfCategory(x.category) ?? 'expense') === 'expense' && inPeriod(x.date, p))) {
     map.set(e.category, (map.get(e.category) ?? 0) + e.amount)
   }
   return [...map.entries()].map(([category, total]) => ({ category, total: round2(total) })).sort((a, b) => b.total - a.total)

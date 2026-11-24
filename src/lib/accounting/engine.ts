@@ -70,7 +70,9 @@ export function normalizeLedger(raw: Partial<LedgerState> | undefined | null, or
     version: 1,
     flags,
     chart: Array.isArray(raw.chart) && raw.chart.length > 0 && validateChart(raw.chart).length === 0 ? raw.chart : base.chart,
-    categoryMap: raw.categoryMap && typeof raw.categoryMap === 'object' ? raw.categoryMap : base.categoryMap,
+    // Migração aditiva e idempotente: os mapeamentos padrão (incluindo categorias novas) são mesclados com o que
+    // já estava salvo; personalizações válidas do usuário têm precedência. Nunca remove mapeamentos existentes.
+    categoryMap: { ...base.categoryMap, ...(raw.categoryMap && typeof raw.categoryMap === 'object' ? raw.categoryMap : {}) },
     events: Array.isArray(raw.events) ? raw.events : [],
     journal: Array.isArray(raw.journal) ? raw.journal : [],
     audit: Array.isArray(raw.audit) ? raw.audit : [],

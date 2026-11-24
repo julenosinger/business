@@ -5,6 +5,7 @@
  */
 import type { AccountSubtype, EventDraft, EventType, FeeKind, LedgerState, PostErrorCode, Side } from './types'
 import { accountBySubtype } from './chart'
+import { isUnsupportedCategory } from '../financial-categories'
 
 export interface LineSpec {
   subtype: AccountSubtype
@@ -49,6 +50,7 @@ export const FEE_SUBTYPE: Record<FeeKind, AccountSubtype> = {
 }
 
 const cashbookIncome: Rule = (d, ledger, amount) => {
+  if (isUnsupportedCategory(str(d, 'category'))) return fail('unsupported_category')
   const mapped = ledger.categoryMap[str(d, 'category')]
   const counter = accountBySubtype(ledger, mapped ?? 'revenue_other')
   // Receita só pode creditar conta de receita; qualquer outro mapeamento cai no padrão seguro.
@@ -60,6 +62,7 @@ const cashbookIncome: Rule = (d, ledger, amount) => {
 }
 
 const cashbookExpense: Rule = (d, ledger, amount) => {
+  if (isUnsupportedCategory(str(d, 'category'))) return fail('unsupported_category')
   const mapped = ledger.categoryMap[str(d, 'category')]
   const counter = accountBySubtype(ledger, mapped ?? 'expense_operating')
   const subtype = counter && (counter.class === 'expense' || counter.class === 'asset') && counter.subtype !== 'cash' ? counter.subtype : 'expense_operating'
@@ -71,6 +74,7 @@ const cashbookExpense: Rule = (d, ledger, amount) => {
 
 /** Obrigação a pagar criada manualmente (aluguel, frete lançado, etc.): despesa (ou estoque) a crédito de contas a pagar. */
 const payableCreated: Rule = (d, ledger, amount) => {
+  if (isUnsupportedCategory(str(d, 'category'))) return fail('unsupported_category')
   const mapped = accountBySubtype(ledger, ledger.categoryMap[str(d, 'category')] ?? 'expense_operating')
   const okTarget = mapped && (mapped.class === 'expense' || mapped.subtype === 'inventory')
   return ok(str(d, 'description') || 'Conta a pagar', [
@@ -81,6 +85,7 @@ const payableCreated: Rule = (d, ledger, amount) => {
 
 /** Direito a receber criado manualmente (serviço prestado a prazo): contas a receber contra receita. */
 const receivableCreated: Rule = (d, ledger, amount) => {
+  if (isUnsupportedCategory(str(d, 'category'))) return fail('unsupported_category')
   const mapped = accountBySubtype(ledger, ledger.categoryMap[str(d, 'category')] ?? 'revenue_other')
   return ok(str(d, 'description') || 'Conta a receber', [
     { subtype: 'receivable', side: 'debit', amount },

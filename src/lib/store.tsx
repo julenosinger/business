@@ -42,6 +42,7 @@ import { fromNumber, toDisplayNumber } from './accounting/money'
 import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury-selectors'
 import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
+import { isUnsupportedCategory } from './financial-categories'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -459,7 +460,7 @@ export interface Store {
   cancelAccount: (id: string) => CancelResult
   /** Cancelamento em lote com resultado por item. */
   cancelAccounts: (ids: string[]) => BatchCancelResult
-  recordSale: (input: SaleInput) => void
+  recordSale: (input: SaleInput) => boolean
   cancelSale: (id: string) => void
   recordPurchase: (input: PurchaseInput) => void
   addEmployee: (e: Omit<Employee, 'id'>) => SaveResult
@@ -711,6 +712,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast.error(t('Período fechado: este mês está fechado e não aceita novos lançamentos. Reabra o período para lançar.', 'Closed period: this month is closed and does not accept new entries. Reopen the period to post.'))
           return { ok: false, reason: 'period_closed' }
         }
+        // Defesa em profundidade (P4): categorias com supported: false não podem ser lançadas.
+        if (isUnsupportedCategory(e.category)) {
+          toast.error(t('Esta categoria não tem suporte contábil e não pode ser lançada. Escolha uma categoria válida.', 'This category has no accounting support and cannot be posted. Choose a valid category.'))
+          return { ok: false, reason: 'unsupported_category' }
+        }
         set((d) => {
           const entry = { ...e, id: uid(), environment: getNetwork() }
           return { ...d, entries: [entry, ...d.entries], ledger: guardLedger(d, (ctx) => syncAdded(d.ledger, entry, ctx)) }
@@ -806,6 +812,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return applied ? { ok: true } : { ok: false, reason: 'already_classified' }
       },
       addAccount: (a) => {
+        if (isUnsupportedCategory(a.category)) {
+          toast.error(t('Esta categoria não tem suporte contábil e não pode ser usada nesta conta. Escolha uma categoria válida.', 'This category has no accounting support and cannot be used in this bill. Choose a valid category.'))
+          return ''
+        }
         const id = uid()
         set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual', currency: a.currency ?? d.settings.currency, environment: getNetwork() }, ...d.accounts] }))
         return id
@@ -978,7 +988,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const foreignCustomer = !!customer && !!customer.environment && customer.environment !== env
         if (foreignProduct || foreignCustomer) {
           toast.error(t('Há produtos ou cliente de outro ambiente neste pedido. Revalide o carrinho.', 'This order has products or a customer from another environment. Revalidate the cart.'))
-          return
+          return false
+        }
+        // Revalida quantidade e estoque na camada de execução (P8): nenhuma venda com quantidade inválida ou acima do estoque.
+        for (const it of input.items) {
+          if (!Number.isSafeInteger(it.qty) || it.qty <= 0) {
+            toast.error(t('Quantidade inválida no pedido. Revise o carrinho.', 'Invalid quantity in the order. Review the cart.'))
+            return false
+          }
+          const p = data.products.find((x) => x.id === it.productId)
+          if (!p) {
+            toast.error(t('Produto não encontrado neste ambiente. Revise o carrinho.', 'Product not found in this environment. Review the cart.'))
+            return false
+          }
+          if (it.qty > p.stock) {
+            toast.error(t(`Estoque insuficiente para "${p.name}". Disponíveis: ${p.stock}.`, `Insufficient stock for "${p.name}". Available: ${p.stock}.`))
+            return false
+          }
         }
         set((d) => {
           const customer = d.contacts.find((c) => c.id === input.customerId)
@@ -1030,6 +1056,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           next.sales = [sale, ...d.sales]
           return next
         })
+        return true
       },
       recordPurchase: (input) => {
         const env = getNetwork()

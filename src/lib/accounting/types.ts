@@ -335,6 +335,7 @@ export type PostErrorCode =
   | 'invalid_fx'
   | 'invalid_review'
   | 'invalid_subtype'
+  | 'unsupported_category'
   | 'period_closed'
   | 'period_not_found'
   | 'period_already_closed'
