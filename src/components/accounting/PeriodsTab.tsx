@@ -5,6 +5,7 @@ import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from 
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { explainLedger } from './messages'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
 import { periodKeyOf, periodStatusOf } from '@/lib/accounting/engine'
 import type { PeriodStatus } from '@/lib/accounting/types'
 import { monthKey, monthTitle, today } from '@/lib/format'
@@ -53,6 +54,7 @@ function ReopenModal({ period, onClose }: { period: string | null; onClose: () =
 
 export function PeriodsTab() {
   const { data, closeAccountingPeriod, setAccountingPeriodReview } = useStore()
+  const network = useNetwork()
   const [reopen, setReopen] = useState<string | null>(null)
 
   const months = useMemo(() => {
@@ -60,21 +62,21 @@ export function PeriodsTab() {
     const add = (date?: string) => {
       if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) keys.add(periodKeyOf(date))
     }
-    for (const j of data.ledger.journal) add(j.accountingDate)
-    for (const e of data.ledger.events) add(e.accountingDate)
-    for (const p of data.ledger.periods) keys.add(p.key)
-    for (const e of data.entries) add(e.date)
-    for (const s of data.sales) add(s.date)
-    for (const p of data.purchases) add(p.date)
-    for (const a of data.accounts) {
+    const env = <T extends { environment?: string }>(list: T[]): T[] => list.filter((x) => x.environment === network)
+    for (const j of env(data.ledger.journal)) add(j.accountingDate)
+    for (const e of env(data.ledger.events)) add(e.accountingDate)
+    for (const p of data.ledger.periods.filter((x) => x.environment === network)) keys.add(p.key)
+    for (const e of env(data.entries)) add(e.date)
+    for (const s of env(data.sales)) add(s.date)
+    for (const p of env(data.purchases)) add(p.date)
+    for (const a of env(data.accounts)) {
       add(a.dueDate)
       add(a.paidAt)
     }
-    for (const o of data.treasuryOps) add(o.date.slice(0, 10))
     return [...keys].sort().reverse()
-  }, [data])
+  }, [data, network])
 
-  const postingsIn = (key: string): number => data.ledger.journal.filter((j) => periodKeyOf(j.accountingDate) === key).length
+  const postingsIn = (key: string): number => data.ledger.journal.filter((j) => j.environment === network && periodKeyOf(j.accountingDate) === key).length
 
   const doClose = (key: string) => {
     const r = closeAccountingPeriod(key)
@@ -114,7 +116,7 @@ export function PeriodsTab() {
               </thead>
               <tbody>
                 {months.map((key) => {
-                  const status = periodStatusOf(data.ledger, key)
+                  const status = periodStatusOf(data.ledger, key, network)
                   const meta = STATUS_META[status]
                   return (
                     <tr key={key} className="transition hover:bg-fill/5">
@@ -145,7 +147,7 @@ export function PeriodsTab() {
 
           <ul className="divide-y divide-line md:hidden">
             {months.map((key) => {
-              const status = periodStatusOf(data.ledger, key)
+              const status = periodStatusOf(data.ledger, key, network)
               const meta = STATUS_META[status]
               return (
                 <li key={key} className="flex flex-wrap items-center justify-between gap-3 p-4">

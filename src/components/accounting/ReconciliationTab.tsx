@@ -10,6 +10,8 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { EntryDrawer } from './EntryDrawer'
 import { explainLedger, reasonText } from './messages'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { appDataForEnvironment } from '@/lib/environment-scope'
 import { buildReconciliation, summarize, type ReconGroup, type ReconItem, type ReconState } from '@/lib/accounting/reconcile-center'
 import { trialBalance } from '@/lib/accounting/engine'
 import { formatDecimal, parseMinor } from '@/lib/accounting/money'
@@ -244,6 +246,7 @@ function FeeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function ReconciliationTab() {
   const { data, confirmLedgerFee } = useStore()
+  const network = useNetwork()
   const ledger = data.ledger
   const lang = getLang()
   const [state, setState] = useState<ReconState | ''>('')
@@ -255,7 +258,9 @@ export function ReconciliationTab() {
   const [openEntry, setOpenEntry] = useState<string | null>(null)
   const [feeOpen, setFeeOpen] = useState(false)
 
-  const items = useMemo(() => buildReconciliation(data), [data])
+  // Conciliação isolada por ambiente: só compara registros (e partidas) do ambiente ativo.
+  const scoped = useMemo(() => appDataForEnvironment(data, network), [data, network])
+  const items = useMemo(() => buildReconciliation(scoped), [scoped])
   const summary = useMemo(() => summarize(items), [items])
   const visible = items.filter((i) => (showResolved || !i.resolved) && (!state || i.state === state) && (!group || i.group === group) && (!q.trim() || `${i.label} ${i.key} ${reasonText(i.reason)}`.toLowerCase().includes(q.trim().toLowerCase())))
   const PAGE = 20

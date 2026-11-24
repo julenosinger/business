@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, Globe2, Search, BookText } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Globe2, Search, BookText, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -7,6 +7,7 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { EntryDrawer } from './EntryDrawer'
 import { SOURCE_LABELS, TYPE_LABELS, explainLedger } from './messages'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
 import { glCsvHeader, glCsvRows, glRows, type GlRow, type GlStatus } from '@/lib/accounting/gl'
 import { formatDecimal, SUPPORTED_CURRENCIES, parseMinor } from '@/lib/accounting/money'
 import { convertForReporting } from '@/lib/accounting/reviews'
@@ -92,6 +93,7 @@ function FxModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: string; onConsume?: () => void } = {}) {
   const { data } = useStore()
+  const network = useNetwork()
   const ledger = data.ledger
   const lang = getLang()
   const [from, setFrom] = useState('')
@@ -121,6 +123,7 @@ export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: s
   const rows = useMemo(
     () =>
       glRows(ledger, {
+        environment: network,
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
         ...(account ? { account } : {}),
@@ -130,14 +133,17 @@ export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: s
         ...(status ? { status } : {}),
         ...(q ? { q } : {}),
       }),
-    [ledger, from, to, account, currency, type, module, status, q],
+    [ledger, network, from, to, account, currency, type, module, status, q],
   )
   const pages = Math.max(1, Math.ceil(rows.length / PAGE))
   const cur = Math.min(page, pages - 1)
   const shown = rows.slice(cur * PAGE, cur * PAGE + PAGE)
 
-  const currencies = useMemo(() => [...new Set(ledger.journal.map((j) => j.currency))].sort(), [ledger.journal])
-  const types = useMemo(() => (Object.keys(RULES) as EventType[]).filter((tp) => ledger.events.some((e) => e.type === tp)), [ledger.events])
+  const scopedJournal = useMemo(() => ledger.journal.filter((j) => j.environment === network), [ledger.journal, network])
+  const scopedEvents = useMemo(() => ledger.events.filter((e) => e.environment === network), [ledger.events, network])
+  const currencies = useMemo(() => [...new Set(scopedJournal.map((j) => j.currency))].sort(), [scopedJournal])
+  const types = useMemo(() => (Object.keys(RULES) as EventType[]).filter((tp) => scopedEvents.some((e) => e.type === tp)), [scopedEvents])
+  const unassignedCount = useMemo(() => ledger.journal.filter((j) => !j.environment || j.environment === 'unassigned').length, [ledger.journal])
   const totals = useMemo(() => {
     const m = new Map<CurrencyCode, { d: bigint; c: bigint }>()
     for (const r of rows) {
@@ -172,7 +178,7 @@ export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: s
         <PanelTitle
           icon={<BookText size={18} />}
           title={t('Razão Geral', 'General ledger')}
-          subtitle={t(`${rows.length} ${rows.length === 1 ? 'linha' : 'linhas'} · ${ledger.journal.length} ${ledger.journal.length === 1 ? 'lançamento' : 'lançamentos'}`, `${rows.length} ${rows.length === 1 ? 'line' : 'lines'} · ${ledger.journal.length} ${ledger.journal.length === 1 ? 'entry' : 'entries'}`)}
+          subtitle={t(`${rows.length} ${rows.length === 1 ? 'linha' : 'linhas'} · ${scopedJournal.length} ${scopedJournal.length === 1 ? 'lançamento' : 'lançamentos'} (${network})`, `${rows.length} ${rows.length === 1 ? 'line' : 'lines'} · ${scopedJournal.length} ${scopedJournal.length === 1 ? 'entry' : 'entries'} (${network})`)}
           action={
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" onClick={() => setFxOpen(true)}>
@@ -254,11 +260,17 @@ export function GeneralLedgerTab({ initialQuery, onConsume }: { initialQuery?: s
       </TCard>
 
       <TCard className="overflow-hidden">
+        {unassignedCount > 0 ? (
+          <p className="flex items-center gap-2 border-b border-warn/40 bg-warn/10 px-4 py-2 text-xs text-warn">
+            <AlertTriangle size={14} />
+            {t(`${unassignedCount} lançamento(s) sem ambiente definido ficam fora desta visão.`, `${unassignedCount} entry(ies) without a defined environment are excluded from this view.`)}
+          </p>
+        ) : null}
         {rows.length === 0 ? (
           <Empty
             icon={<BookText size={22} />}
-            title={ledger.journal.length === 0 ? t('Nenhum lançamento no razão ainda', 'No ledger entries yet') : t('Nenhuma linha com estes filtros', 'No lines match these filters')}
-            text={ledger.journal.length === 0 ? t('Crie um lançamento no Livro-Caixa ou ligue um lançamento automático na aba Conciliação.', 'Create a Cash Book entry or turn on automatic posting in the Reconciliation tab.') : undefined}
+            title={scopedJournal.length === 0 ? t('Nenhum lançamento no razão ainda', 'No ledger entries yet') : t('Nenhuma linha com estes filtros', 'No lines match these filters')}
+            text={scopedJournal.length === 0 ? t('Crie um lançamento no Livro-Caixa ou ligue um lançamento automático na aba Conciliação.', 'Create a Cash Book entry or turn on automatic posting in the Reconciliation tab.') : undefined}
           />
         ) : (
           <>

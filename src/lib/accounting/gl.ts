@@ -5,7 +5,7 @@
 import { formatDecimal } from './money'
 import { isReversed } from './engine'
 import type { AuditRecord, EventType, FeeRecord, FinancialEvent, JournalEntry, LedgerState, SourceModule } from './types'
-import type { CurrencyCode } from '../types'
+import type { CurrencyCode, Environment } from '../types'
 
 export type GlStatus = 'posted' | 'reversed' | 'reversal'
 
@@ -35,6 +35,8 @@ export interface GlFilter {
   module?: SourceModule
   status?: GlStatus
   q?: string
+  /** Isolamento por ambiente: só partidas do ambiente indicado (exclui `unassigned`). */
+  environment?: Environment
 }
 
 export const entryStatus = (ledger: LedgerState, j: JournalEntry): GlStatus => (j.reversalOf ? 'reversal' : isReversed(ledger, j.id) ? 'reversed' : 'posted')
@@ -58,6 +60,7 @@ export function glRows(ledger: LedgerState, f: GlFilter = {}): GlRow[] {
   const rows: GlRow[] = []
   for (const j of ledger.journal) {
     if (j.orgId !== ledger.orgId) continue
+    if (f.environment && j.environment !== f.environment) continue
     if (f.from && j.accountingDate < f.from) continue
     if (f.to && j.accountingDate > f.to) continue
     if (f.currency && j.currency !== f.currency) continue
