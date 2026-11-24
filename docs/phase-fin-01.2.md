@@ -1,6 +1,6 @@
 # HOTFIX FIN-01.2: Final Accounting Integrity & Sandbox Policy Engine
 
-**HEAD inicial:** `4ab27f2` (HOTFIX FIN-01.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `4ab27f2` (HOTFIX FIN-01.1) · **HEAD final:** `113980b`
 
 Resultado: **471 testes passando** (eram 464), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão, nenhuma perda de dados, nenhuma duplicação contábil.
 
