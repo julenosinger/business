@@ -1,6 +1,6 @@
 # HOTFIX FIN-01.3: Sandbox Safety, Environment Isolation & Accounting Integrity
 
-**HEAD inicial:** `b331607` (HOTFIX FIN-01.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `b331607` (HOTFIX FIN-01.2) · **HEAD final:** `9c3d15f`
 
 Resultado: **475 testes passando** (eram 471), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão, nenhuma perda de dados, nenhuma duplicação contábil.
 
