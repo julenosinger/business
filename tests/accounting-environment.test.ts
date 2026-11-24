@@ -10,7 +10,7 @@ try {
 
 const React = await import('react')
 const { createRoot } = await import('react-dom/client')
-const { StoreProvider, useStore } = await import('../src/lib/store')
+const { StoreProvider, useStore, emptyData } = await import('../src/lib/store')
 const { NavContext } = await import('../src/lib/nav')
 const { Accounting } = await import('../src/pages/Accounting')
 const { setNetwork } = await import('../src/lib/network')
@@ -94,5 +94,80 @@ describe('Contabilidade (componente real): isolamento financeiro por ambiente', 
     expect(test.container.textContent).toContain('9.876')
     expect(test.container.textContent).not.toContain('1.234')
     test.unmount()
+  })
+})
+
+describe('proteção de lançamentos entre ambientes e classificação', () => {
+  test('editar lançamento de outro ambiente é bloqueado (sem alteração)', () => {
+    let testnetEntryId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        setNetwork('testnet')
+        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, date: '2026-11-20' })
+      })
+      testnetEntryId = store().data.entries.find((e) => e.description === 'Testnet')!.id
+      unmount()
+    }
+    setNetwork('mainnet')
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      store().updateEntry(testnetEntryId, { description: 'Alterado' })
+    })
+    expect(store().data.entries.find((e) => e.id === testnetEntryId)!.description).toBe('Testnet')
+    unmount()
+  })
+
+  test('excluir lançamento de outro ambiente é bloqueado (registro preservado)', () => {
+    let testnetEntryId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        setNetwork('testnet')
+        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, date: '2026-11-20' })
+      })
+      testnetEntryId = store().data.entries.find((e) => e.description === 'Testnet')!.id
+      unmount()
+    }
+    setNetwork('mainnet')
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      store().removeEntry(testnetEntryId)
+    })
+    expect(store().data.entries.some((e) => e.id === testnetEntryId)).toBe(true)
+    unmount()
+  })
+
+  test('setEntryEnvironment classifica lançamento unassigned com auditoria', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      store().importData({
+        ...emptyData(),
+        entries: [{ id: 'legacy', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'Legado', amount: 100 }],
+      })
+    })
+    React.act(() => {
+      expect(store().setEntryEnvironment('legacy', 'mainnet')).toEqual({ ok: true })
+    })
+    expect(store().data.entries.find((e) => e.id === 'legacy')!.environment).toBe('mainnet')
+    unmount()
+  })
+
+  test('setEntryEnvironment recusa reclassificar lançamento já classificado', () => {
+    let entryId = ''
+    {
+      const { store, unmount } = render(React.createElement('div'))
+      React.act(() => {
+        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Mainnet', amount: 10, date: '2026-11-20' })
+      })
+      entryId = store().data.entries.find((e) => e.description === 'Mainnet')!.id
+      unmount()
+    }
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      expect(store().setEntryEnvironment(entryId, 'testnet')).toEqual({ ok: false, reason: 'already_classified' })
+    })
+    expect(store().data.entries.find((e) => e.id === entryId)!.environment).toBe('mainnet')
+    unmount()
   })
 })

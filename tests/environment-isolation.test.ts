@@ -9,7 +9,7 @@ const el = () => ({ style: {}, appendChild() {}, setAttribute() {}, addEventList
 g.document = { documentElement: el(), head: el(), body: el(), createElement: el, createTextNode: () => ({}), getElementsByTagName: () => [el()], querySelector: () => null, addEventListener() {}, removeEventListener() {} }
 g.window = { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {}, localStorage: g.localStorage }
 
-const { emptyData, migrateAccountEnvironments, migrateErpEnvironments } = await import('../src/lib/store')
+const { emptyData, migrateAccountEnvironments, migrateEntryEnvironments, migrateErpEnvironments } = await import('../src/lib/store')
 const { accountsForEnvironment, accountTotalsForEnvironment, cashBalanceForEnvironment, contactsForEnvironment, employeesForEnvironment, entriesForEnvironment, expensesByCategoryForEnvironment, kpisForEnvironment, monthPeriod, productsForEnvironment, purchasesForEnvironment, salesForEnvironment, scopedByEnvironment, shipmentsForEnvironment, upcomingForEnvironment, dueSoonForEnvironment } = await import('../src/lib/selectors')
 import type { Account, AppData, Contact, Employee, Entry, Product, PurchaseRef, Sale, Shipment, TreasuryOp } from '../src/lib/types'
 import { CAT_SALES } from '../src/lib/types'
@@ -320,5 +320,50 @@ describe('isolamento financeiro de lançamentos (entries) por ambiente', () => {
     expect(twice.entries).toEqual(once.entries)
     expect(twice.entries.find((e) => e.id === 'm')!.environment).toBe('mainnet')
     expect(twice.entries.find((e) => e.id === 'u')!.environment).toBe('unassigned')
+  })
+
+  test('migrateEntryEnvironments: recupera ambiente pelo vínculo inequívoco sourceId (venda)', () => {
+    const d: AppData = {
+      ...emptyData(),
+      sales: [{ id: 's1', date: '2026-11-20', customerName: 'c', items: [], total: 100, cogs: 50, method: 'pix', environment: 'mainnet' }],
+      entries: [entry('e1', undefined, { sourceKind: 'sale', sourceId: 's1' })],
+    }
+    const out = migrateEntryEnvironments(d)
+    expect(out.entries[0]!.environment).toBe('mainnet')
+  })
+
+  test('migrateEntryEnvironments: recupera ambiente pelo vínculo com conta (liquidação)', () => {
+    const d: AppData = {
+      ...emptyData(),
+      accounts: [acc({ id: 'a1', environment: 'testnet' })],
+      entries: [entry('e1', undefined, { sourceKind: 'account', sourceId: 'a1' })],
+    }
+    const out = migrateEntryEnvironments(d)
+    expect(out.entries[0]!.environment).toBe('testnet')
+  })
+
+  test('migrateEntryEnvironments: sem vínculo ou origem inexistente/unassigned → permanece sem ambiente', () => {
+    const d: AppData = {
+      ...emptyData(),
+      sales: [{ id: 's1', date: '2026-11-20', customerName: 'c', items: [], total: 100, cogs: 50, method: 'pix', environment: 'unassigned' }],
+      entries: [entry('e1', undefined), entry('e2', undefined, { sourceKind: 'sale', sourceId: 'ghost' }), entry('e3', undefined, { sourceKind: 'sale', sourceId: 's1' })],
+    }
+    const out = migrateEntryEnvironments(d)
+    expect(out.entries.find((e) => e.id === 'e1')!.environment).toBeUndefined()
+    expect(out.entries.find((e) => e.id === 'e2')!.environment).toBeUndefined()
+    expect(out.entries.find((e) => e.id === 'e3')!.environment).toBeUndefined() // origem unassigned
+  })
+
+  test('migrateEntryEnvironments é idempotente e não altera registros já classificados', () => {
+    const d: AppData = {
+      ...emptyData(),
+      sales: [{ id: 's1', date: '2026-11-20', customerName: 'c', items: [], total: 100, cogs: 50, method: 'pix', environment: 'mainnet' }],
+      entries: [entry('m', 'testnet'), entry('e1', undefined, { sourceKind: 'sale', sourceId: 's1' })],
+    }
+    const once = migrateEntryEnvironments(d)
+    const twice = migrateEntryEnvironments(once)
+    expect(twice.entries).toEqual(once.entries)
+    expect(twice.entries.find((e) => e.id === 'm')!.environment).toBe('testnet') // preservado
+    expect(twice.entries.find((e) => e.id === 'e1')!.environment).toBe('mainnet')
   })
 })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeftRight, BookOpen, Download, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, BookOpen, Download, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp } from 'lucide-react'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
 import { isValidIso } from '@/lib/dates'
@@ -126,7 +126,7 @@ function DreRow({ label, value, strong, tone }: { label: string; value: number; 
 type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliation' | 'periods'
 
 export function Accounting() {
-  const { data, removeEntry } = useStore()
+  const { data, removeEntry, setEntryEnvironment } = useStore()
   const { ledgerFocus, clearLedgerFocus } = useNav()
   const network = useNetwork()
   const [range, setRange] = useState<Range>('month')
@@ -147,6 +147,15 @@ export function Accounting() {
   const net = k.inflow - k.outflow
   const maxCat = Math.max(0, ...cats.map((c) => c.total))
   const totalCats = cats.reduce((s, c) => s + c.total, 0)
+  const unassignedEntries = data.entries.filter((e) => !e.environment || e.environment === 'unassigned')
+
+  const classifyEntry = (id: string, env: 'mainnet' | 'testnet') => {
+    const e = data.entries.find((x) => x.id === id)
+    if (!e) return
+    if (window.confirm(t(`Classificar o lançamento "${e.description}" como ${env === 'mainnet' ? 'Mainnet' : 'Testnet'}? Esta ação fica registrada na auditoria.`, `Classify the "${e.description}" entry as ${env === 'mainnet' ? 'Mainnet' : 'Testnet'}? This action is recorded in the audit trail.`))) {
+      setEntryEnvironment(id, env)
+    }
+  }
 
   const pickRange = (r: Range) => {
     setRange(r)
@@ -211,6 +220,34 @@ export function Accounting() {
 
       {tab === 'overview' ? (
         <>
+      {unassignedEntries.length > 0 ? (
+        <div className="rounded-xl border border-warn/40 bg-warn/10 p-4 text-sm" role="status">
+          <p className="flex items-center gap-2 text-warn">
+            <AlertTriangle size={16} />
+            {t(`${unassignedEntries.length} lançamento(s) sem ambiente definido ficam fora dos indicadores.`, `${unassignedEntries.length} entry(ies) without a defined environment are excluded from the indicators.`)}
+          </p>
+          <ul className="mt-2 space-y-2">
+            {unassignedEntries.slice(0, 6).map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-fill/5 p-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-semibold">{e.description}</div>
+                  <div className="text-[11px] text-subtle">
+                    {fmtDate(e.date)} · {cat(e.category)} · {e.type === 'in' ? '+' : '-'} {money(e.amount)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'mainnet')}>
+                    {t('Mainnet', 'Mainnet')}
+                  </Button>
+                  <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'testnet')}>
+                    {t('Testnet', 'Testnet')}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="ok" icon={<TrendingUp size={20} />} label={t('Receita bruta', 'Gross revenue')} value={money(k.revenue)} sub={`${t('Vendas', 'Sales')} ${money(salesRev)}`} />

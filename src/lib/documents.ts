@@ -91,6 +91,30 @@ export function docInvalidError(raw: string, personType: 'fisica' | 'juridica'):
   return personType === 'fisica' ? !isValidCpf(d) : !isValidCnpj(d)
 }
 
+export type DocErrorKind = 'none' | 'incomplete' | 'invalid'
+
+export interface DocError {
+  kind: DocErrorKind
+  /** Dígitos preenchidos até o momento. */
+  digits: number
+  /** Total de dígitos esperados (CPF 11, CNPJ 14). */
+  expected: number
+}
+
+/**
+ * Estado do documento para a interface (fase FIN-01.1): distingue vazio (opcional), incompleto
+ * (em digitação, mas ainda bloqueia o salvamento), completo-inválido e válido. Unifica a validação
+ * visual com a validação final — evita o botão Salvar desabilitado sem explicação.
+ */
+export function docErrorStatus(raw: string, personType: 'fisica' | 'juridica'): DocError {
+  const d = onlyDigits(raw)
+  const expected = personType === 'fisica' ? 11 : 14
+  if (d.length === 0) return { kind: 'none', digits: 0, expected }
+  if (d.length < expected) return { kind: 'incomplete', digits: d.length, expected }
+  const valid = personType === 'fisica' ? isValidCpf(d) : isValidCnpj(d)
+  return valid ? { kind: 'none', digits: d.length, expected } : { kind: 'invalid', digits: d.length, expected }
+}
+
 /** Normaliza um documento (somente dígitos) para comparação de duplicidade. */
 export const normalizeDoc = onlyDigits
 

@@ -82,6 +82,10 @@ export interface Entry {
   amount: number
   /** Ambiente financeiro de ORIGEM do lançamento. `unassigned`/ausente = legado sem classificação. */
   environment?: Environment
+  /** Tipo da operação de origem (vínculo inequívoco para recuperação do ambiente). */
+  sourceKind?: 'sale' | 'account' | 'purchase'
+  /** ID da operação de origem (venda/conta/compra), quando aplicável. */
+  sourceId?: string
 }
 
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'

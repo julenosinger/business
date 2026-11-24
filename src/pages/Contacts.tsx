@@ -10,7 +10,7 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
 import { accountsForEnvironment, contactsForEnvironment, salesForEnvironment } from '@/lib/selectors'
-import { docInvalidError, docValidForSubmit, isEmailValid, maskCnpj, maskCpf } from '@/lib/documents'
+import { docErrorStatus, docValidForSubmit, isEmailValid, maskCnpj, maskCpf } from '@/lib/documents'
 import { findContactDuplicates } from '@/lib/duplicates'
 import { lookupCep, lookupCnpj, type CnpjResult } from '@/lib/lookup'
 import { useDraft } from '@/lib/draft'
@@ -87,11 +87,28 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
   }
 
   const walletOk = form.wallet.trim() === '' || isValidAddress(form.wallet.trim())
-  const docInvalid = docInvalidError(form.doc, form.personType)
+  const docErr = docErrorStatus(form.doc, form.personType)
   const emailInvalid = !isEmailValid(form.email)
   const isCustomer = kind === 'customer'
   const icon = isCustomer ? <Users size={22} /> : <Truck size={22} />
   const docLabel = form.personType === 'fisica' ? t('CPF', 'CPF') : t('CNPJ', 'CNPJ')
+  const docMessage =
+    docErr.kind === 'none'
+      ? null
+      : docErr.kind === 'incomplete'
+        ? form.personType === 'fisica'
+          ? t(`CPF incompleto: ${docErr.digits} de ${docErr.expected} dígitos.`, `CPF incomplete: ${docErr.digits} of ${docErr.expected} digits.`)
+          : t(`CNPJ incompleto: ${docErr.digits} de ${docErr.expected} dígitos.`, `CNPJ incomplete: ${docErr.digits} of ${docErr.expected} digits.`)
+        : form.personType === 'fisica'
+          ? t('CPF inválido.', 'Invalid CPF.')
+          : t('CNPJ inválido.', 'Invalid CNPJ.')
+
+  // Resumo compacto das pendências que bloqueiam o salvamento (sempre visível quando há erro).
+  const pendingReasons: string[] = []
+  if (!form.name.trim()) pendingReasons.push(t('Nome obrigatório.', 'Name is required.'))
+  if (docMessage) pendingReasons.push(docMessage)
+  if (emailInvalid) pendingReasons.push(t('Email inválido.', 'Invalid email.'))
+  if (!walletOk) pendingReasons.push(t('Carteira inválida.', 'Invalid wallet address.'))
 
   // --- Consultas externas (opcionais) ---
   const network = useNetwork()
@@ -234,7 +251,7 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
           </div>
           <Field label={docLabel}>
             <div className="flex gap-2">
-              <input className={`${inputCls} ${docInvalid ? 'border-bad/60' : ''}`} inputMode="numeric" value={form.doc} onChange={(e) => setDoc(e.target.value)} placeholder={form.personType === 'fisica' ? '000.000.000-00' : '00.000.000/0000-00'} />
+              <input className={`${inputCls} ${docErr.kind === 'invalid' ? 'border-bad/60' : ''}`} inputMode="numeric" value={form.doc} onChange={(e) => setDoc(e.target.value)} placeholder={form.personType === 'fisica' ? '000.000.000-00' : '00.000.000/0000-00'} />
               {cnpjReady ? (
                 <Button type="button" variant="ghost" className="shrink-0" onClick={() => void searchCnpj()} disabled={cnpjBusy}>
                   {cnpjBusy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
@@ -242,7 +259,11 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
                 </Button>
               ) : null}
             </div>
-            {docInvalid ? <FormFieldError>{form.personType === 'fisica' ? t('CPF inválido.', 'Invalid CPF.') : t('CNPJ inválido.', 'Invalid CNPJ.')}</FormFieldError> : null}
+            {docMessage ? (
+              <p role="alert" className={`mt-1 text-xs ${docErr.kind === 'invalid' ? 'text-bad' : 'text-warn'}`}>
+                {docMessage}
+              </p>
+            ) : null}
           </Field>
           {cnpjData ? (
             <div className="rounded-xl border border-sky/30 bg-sky/10 p-3 text-sm">
@@ -365,6 +386,17 @@ function ContactModal({ kind, target, onClose }: { kind: Kind; target: Contact |
         ) : dup.possible.length > 0 ? (
           <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn" role="status">
             {t('Possível duplicidade por nome ou email. Revise antes de salvar.', 'Possible duplicate by name or email. Review before saving.')}
+          </div>
+        ) : null}
+
+        {pendingReasons.length > 0 ? (
+          <div className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-warn" role="status">
+            <p className="font-semibold">{t('Para salvar, revise:', 'To save, review:')}</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {pendingReasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
           </div>
         ) : null}
 

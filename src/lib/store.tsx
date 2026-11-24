@@ -173,6 +173,28 @@ export function migrateErpEnvironments(data: AppData): AppData {
   return changed ? { ...data, sales, products, moves, contacts, employees, purchases, shipments, carriers, returns, receipts, entries } : data
 }
 
+/**
+ * Recuperação do ambiente de lançamentos legados (fase FIN-01.1): usa o vínculo inequívoco
+ * `sourceKind`/`sourceId` para herdar o ambiente da operação de origem (venda/conta/compra).
+ * Sem vínculo confiável ou com origem sem ambiente definido, permanece sem ambiente (será marcado
+ * `unassigned` na migração ERP seguinte). Idempotente e não destrutiva.
+ */
+export function migrateEntryEnvironments(data: AppData): AppData {
+  const saleEnv = new Map(data.sales.map((s) => [s.id, s.environment]))
+  const accountEnv = new Map(data.accounts.map((a) => [a.id, a.environment]))
+  const purchaseEnv = new Map(data.purchases.map((p) => [p.id, p.environment]))
+  let changed = false
+  const entries = data.entries.map((e) => {
+    if (e.environment) return e
+    const id = e.sourceId ?? ''
+    const env = e.sourceKind === 'sale' ? saleEnv.get(id) : e.sourceKind === 'account' ? accountEnv.get(id) : e.sourceKind === 'purchase' ? purchaseEnv.get(id) : undefined
+    if (!env || env === 'unassigned') return e
+    changed = true
+    return { ...e, environment: env }
+  })
+  return changed ? { ...data, entries } : data
+}
+
 /** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
 function accountOutstandingMinor(acc: Account): bigint | null {
   const currency = acc.currency
@@ -298,7 +320,7 @@ function load(): AppData {
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
     const data: AppData = { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
-    return migrateErpEnvironments(migrateAccountEnvironments(migrateAccountCurrencies(data)))
+    return migrateErpEnvironments(migrateEntryEnvironments(migrateAccountEnvironments(migrateAccountCurrencies(data))))
   } catch {
     return emptyData()
   }
@@ -348,6 +370,8 @@ export interface Store {
   updateContact: (id: string, patch: Partial<Contact>) => SaveResult
   removeContact: (id: string) => void
   addEntry: (e: Omit<Entry, 'id'>) => void
+  /** Classifica manualmente um lançamento sem ambiente (`unassigned`), com auditoria. */
+  setEntryEnvironment: (id: string, environment: NetworkId) => ClassifyResult
   /** Liga/desliga um adaptador do razão contábil. Cada um só trata registros criados DEPOIS de ligado. */
   setLedgerAdapter: (name: AdapterFlagName, on: boolean) => void
   createLedgerAccount: (input: chartOps.AccountInput) => LedgerResult<{ code: string }>
@@ -530,6 +554,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         description: acc.description,
         amount: round2(amount),
         environment: acc.environment ?? 'unassigned',
+        sourceKind: 'account',
+        sourceId: acc.id,
       }
       return {
         ...d,
@@ -660,7 +686,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateEntry: (id, patch) => {
         const before = data.entries.find((e) => e.id === id)
         if (!before) return
+        // Proteção (FIN-01.1): não editar lançamento de outro ambiente.
+        if (before.environment && before.environment !== 'unassigned' && before.environment !== getNetwork()) {
+          toast.error(t('Este lançamento pertence a outro ambiente e não pode ser editado aqui.', 'This entry belongs to another environment and cannot be edited here.'))
+          return
+        }
         const after = { ...before, ...patch }
+        // O ambiente de origem não pode ser alterado por patch comum (classificação é via setEntryEnvironment).
+        if (after.environment !== before.environment) {
+          toast.error(t('O ambiente do lançamento não pode ser alterado aqui.', 'The entry environment cannot be changed here.'))
+          return
+        }
         const financial = (['type', 'amount', 'date', 'category'] as const).some((k) => before[k] !== after[k])
         if (financial && (isDateClosed(data.ledger, before.date) || isDateClosed(data.ledger, after.date))) {
           toast.error(t('Período fechado: edições financeiras neste mês estão bloqueadas. Reabra o período para ajustar.', 'Closed period: financial edits in this month are blocked. Reopen the period to adjust.'))
@@ -675,6 +711,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       removeEntry: (id) => {
         const gone = data.entries.find((e) => e.id === id)
+        if (gone && gone.environment && gone.environment !== 'unassigned' && gone.environment !== getNetwork()) {
+          toast.error(t('Este lançamento pertence a outro ambiente e não pode ser removido aqui.', 'This entry belongs to another environment and cannot be removed here.'))
+          return
+        }
         if (gone && isDateClosed(data.ledger, gone.date)) {
           toast.error(t('Período fechado: este lançamento não pode ser removido. Reabra o período para ajustar.', 'Closed period: this entry cannot be removed. Reopen the period to adjust.'))
           return
@@ -683,6 +723,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const g = d.entries.find((e) => e.id === id)
           return { ...d, entries: d.entries.filter((e) => e.id !== id), ledger: g ? guardLedger(d, (ctx) => syncRemoved(d.ledger, g, ctx)) : d.ledger }
         }, t('Lançamento removido.', 'Entry removed.'))
+      },
+      setEntryEnvironment: (id, environment) => {
+        const cur = data.entries.find((e) => e.id === id)
+        if (!cur) return { ok: false, reason: 'not_found' }
+        if (cur.environment && cur.environment !== 'unassigned') return { ok: false, reason: 'already_classified' }
+        set((d) => {
+          const e = d.entries.find((x) => x.id === id)
+          if (!e || (e.environment && e.environment !== 'unassigned')) return d
+          return {
+            ...d,
+            entries: d.entries.map((x) => (x.id === id ? { ...x, environment } : x)),
+            ledger: withAudit(d.ledger, ledgerCtx(d), 'record.classified', `entry ${id} classified as ${environment}`),
+          }
+        })
+        return { ok: true }
       },
       addAccount: (a) => {
         const id = uid()
@@ -839,6 +894,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 description: t(`Estorno da venda para ${sale.customerName}`, `Refund of sale to ${sale.customerName}`),
                 amount: sale.total,
                 environment: sale.environment ?? 'unassigned',
+                sourceKind: 'sale',
+                sourceId: sale.id,
               },
               ...d.entries,
             ]
@@ -899,7 +956,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             next.accounts = [acc, ...d.accounts]
           } else {
             next.entries = [
-              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total, environment: getNetwork() },
+              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total, environment: getNetwork(), sourceKind: 'sale', sourceId: saleId },
               ...d.entries,
             ]
           }
@@ -926,6 +983,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const total = round2(input.items.reduce((s, i) => s + i.qty * i.cost, 0))
           const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
           const awaiting = !!input.awaitReceipt
+          const purchaseId = receiving.nextPurchaseId(d.purchases)
           const next: AppData = {
             ...d,
             // Fluxo padrão: a compra soma o estoque na hora. Aguardando recebimento: o estoque só entra no recebimento.
@@ -943,7 +1001,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ],
             purchases: [
               {
-                id: receiving.nextPurchaseId(d.purchases),
+                id: purchaseId,
                 date,
                 supplierId: supplier?.id,
                 supplierName: name,
@@ -961,7 +1019,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
           if (input.paidNow) {
-            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: getNetwork() }, ...d.entries]
+            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: getNetwork(), sourceKind: 'purchase', sourceId: purchaseId }, ...d.entries]
           } else {
             next.accounts = [
               {

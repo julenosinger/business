@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { docInvalidError, docValidForSubmit, isDocValid, isEmailValid, isValidCnpj, isValidCpf, maskCnpj, maskCpf } from '../src/lib/documents'
+import { docErrorStatus, docInvalidError, docValidForSubmit, isDocValid, isEmailValid, isValidCnpj, isValidCpf, maskCnpj, maskCpf } from '../src/lib/documents'
 
 describe('máscaras de CPF/CNPJ', () => {
   test('maskCpf formata 11 dígitos', () => {
@@ -48,6 +48,19 @@ describe('validação de documentos', () => {
     expect(docInvalidError('111.444', 'fisica')).toBe(false) // digitando
     expect(docInvalidError('111.444.777-35', 'fisica')).toBe(false)
     expect(docInvalidError('111.444.777-36', 'fisica')).toBe(true)
+  })
+
+  test('docErrorStatus distingue vazio, incompleto, inválido e válido', () => {
+    expect(docErrorStatus('', 'fisica')).toEqual({ kind: 'none', digits: 0, expected: 11 })
+    expect(docErrorStatus('111.444', 'fisica')).toEqual({ kind: 'incomplete', digits: 6, expected: 11 })
+    expect(docErrorStatus('111.444.777-35', 'fisica')).toEqual({ kind: 'none', digits: 11, expected: 11 })
+    expect(docErrorStatus('111.444.777-36', 'fisica')).toEqual({ kind: 'invalid', digits: 11, expected: 11 })
+  })
+
+  test('docErrorStatus: CNPJ incompleto reporta a contagem de dígitos (caso do fornecedor com 13 dígitos)', () => {
+    const cnpj13 = '1122233300018' // 13 dígitos (falta 1)
+    expect(docErrorStatus(cnpj13, 'juridica')).toEqual({ kind: 'incomplete', digits: 13, expected: 14 })
+    expect(docValidForSubmit(cnpj13, 'juridica')).toBe(false) // bloqueia, mas agora há explicação
   })
 })
 
