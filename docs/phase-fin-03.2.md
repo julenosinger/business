@@ -1,6 +1,6 @@
 # FIN-03.2: Financial Integrity, Dashboard Accuracy & Sales Quantity UX
 
-**HEAD inicial:** `43685f5` (FIN-03.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `43685f5` (FIN-03.1) · **HEAD final:** `bcfd9ca`
 
 Resultado: **508 testes passando** (eram 483) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
