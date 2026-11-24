@@ -1,6 +1,6 @@
 # FIN-02: Accounting Environment Partition & Sandbox Independence
 
-**HEAD inicial:** `24fb30e` (HOTFIX FIN-01.3) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `24fb30e` (HOTFIX FIN-01.3) · **HEAD final:** `74fa1d8`
 
 Resultado: **478 testes passando** (eram 475), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
