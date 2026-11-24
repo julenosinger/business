@@ -13,6 +13,7 @@ import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
 import { contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment, salesForEnvironment } from '@/lib/selectors'
 import { addDays, fmtDate, money, num, today } from '@/lib/format'
+import { quantityError, type QuantityError } from '@/lib/quantity'
 import { t } from '@/lib/i18n'
 import type { PayMethod } from '@/lib/types'
 
@@ -34,6 +35,7 @@ export function Sales() {
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('all')
   const [cart, setCart] = useState<Record<string, number>>({})
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [customerId, setCustomerId] = useState('')
   const [method, setMethod] = useState<PayMethod>('pix')
   const [dueDate, setDueDate] = useState(addDays(today(), 30))
@@ -70,6 +72,12 @@ export function Sales() {
   const total = lines.reduce((s, l) => s + l.qty * l.p.price, 0)
   const overStock = lines.some((l) => l.qty > l.p.stock)
   const itemCount = lines.reduce((s, l) => s + l.qty, 0)
+  // Linhas com quantidade digitada inválida (vazio/zero/negativo/científico/acima do estoque) bloqueiam a finalização.
+  const invalidLines = lines.filter((l) => {
+    const raw = drafts[l.p.id]
+    return raw !== undefined && quantityError(raw, l.p.stock) !== null
+  })
+  const hasInvalidQty = invalidLines.length > 0
 
   const live = scopedSales.filter((s) => !s.canceledAt)
   // Vendas exibidas na lista (filtro opcional por cliente, vindo do perfil).
@@ -83,27 +91,67 @@ export function Sales() {
   const ticket = monthSales.length > 0 ? monthTotal / monthSales.length : 0
   const saleCount = (n: number) => `${n} ${n === 1 ? t('venda', 'sale') : t('vendas', 'sales')}`
 
+  const clearDraft = (id: string) =>
+    setDrafts((d) => {
+      if (!(id in d)) return d
+      const { [id]: _drop, ...rest } = d
+      return rest
+    })
+
   const add = (id: string) => {
     const p = catalogProducts.find((x) => x.id === id)
     if (!p) return
+    clearDraft(id)
     setCart((c) => ({ ...c, [id]: Math.min(p.stock, (c[id] ?? 0) + 1) }))
   }
-  const dec = (id: string) =>
+  const dec = (id: string) => {
+    clearDraft(id)
     setCart((c) => {
       const next = { ...c, [id]: (c[id] ?? 0) - 1 }
       if ((next[id] ?? 0) <= 0) delete next[id]
       return next
     })
+  }
+
+  const changeQty = (id: string, raw: string) => {
+    const p = catalogProducts.find((x) => x.id === id)
+    if (!p) return
+    setDrafts((d) => ({ ...d, [id]: raw }))
+    // Só aplica ao carrinho valores VÁLIDOS; valores inválidos mantêm a última quantidade válida e bloqueiam a finalização.
+    if (quantityError(raw, p.stock) === null) {
+      const n = Number(raw.trim())
+      setCart((c) => ({ ...c, [id]: n }))
+    }
+  }
+
+  const blurQty = (id: string) => clearDraft(id)
+
+  const qtyMessage = (err: QuantityError): string => {
+    switch (err) {
+      case 'empty':
+        return t('Informe a quantidade.', 'Enter a quantity.')
+      case 'zero':
+        return t('A quantidade deve ser maior que zero.', 'Quantity must be greater than zero.')
+      case 'over_stock':
+        return t('Quantidade acima do estoque disponível.', 'Quantity exceeds available stock.')
+      default:
+        return t('Quantidade inválida (use um número inteiro).', 'Invalid quantity (use a whole number).')
+    }
+  }
 
   const finish = () => {
-    recordSale({
+    if (lines.length === 0 || overStock || hasInvalidQty) return
+    const ok = recordSale({
       customerId: customerId || undefined,
       method,
       dueDate: method === 'prazo' ? dueDate : undefined,
       items: lines.map((l) => ({ productId: l.p.id, qty: l.qty, price: l.p.price })),
     })
+    // Só limpa o carrinho e confirma após sucesso efetivo (sem falso sucesso).
+    if (!ok) return
     toast.success(method === 'prazo' ? t('Venda registrada como conta a receber.', 'Sale recorded as a receivable.') : t('Venda registrada e caixa atualizado.', 'Sale recorded and cash updated.'))
     setCart({})
+    setDrafts({})
     setCustomerId('')
   }
 
@@ -195,24 +243,40 @@ export function Sales() {
             <p className="py-6 text-center text-sm text-muted">{t('Toque em um produto para adicionar.', 'Tap a product to add it.')}</p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {lines.map((l) => (
-                <li key={l.p.id} className="flex items-center gap-2 rounded-xl bg-fill/5 p-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold">{l.p.name}</div>
-                    <div className="num text-xs text-subtle">{money(l.p.price)} {t('cada', 'each')}</div>
-                  </div>
-                  <button aria-label={t('Diminuir', 'Decrease')} onClick={() => dec(l.p.id)} className="flex size-9 items-center justify-center rounded-lg border border-line hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
-                    <Minus size={14} />
-                  </button>
-                  <span className="num w-6 text-center text-sm font-semibold">{l.qty}</span>
-                  <button aria-label={t('Aumentar', 'Increase')} onClick={() => add(l.p.id)} disabled={l.qty >= l.p.stock} className="flex size-9 items-center justify-center rounded-lg border border-line hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 disabled:opacity-40">
-                    <Plus size={14} />
-                  </button>
-                  <button aria-label={t('Remover', 'Remove')} onClick={() => setCart((c) => Object.fromEntries(Object.entries(c).filter(([k]) => k !== l.p.id)))} className="flex size-9 items-center justify-center rounded-lg text-bad hover:bg-bad/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
-                    <Trash2 size={14} />
-                  </button>
-                </li>
-              ))}
+              {lines.map((l) => {
+                const err = drafts[l.p.id] !== undefined ? quantityError(drafts[l.p.id], l.p.stock) : null
+                return (
+                  <li key={l.p.id} className="rounded-xl bg-fill/5 p-2">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">{l.p.name}</div>
+                        <div className="num text-xs text-subtle">
+                          {money(l.p.price)} {t('cada', 'each')} · {money(l.qty * l.p.price)}
+                        </div>
+                      </div>
+                      <button aria-label={t('Diminuir', 'Decrease')} onClick={() => dec(l.p.id)} className="flex size-9 items-center justify-center rounded-lg border border-line hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                        <Minus size={14} />
+                      </button>
+                      <input
+                        value={drafts[l.p.id] ?? String(l.qty)}
+                        onChange={(e) => changeQty(l.p.id, e.target.value)}
+                        onBlur={() => blurQty(l.p.id)}
+                        onFocus={(e) => e.target.select()}
+                        inputMode="numeric"
+                        aria-label={t(`Quantidade de ${l.p.name}`, `Quantity of ${l.p.name}`)}
+                        className={`num h-9 w-16 rounded-lg border bg-transparent text-center text-sm font-semibold outline-none focus:ring-2 focus:ring-violet/60 ${err ? 'border-bad text-bad' : 'border-line'}`}
+                      />
+                      <button aria-label={t('Aumentar', 'Increase')} onClick={() => add(l.p.id)} disabled={l.qty >= l.p.stock} className="flex size-9 items-center justify-center rounded-lg border border-line hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 disabled:opacity-40">
+                        <Plus size={14} />
+                      </button>
+                      <button aria-label={t('Remover', 'Remove')} onClick={() => setCart((c) => Object.fromEntries(Object.entries(c).filter(([k]) => k !== l.p.id)))} className="flex size-9 items-center justify-center rounded-lg text-bad hover:bg-bad/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    {err ? <p className="mt-1.5 text-xs text-bad">{qtyMessage(err)}</p> : null}
+                  </li>
+                )
+              })}
             </ul>
           )}
 
@@ -242,7 +306,7 @@ export function Sales() {
             <span className="text-sm text-muted">Total</span>
             <span className="display num text-2xl font-semibold">{money(total)}</span>
           </div>
-          <Button className="mt-3 w-full" disabled={lines.length === 0 || overStock || (method === 'prazo' && !isValidIso(dueDate))} onClick={finish}>
+          <Button className="mt-3 w-full" disabled={lines.length === 0 || overStock || hasInvalidQty || (method === 'prazo' && !isValidIso(dueDate))} onClick={finish}>
             <Check size={16} /> {t('Finalizar venda', 'Complete sale')}
           </Button>
         </TCard>
