@@ -15,7 +15,7 @@
  *   sem decisão humana (Centro de Conciliação).
  * - Nunca lança exceção: em caso de erro devolve o estado novo sem alteração no razão.
  */
-import type { Account, AppData, PurchaseRef, Sale, TreasuryOp } from '../types'
+import type { Account, AppData, Environment, PurchaseRef, Sale, TreasuryOp } from '../types'
 import { CAT_PURCHASE, CAT_SALES } from '../types'
 import { fromNumber } from './money'
 import { activeEntryForCashEntry, isReversed, postEvent, reverseEntry, type Ctx } from './engine'
@@ -95,7 +95,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       if (!old) {
         const cashEntryId = s.method !== 'prazo' ? claim((e) => e.type === 'in' && e.category === CAT_SALES && e.date === s.date && e.amount === s.total) : undefined
         const res = saleEvent(ledger, { id: s.id, date: s.date, total: s.total, cogs: s.cogs, method: s.method, canceled: !!s.canceledAt }, currency)
-        if (res.ok) post({ ...res.draft, payload: { ...res.draft.payload, saleId: s.id, cashEntryId: str(cashEntryId), accountId: str(s.accountId) } })
+        if (res.ok) post({ ...res.draft, environment: s.environment, payload: { ...res.draft.payload, saleId: s.id, cashEntryId: str(cashEntryId), accountId: str(s.accountId) } })
       } else if (!old.canceledAt && s.canceledAt) {
         const ev = ledger.events.find((e) => e.idempotencyKey === `sale:${s.id}:recorded` && e.status === 'posted')
         const paidCredit = s.method === 'prazo' && prev.accounts.find((a) => a.id === s.accountId)?.status === 'paid'
@@ -123,7 +123,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       if (account) linkedAcc.add(account.id)
       if (cashEntryId) linkedCash.add(cashEntryId)
       const res = purchaseEvent(ledger, { id: p.id, date: p.date, total: p.total, paidNow: !account, stockPosted: true }, currency)
-      if (res.ok) post({ ...res.draft, payload: { ...res.draft.payload, purchaseId: p.id, cashEntryId: str(cashEntryId), accountId: str(account?.id) } })
+      if (res.ok) post({ ...res.draft, environment: p.environment, payload: { ...res.draft.payload, purchaseId: p.id, cashEntryId: str(cashEntryId), accountId: str(account?.id) } })
     }
   }
 
@@ -150,6 +150,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
           amountMinor,
           payload: { accountId: a.id, category: a.category, description: a.description.slice(0, 120), revision: rev },
           confirmation: 'confirmed',
+          environment: a.environment,
         }, opts.now),
       )
     } else if (a.source === 'payroll' && flags.payroll && /\d{4}-\d{2}$/.test(a.description) && rev === 0) {
@@ -163,6 +164,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
           amountMinor,
           payload: { accountId: a.id, month: a.description.slice(-7) },
           confirmation: 'confirmed',
+          environment: a.environment,
         }, opts.now),
       )
     }
@@ -205,6 +207,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
           // Pagamento via USDC/Gateway só vira liquidação CONFIRMADA quando já verificado (verified) ou quando for caixa.
           payload: { accountId: a.id, settleIn: viaTreasury && currency === 'USDC' ? 'usdc_gateway' : 'cash', cashEntryId: str(cashEntryId), txRef: str(treasuryTx), ...(settlementId ? { settlementId } : {}) },
           confirmation: viaTreasury && !verified ? 'pending' : 'confirmed',
+          environment: a.environment,
         }, opts.now),
       )
     }
@@ -227,7 +230,8 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
     for (const op of next.treasuryOps) {
       if (prevOps.has(op.id) || op.accountId || op.kind !== 'deposit') continue
       const res = treasuryEvent(ledger, { id: op.id, kind: 'deposit', amount: normalizeAmount(op), date: op.date, txHash: op.txHash ?? null, state: 'pending' })
-      if (res.ok) post({ ...res.draft, payload: { ...res.draft.payload, opId: op.id, chain: op.chain } })
+      const chainEnv = (chain: string): Environment | undefined => (chain === 'Arc' ? 'mainnet' : chain === 'Arc_Testnet' ? 'testnet' : undefined)
+      if (res.ok) post({ ...res.draft, environment: chainEnv(op.chain), payload: { ...res.draft.payload, opId: op.id, chain: op.chain } })
     }
   }
   return ledger

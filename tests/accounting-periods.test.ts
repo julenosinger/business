@@ -6,6 +6,7 @@ const NOW = '2026-11-22T10:00:00.000Z'
 const user = { id: 'u1', kind: 'user' as const }
 const agent = { id: 'a1', kind: 'agent' as const }
 const ctx: Ctx = { now: NOW, actor: user }
+const ENV = 'mainnet' as const
 
 function draft(over: Partial<EventDraft> = {}): EventDraft {
   return {
@@ -32,15 +33,15 @@ describe('accounting periods', () => {
 
   test('postEvent bloqueia lançamento em período fechado, com auditoria', () => {
     let l = emptyLedger()
-    const r = closePeriod(l, '2026-11', ctx)
+    const r = closePeriod(l, '2026-11', ENV, ctx)
     expect(r.ok).toBe(true)
     l = r.ledger
-    expect(isDateClosed(l, '2026-11-30')).toBe(true)
+    expect(isDateClosed(l, '2026-11-30', ENV)).toBe(true)
     // Outro mês continua aberto.
-    expect(isDateClosed(l, '2026-12-01')).toBe(false)
+    expect(isDateClosed(l, '2026-12-01', ENV)).toBe(false)
 
     const before = l.audit.length
-    const posted = postEvent(l, draft(), ctx)
+    const posted = postEvent(l, draft({ environment: ENV }), ctx)
     expect(posted.ok).toBe(false)
     expect(posted.errors).toContain('period_closed')
     expect(posted.ledger.audit.length).toBeGreaterThan(before) // tentativa registrada
@@ -49,49 +50,49 @@ describe('accounting periods', () => {
 
   test('reverseEntry bloqueia estorno em período fechado', () => {
     let l = emptyLedger()
-    const posted = postEvent(l, draft(), ctx)
+    const posted = postEvent(l, draft({ environment: ENV }), ctx)
     expect(posted.ok).toBe(true)
     l = posted.ledger
     const entryId = posted.entryId!
-    l = closePeriod(l, '2026-11', ctx).ledger
+    l = closePeriod(l, '2026-11', ENV, ctx).ledger
     const rev = reverseEntry(l, entryId, 'corrigir', ctx)
     expect(rev.ok).toBe(false)
     expect(rev.errors).toContain('period_closed')
     // Reabre e o estorno volta a funcionar.
-    l = reopenPeriod(l, '2026-11', 'ajuste autorizado', ctx).ledger
+    l = reopenPeriod(l, '2026-11', 'ajuste autorizado', ENV, ctx).ledger
     const rev2 = reverseEntry(l, entryId, 'corrigir', ctx)
     expect(rev2.ok).toBe(true)
   })
 
   test('reopen exige motivo e usuário; close é idempotente', () => {
-    let l = closePeriod(emptyLedger(), '2026-10', ctx).ledger
-    expect(reopenPeriod(l, '2026-10', 'x', ctx).ok).toBe(false) // motivo curto
-    expect(reopenPeriod(l, '2026-10', 'correção', { now: NOW, actor: agent }).ok).toBe(false) // agente
-    const re = reopenPeriod(l, '2026-10', 'correção', ctx)
+    let l = closePeriod(emptyLedger(), '2026-10', ENV, ctx).ledger
+    expect(reopenPeriod(l, '2026-10', 'x', ENV, ctx).ok).toBe(false) // motivo curto
+    expect(reopenPeriod(l, '2026-10', 'correção', ENV, { now: NOW, actor: agent }).ok).toBe(false) // agente
+    const re = reopenPeriod(l, '2026-10', 'correção', ENV, ctx)
     expect(re.ok).toBe(true)
     l = re.ledger
-    expect(isDateClosed(l, '2026-10-05')).toBe(false)
+    expect(isDateClosed(l, '2026-10-05', ENV)).toBe(false)
     // fechar de novo é idempotente
-    expect(closePeriod(l, '2026-10', ctx).ok).toBe(true)
+    expect(closePeriod(l, '2026-10', ENV, ctx).ok).toBe(true)
   })
 
   test('review é um marco e não bloqueia lançamentos', () => {
-    let l = setPeriodReview(emptyLedger(), '2026-11', ctx).ledger
-    expect(isDateClosed(l, '2026-11-22')).toBe(false)
-    const posted = postEvent(l, draft(), ctx)
+    let l = setPeriodReview(emptyLedger(), '2026-11', ENV, ctx).ledger
+    expect(isDateClosed(l, '2026-11-22', ENV)).toBe(false)
+    const posted = postEvent(l, draft({ environment: ENV }), ctx)
     expect(posted.ok).toBe(true)
   })
 
   test('normalizeLedger preserva períodos', () => {
-    const l = closePeriod(emptyLedger(), '2026-09', ctx).ledger
+    const l = closePeriod(emptyLedger(), '2026-09', ENV, ctx).ledger
     const n = normalizeLedger({ periods: l.periods })
-    expect(isDateClosed(n, '2026-09-15')).toBe(true)
+    expect(isDateClosed(n, '2026-09-15', ENV)).toBe(true)
   })
 
   test('agente não pode fechar nem reabrir período', () => {
     const actx: Ctx = { now: NOW, actor: agent }
-    expect(closePeriod(emptyLedger(), '2026-11', actx).ok).toBe(false)
-    const l = closePeriod(emptyLedger(), '2026-11', ctx).ledger
-    expect(reopenPeriod(l, '2026-11', 'motivo', actx).ok).toBe(false)
+    expect(closePeriod(emptyLedger(), '2026-11', ENV, actx).ok).toBe(false)
+    const l = closePeriod(emptyLedger(), '2026-11', ENV, ctx).ledger
+    expect(reopenPeriod(l, '2026-11', 'motivo', ENV, actx).ok).toBe(false)
   })
 })

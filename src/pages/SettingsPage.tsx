@@ -15,7 +15,7 @@ import { exportBackup, lastBackupAt, parseBackup } from '@/lib/backup'
 import type { CurrencyCode } from '@/lib/types'
 
 export function SettingsPage() {
-  const { data, updateSettings, loadDemo, resetAll, importData, clearSandboxData, loadSandboxDemo } = useStore()
+  const { data, updateSettings, resetAll, importData, clearSandboxData, loadSandboxDemo } = useStore()
   const network = useNetwork()
   const fileRef = useRef<HTMLInputElement>(null)
   const [lastBackup, setLastBackup] = useState<number | null>(lastBackupAt())
@@ -84,6 +84,20 @@ export function SettingsPage() {
       ),
     )
     if (ok) clearSandboxData()
+  }
+
+  const doResetAll = () => {
+    // Operação global destrutiva: exige backup automático + confirmação reforçada.
+    const ok = window.confirm(
+      t(
+        'Apagar TODOS os dados do negócio neste navegador? Esta ação é definitiva e um backup será exportado antes.',
+        'Delete ALL business data in this browser? This is permanent and a backup will be exported first.',
+      ),
+    )
+    if (!ok) return
+    exportBackup(data)
+    const confirm = window.confirm(t('Confirmar a exclusão total dos dados? Esta ação não pode ser desfeita após sair.', 'Confirm deleting all data? This cannot be undone after leaving.'))
+    if (confirm) resetAll()
   }
 
   return (
@@ -245,27 +259,10 @@ export function SettingsPage() {
           <TCard className="border-bad/30 p-4 sm:p-5">
             <PanelTitle icon={<Database size={18} />} title={t('Dados', 'Data')} subtitle={t('Ações que substituem seus dados atuais', 'Actions that replace your current data')} />
             <p className="mt-4 text-sm text-muted text-pretty">
-              {t('A demonstração substitui os dados atuais por um negócio de exemplo. Você pode desfazer logo após.', 'The demo replaces current data with a sample business. You can undo right after.')}
+              {t('A exclusão total é definitiva e exige confirmação reforçada. Para dados de demonstração, use as ferramentas Sandbox na Testnet.', 'Full deletion is permanent and requires reinforced confirmation. For demo data, use the Sandbox tools on Testnet.')}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (window.confirm(t('Substituir os dados atuais pela demonstração?', 'Replace current data with the demo?'))) {
-                    loadDemo()
-                  }
-                }}
-              >
-                <Database size={16} /> {t('Carregar demonstração', 'Load demo')}
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  if (window.confirm(t('Apagar todos os dados do negócio neste navegador?', 'Delete all business data in this browser?'))) {
-                    resetAll()
-                  }
-                }}
-              >
+              <Button variant="danger" onClick={doResetAll}>
                 <Trash2 size={16} /> {t('Apagar tudo', 'Delete everything')}
               </Button>
             </div>

@@ -1,4 +1,4 @@
-import type { CurrencyCode } from '../types'
+import type { CurrencyCode, Environment } from '../types'
 import type { Role } from './auth'
 
 /** Classe contábil da conta. O lado normal é débito para ativo/despesa e crédito para os demais. */
@@ -86,6 +86,8 @@ export interface EventDraft {
   amountMinor: string
   payload: Record<string, PayloadValue>
   confirmation: Confirmation
+  /** Ambiente de origem da operação (Mainnet/Testnet/unassigned). Ausente = legado. */
+  environment?: Environment
 }
 
 export interface FinancialEvent extends EventDraft {
@@ -125,6 +127,8 @@ export interface JournalEntry {
   /** Presente apenas em estornos: lançamento original e motivo. */
   reversalOf?: string
   reason?: string
+  /** Ambiente de origem da partida (todas as linhas compartilham o mesmo ambiente). Ausente = legado. */
+  environment?: Environment
 }
 
 export type AuditAction =
@@ -267,6 +271,8 @@ export interface AccountingPeriod {
   reopenReason?: string
   reopenedAt?: string
   reopenedBy?: Actor
+  /** Ambiente do período (Mainnet/Testnet/unassigned). Ausente = legado/global. */
+  environment?: Environment
 }
 
 export interface LedgerState {

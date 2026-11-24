@@ -6,7 +6,7 @@
  * - Cada adaptador respeita uma flag; nesta fase apenas o do Livro-Caixa vem ligado.
  * - Eles NÃO escrevem em lugar nenhum e NÃO movimentam caixa: o Livro-Caixa continua sendo a fonte do caixa.
  */
-import type { CurrencyCode } from '../types'
+import type { CurrencyCode, Environment } from '../types'
 import { fromNumber, formatDecimal, isCurrency } from './money'
 import type { EventDraft, LedgerFlags, LedgerState, PayloadValue } from './types'
 
@@ -37,6 +37,8 @@ export interface CashBookRow {
   date: string
   category: string
   description?: string
+  /** Ambiente de origem do lançamento (propagado ao evento contábil). */
+  environment?: Environment
 }
 
 export function cashBookEvent(
@@ -62,6 +64,7 @@ export function cashBookEvent(
       amountMinor,
       payload,
       confirmation: 'confirmed',
+      environment: row.environment,
     }),
   }
 }

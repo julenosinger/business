@@ -196,6 +196,53 @@ export function migrateEntryEnvironments(data: AppData): AppData {
   return changed ? { ...data, entries } : data
 }
 
+/**
+ * Migração do ambiente contábil (fase FIN-02): classifica eventos e partidas legados (sem `environment`)
+ * a partir de evidências inequívocas — `accountId`/`saleId`/`purchaseId`/`cashEntryId` no payload e
+ * `chain` comprovada (`Arc` → Mainnet, `Arc_Testnet` → Testnet). Nunca infere por valor/descrição/data.
+ * Idempotente e não destrutiva: eventos ambíguos permanecem sem ambiente (revisão).
+ */
+export function migrateLedgerEnvironments(data: AppData): AppData {
+  const accountEnv = new Map(data.accounts.map((a) => [a.id, a.environment]))
+  const saleEnv = new Map(data.sales.map((s) => [s.id, s.environment]))
+  const purchaseEnv = new Map(data.purchases.map((p) => [p.id, p.environment]))
+  const entryEnv = new Map(data.entries.map((e) => [e.id, e.environment]))
+
+  const infer = (payload: Record<string, unknown> | undefined): Environment | undefined => {
+    const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
+    const pick = (env: Environment | undefined): Environment | undefined => (env && env !== 'unassigned' ? env : undefined)
+    const byAccount = pick(accountEnv.get(str(payload?.accountId) ?? ''))
+    if (byAccount) return byAccount
+    const bySale = pick(saleEnv.get(str(payload?.saleId) ?? ''))
+    if (bySale) return bySale
+    const byPurchase = pick(purchaseEnv.get(str(payload?.purchaseId) ?? ''))
+    if (byPurchase) return byPurchase
+    const byCash = pick(entryEnv.get(str(payload?.cashEntryId) ?? ''))
+    if (byCash) return byCash
+    const chain = str(payload?.chain)
+    if (chain === 'Arc') return 'mainnet'
+    if (chain === 'Arc_Testnet') return 'testnet'
+    return undefined
+  }
+
+  let changed = false
+  const events = data.ledger.events.map((e) => {
+    if (e.environment) return e
+    const env = infer(e.payload)
+    if (!env) return e
+    changed = true
+    return { ...e, environment: env }
+  })
+  const journal = data.ledger.journal.map((j) => {
+    if (j.environment) return j
+    const env = events.find((e) => e.id === j.eventId)?.environment
+    if (!env) return j
+    changed = true
+    return { ...j, environment: env }
+  })
+  return changed ? { ...data, ledger: { ...data.ledger, events, journal } } : data
+}
+
 /** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
 function accountOutstandingMinor(acc: Account): bigint | null {
   const currency = acc.currency
@@ -321,7 +368,7 @@ function load(): AppData {
     const parsed = JSON.parse(raw) as Partial<AppData>
     const base = emptyData()
     const data: AppData = { ...base, ...parsed, ledger: normalizeLedger(parsed.ledger), settings: { ...base.settings, ...(parsed.settings ?? {}) } }
-    return migrateErpEnvironments(migrateEntryEnvironments(migrateAccountEnvironments(migrateAccountCurrencies(data))))
+    return migrateLedgerEnvironments(migrateErpEnvironments(migrateEntryEnvironments(migrateAccountEnvironments(migrateAccountCurrencies(data)))))
   } catch {
     return emptyData()
   }
@@ -660,7 +707,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
       // (atômico dentro da memória) e nunca derruba o lançamento manual: erros viram eventos rejeitados na auditoria.
       addEntry: (e) => {
-        if (isDateClosed(dataRef.current.ledger, e.date)) {
+        if (isDateClosed(dataRef.current.ledger, e.date, getNetwork())) {
           toast.error(t('Período fechado: este mês está fechado e não aceita novos lançamentos. Reabra o período para lançar.', 'Closed period: this month is closed and does not accept new entries. Reopen the period to post.'))
           return { ok: false, reason: 'period_closed' }
         }
@@ -678,9 +725,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       recordLedgerFxRate: (input) => runLedger((l, ctx) => reviewOps.recordFxRate(l, input, ctx)),
       registerLedgerFee: (input) => runLedger((l, ctx) => registerFee(l, input, ctx)),
       confirmLedgerFee: (dedupeKey, patch) => runLedger((l, ctx) => confirmFee(l, dedupeKey, patch, ctx)),
-      closeAccountingPeriod: (key) => runLedger((l, ctx) => closePeriod(l, key, ctx)),
-      reopenAccountingPeriod: (key, reason) => runLedger((l, ctx) => reopenPeriod(l, key, reason, ctx)),
-      setAccountingPeriodReview: (key) => runLedger((l, ctx) => setPeriodReview(l, key, ctx)),
+      closeAccountingPeriod: (key) => runLedger((l, ctx) => closePeriod(l, key, getNetwork(), ctx)),
+      reopenAccountingPeriod: (key, reason) => runLedger((l, ctx) => reopenPeriod(l, key, reason, getNetwork(), ctx)),
+      setAccountingPeriodReview: (key) => runLedger((l, ctx) => setPeriodReview(l, key, getNetwork(), ctx)),
       reconcilePurchases: (ids) => {
         const wanted = new Set(ids)
         const mk = (d: AppData): Ctx => ({ now: new Date().toISOString(), actor: { id: d.settings.owner.trim() || 'local-user', kind: 'user' } })
@@ -708,7 +755,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return { ok: false, reason: 'env_immutable' }
         }
         const financial = (['type', 'amount', 'date', 'category'] as const).some((k) => before[k] !== after[k])
-        if (financial && (isDateClosed(dataRef.current.ledger, before.date) || isDateClosed(dataRef.current.ledger, after.date))) {
+        if (financial && (isDateClosed(dataRef.current.ledger, before.date, before.environment) || isDateClosed(dataRef.current.ledger, after.date, before.environment))) {
           toast.error(t('Período fechado: edições financeiras neste mês estão bloqueadas. Reabra o período para ajustar.', 'Closed period: financial edits in this month are blocked. Reopen the period to adjust.'))
           return { ok: false, reason: 'period_closed' }
         }
@@ -727,7 +774,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast.error(t('Este lançamento pertence a outro ambiente e não pode ser removido aqui.', 'This entry belongs to another environment and cannot be removed here.'))
           return { ok: false, reason: 'wrong_environment' }
         }
-        if (isDateClosed(dataRef.current.ledger, gone.date)) {
+        if (isDateClosed(dataRef.current.ledger, gone.date, gone.environment)) {
           toast.error(t('Período fechado: este lançamento não pode ser removido. Reabra o período para ajustar.', 'Closed period: this entry cannot be removed. Reopen the period to adjust.'))
           return { ok: false, reason: 'period_closed' }
         }
