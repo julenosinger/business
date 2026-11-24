@@ -1,6 +1,6 @@
 # FIN-03: Financial Categories & Receivables/Payables UX
 
-**HEAD inicial:** `0d889bc` (FIN-02) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `0d889bc` (FIN-02) · **HEAD final:** `a01d0f0`
 
 Resultado: **483 testes passando** (eram 478), typecheck (app + servidor) limpo, lint limpo, build de produção OK.
 
