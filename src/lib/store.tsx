@@ -185,7 +185,8 @@ export function migrateEntryEnvironments(data: AppData): AppData {
   const purchaseEnv = new Map(data.purchases.map((p) => [p.id, p.environment]))
   let changed = false
   const entries = data.entries.map((e) => {
-    if (e.environment) return e
+    // Preserva registros corretamente classificados (Mainnet/Testnet); reavalia `unassigned` e ausentes.
+    if (e.environment && e.environment !== 'unassigned') return e
     const id = e.sourceId ?? ''
     const env = e.sourceKind === 'sale' ? saleEnv.get(id) : e.sourceKind === 'account' ? accountEnv.get(id) : e.sourceKind === 'purchase' ? purchaseEnv.get(id) : undefined
     if (!env || env === 'unassigned') return e
@@ -451,6 +452,8 @@ export interface Store {
   importData: (next: AppData) => void
   loadDemo: () => void
   resetAll: () => void
+  /** Limpa apenas os dados da Testnet (Sandbox), preservando Mainnet, unassigned, configurações e o Ledger. */
+  clearSandboxData: () => void
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -684,7 +687,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
       updateEntry: (id, patch) => {
-        const before = data.entries.find((e) => e.id === id)
+        const before = dataRef.current.entries.find((e) => e.id === id)
         if (!before) return
         // Proteção (FIN-01.1): não editar lançamento de outro ambiente.
         if (before.environment && before.environment !== 'unassigned' && before.environment !== getNetwork()) {
@@ -698,7 +701,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return
         }
         const financial = (['type', 'amount', 'date', 'category'] as const).some((k) => before[k] !== after[k])
-        if (financial && (isDateClosed(data.ledger, before.date) || isDateClosed(data.ledger, after.date))) {
+        if (financial && (isDateClosed(dataRef.current.ledger, before.date) || isDateClosed(dataRef.current.ledger, after.date))) {
           toast.error(t('Período fechado: edições financeiras neste mês estão bloqueadas. Reabra o período para ajustar.', 'Closed period: financial edits in this month are blocked. Reopen the period to adjust.'))
           return
         }
@@ -710,12 +713,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       },
       removeEntry: (id) => {
-        const gone = data.entries.find((e) => e.id === id)
+        const gone = dataRef.current.entries.find((e) => e.id === id)
         if (gone && gone.environment && gone.environment !== 'unassigned' && gone.environment !== getNetwork()) {
           toast.error(t('Este lançamento pertence a outro ambiente e não pode ser removido aqui.', 'This entry belongs to another environment and cannot be removed here.'))
           return
         }
-        if (gone && isDateClosed(data.ledger, gone.date)) {
+        if (gone && isDateClosed(dataRef.current.ledger, gone.date)) {
           toast.error(t('Período fechado: este lançamento não pode ser removido. Reabra o período para ajustar.', 'Closed period: this entry cannot be removed. Reopen the period to adjust.'))
           return
         }
@@ -725,19 +728,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, t('Lançamento removido.', 'Entry removed.'))
       },
       setEntryEnvironment: (id, environment) => {
-        const cur = data.entries.find((e) => e.id === id)
+        const cur = dataRef.current.entries.find((e) => e.id === id)
         if (!cur) return { ok: false, reason: 'not_found' }
         if (cur.environment && cur.environment !== 'unassigned') return { ok: false, reason: 'already_classified' }
+        // Rejeita classificação incompatível com a origem comprovada (vínculo inequívoco).
+        const src = dataRef.current
+        const srcEnv = cur.sourceKind === 'sale' ? src.sales.find((s) => s.id === cur.sourceId)?.environment : cur.sourceKind === 'account' ? src.accounts.find((a) => a.id === cur.sourceId)?.environment : cur.sourceKind === 'purchase' ? src.purchases.find((p) => p.id === cur.sourceId)?.environment : undefined
+        if (srcEnv && srcEnv !== 'unassigned' && srcEnv !== environment) return { ok: false, reason: 'conflicting_evidence' }
+        let applied = false
         set((d) => {
           const e = d.entries.find((x) => x.id === id)
           if (!e || (e.environment && e.environment !== 'unassigned')) return d
+          applied = true
           return {
             ...d,
             entries: d.entries.map((x) => (x.id === id ? { ...x, environment } : x)),
             ledger: withAudit(d.ledger, ledgerCtx(d), 'record.classified', `entry ${id} classified as ${environment}`),
           }
         })
-        return { ok: true }
+        return applied ? { ok: true } : { ok: false, reason: 'already_classified' }
       },
       addAccount: (a) => {
         const id = uid()
@@ -1227,6 +1236,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           false,
         ),
       resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.'), false),
+      clearSandboxData: () => {
+        if (getNetwork() !== 'testnet') {
+          toast.error(t('A limpeza de dados de teste só está disponível na Testnet (Sandbox).', 'Test data clearing is only available on Testnet (Sandbox).'))
+          return
+        }
+        undoable(
+          (d) => {
+            const keep = <T extends { environment?: Environment }>(list: T[]): T[] => list.filter((x) => x.environment !== 'testnet')
+            // Preserva Mainnet, unassigned, configurações compartilhadas, tesouraria e o Ledger (histórico global).
+            return {
+              ...d,
+              products: keep(d.products),
+              moves: keep(d.moves),
+              contacts: keep(d.contacts),
+              employees: keep(d.employees),
+              sales: keep(d.sales),
+              purchases: keep(d.purchases),
+              shipments: keep(d.shipments),
+              carriers: keep(d.carriers),
+              returns: keep(d.returns),
+              receipts: keep(d.receipts),
+              accounts: keep(d.accounts),
+              entries: keep(d.entries),
+            }
+          },
+          t('Dados de teste da Testnet removidos.', 'Testnet test data cleared.'),
+        )
+      },
     }
   }, [data])
 

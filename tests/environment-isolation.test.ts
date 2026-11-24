@@ -366,4 +366,15 @@ describe('isolamento financeiro de lançamentos (entries) por ambiente', () => {
     expect(twice.entries.find((e) => e.id === 'm')!.environment).toBe('testnet') // preservado
     expect(twice.entries.find((e) => e.id === 'e1')!.environment).toBe('mainnet')
   })
+
+  test('migrateEntryEnvironments reavalia registros unassigned com vínculo confiável (FIN-01.2)', () => {
+    const d: AppData = {
+      ...emptyData(),
+      sales: [{ id: 's1', date: '2026-11-20', customerName: 'c', items: [], total: 100, cogs: 50, method: 'pix', environment: 'mainnet' }],
+      entries: [entry('e1', 'unassigned', { sourceKind: 'sale', sourceId: 's1' }), entry('e2', 'unassigned')],
+    }
+    const out = migrateEntryEnvironments(d)
+    expect(out.entries.find((e) => e.id === 'e1')!.environment).toBe('mainnet') // recuperado
+    expect(out.entries.find((e) => e.id === 'e2')!.environment).toBe('unassigned') // sem vínculo → permanece
+  })
 })

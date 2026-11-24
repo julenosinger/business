@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react'
-import { Archive, Building2, Coins, Database, Download, Landmark, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Archive, Building2, Coins, Database, Download, FlaskConical, Landmark, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Field, inputCls } from '@/components/ui'
 import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
+import { useNetwork } from '@/lib/network'
+import { isSandbox } from '@/lib/environment-policy'
 import { EnvironmentReview } from '@/components/EnvironmentReview'
 import { num, parseNum } from '@/lib/format'
 import { locale, t } from '@/lib/i18n'
@@ -13,7 +15,8 @@ import { exportBackup, lastBackupAt, parseBackup } from '@/lib/backup'
 import type { CurrencyCode } from '@/lib/types'
 
 export function SettingsPage() {
-  const { data, updateSettings, loadDemo, resetAll, importData } = useStore()
+  const { data, updateSettings, loadDemo, resetAll, importData, clearSandboxData } = useStore()
+  const network = useNetwork()
   const fileRef = useRef<HTMLInputElement>(null)
   const [lastBackup, setLastBackup] = useState<number | null>(lastBackupAt())
   const s = data.settings
@@ -66,6 +69,21 @@ export function SettingsPage() {
       ),
     )
     if (ok) importData(res.data)
+  }
+
+  const doClearTestnet = () => {
+    // Re-verifica o ambiente no momento da execução (proteção contra troca de rede).
+    if (!isSandbox(network)) {
+      toast.error(t('A limpeza de dados de teste só está disponível na Testnet (Sandbox).', 'Test data clearing is only available on Testnet (Sandbox).'))
+      return
+    }
+    const ok = window.confirm(
+      t(
+        'Remover todos os dados cadastrados na Testnet? Os dados da Mainnet, registros não classificados e configurações compartilhadas serão preservados.',
+        'Remove all Testnet records? Mainnet data, unclassified records and shared settings will be preserved.',
+      ),
+    )
+    if (ok) clearSandboxData()
   }
 
   return (
@@ -252,6 +270,33 @@ export function SettingsPage() {
               </Button>
             </div>
           </TCard>
+
+          {isSandbox(network) ? (
+            <TCard className="border-warn/30 p-4 sm:p-5">
+              <PanelTitle icon={<FlaskConical size={18} />} title={t('Sandbox — Ferramentas de teste', 'Sandbox — Test tools')} subtitle={t('Disponíveis apenas na Arc Testnet', 'Available only on Arc Testnet')} />
+              <p className="mt-4 text-sm text-muted text-pretty">
+                {t('Experimente o ERP com dados fictícios. Os registros da Mainnet e não classificados são preservados.', 'Experiment with the ERP using fictitious data. Mainnet and unclassified records are preserved.')}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  variant="subtle"
+                  onClick={() => {
+                    if (window.confirm(t('Carregar dados demonstrativos na Testnet?', 'Load demo data into Testnet?'))) {
+                      loadDemo()
+                    }
+                  }}
+                >
+                  <Database size={16} /> {t('Dados demonstrativos', 'Demo data')}
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={doClearTestnet}
+                >
+                  <Trash2 size={16} /> {t('Limpar dados da Testnet', 'Clear Testnet data')}
+                </Button>
+              </div>
+            </TCard>
+          ) : null}
         </div>
       </div>
     </div>

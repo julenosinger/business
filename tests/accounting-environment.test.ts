@@ -170,4 +170,33 @@ describe('proteção de lançamentos entre ambientes e classificação', () => {
     expect(store().data.entries.find((e) => e.id === entryId)!.environment).toBe('mainnet')
     unmount()
   })
+
+  test('clearSandboxData limpa apenas a Testnet, preservando Mainnet e unassigned', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      store().importData({
+        ...emptyData(),
+        contacts: [
+          { id: 'c-m', kind: 'customer', name: 'Mainnet', doc: '', email: '', phone: '', wallet: '', environment: 'mainnet' },
+          { id: 'c-t', kind: 'customer', name: 'Testnet', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' },
+        ],
+        entries: [
+          { id: 'e-m', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'M', amount: 10, environment: 'mainnet' },
+          { id: 'e-t', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'T', amount: 20, environment: 'testnet' },
+          { id: 'e-u', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'U', amount: 30, environment: 'unassigned' },
+        ],
+      })
+    })
+    React.act(() => {
+      setNetwork('testnet')
+      store().clearSandboxData()
+    })
+    const d = store().data
+    expect(d.contacts.some((c) => c.id === 'c-m')).toBe(true)
+    expect(d.contacts.some((c) => c.id === 'c-t')).toBe(false)
+    expect(d.entries.some((e) => e.id === 'e-m')).toBe(true)
+    expect(d.entries.some((e) => e.id === 'e-t')).toBe(false)
+    expect(d.entries.some((e) => e.id === 'e-u')).toBe(true)
+    unmount()
+  })
 })

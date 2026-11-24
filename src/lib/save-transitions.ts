@@ -8,7 +8,7 @@
  */
 import type { AppData, Contact, Employee } from './types'
 import type { NetworkId } from './network'
-import { docValidForSubmit } from './documents'
+import { docAllowedForSubmit } from './environment-policy'
 import { findContactDuplicates, findEmployeeDuplicates } from './duplicates'
 
 export type SaveCode = 'invalid_document' | 'duplicate' | 'not_found' | 'wrong_environment'
@@ -26,7 +26,7 @@ export interface Transition {
  * reexecuções.
  */
 export function addContactTransition(d: AppData, c: Omit<Contact, 'id'>, env: NetworkId, id: string): Transition {
-  if (!docValidForSubmit(c.doc, c.personType ?? 'fisica')) {
+  if (!docAllowedForSubmit(c.doc, c.personType ?? 'fisica', env)) {
     return { nextState: d, result: { ok: false, code: 'invalid_document' } }
   }
   const dupInput = { doc: c.doc, internalCode: c.internalCode ?? '', name: c.name, email: c.email, kind: c.kind }
@@ -42,7 +42,7 @@ export function updateContactTransition(d: AppData, id: string, patch: Partial<C
   if (cur.environment !== env) return { nextState: d, result: { ok: false, code: 'wrong_environment' } }
   // O ambiente original é preservado: o payload não pode alterá-lo.
   const next = { ...cur, ...patch, environment: cur.environment }
-  if (!docValidForSubmit(next.doc, next.personType ?? 'fisica')) return { nextState: d, result: { ok: false, code: 'invalid_document' } }
+  if (!docAllowedForSubmit(next.doc, next.personType ?? 'fisica', env)) return { nextState: d, result: { ok: false, code: 'invalid_document' } }
   const dupInput = { doc: next.doc, internalCode: next.internalCode ?? '', name: next.name, email: next.email, kind: next.kind }
   if (findContactDuplicates(d.contacts.filter((x) => x.kind === next.kind && x.environment === env), dupInput, id).exact.length > 0) {
     return { nextState: d, result: { ok: false, code: 'duplicate' } }

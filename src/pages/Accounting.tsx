@@ -226,25 +226,29 @@ export function Accounting() {
             <AlertTriangle size={16} />
             {t(`${unassignedEntries.length} lançamento(s) sem ambiente definido ficam fora dos indicadores.`, `${unassignedEntries.length} entry(ies) without a defined environment are excluded from the indicators.`)}
           </p>
-          <ul className="mt-2 space-y-2">
-            {unassignedEntries.slice(0, 6).map((e) => (
-              <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-fill/5 p-2">
-                <div className="min-w-0">
-                  <div className="truncate text-xs font-semibold">{e.description}</div>
-                  <div className="text-[11px] text-subtle">
-                    {fmtDate(e.date)} · {cat(e.category)} · {e.type === 'in' ? '+' : '-'} {money(e.amount)}
+          <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto">
+            {unassignedEntries.map((e) => {
+              const origin =
+                e.sourceKind === 'sale' ? t('Origem: venda', 'Origin: sale') : e.sourceKind === 'account' ? t('Origem: conta', 'Origin: bill') : e.sourceKind === 'purchase' ? t('Origem: compra', 'Origin: purchase') : t('Sem vínculo de origem', 'No source link')
+              return (
+                <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-fill/5 p-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-semibold">{e.description}</div>
+                    <div className="text-[11px] text-subtle">
+                      {fmtDate(e.date)} · {cat(e.category)} · {e.type === 'in' ? '+' : '-'} {money(e.amount)} · {origin}
+                    </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'mainnet')}>
-                    {t('Mainnet', 'Mainnet')}
-                  </Button>
-                  <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'testnet')}>
-                    {t('Testnet', 'Testnet')}
-                  </Button>
-                </div>
-              </li>
-            ))}
+                  <div className="flex shrink-0 gap-1">
+                    <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'mainnet')}>
+                      {t('Mainnet', 'Mainnet')}
+                    </Button>
+                    <Button small variant="subtle" onClick={() => classifyEntry(e.id, 'testnet')}>
+                      {t('Testnet', 'Testnet')}
+                    </Button>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </div>
       ) : null}

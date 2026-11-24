@@ -98,7 +98,7 @@ export function EnvironmentBadge() {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-fill/5 px-2.5 py-1 text-[11px] font-semibold text-subtle">
       <span aria-hidden="true" className={`size-1.5 rounded-full ${live ? 'bg-ok' : 'bg-warn'}`} />
-      {info.label} · {live ? t('Produção', 'Production') : t('Testes', 'Testing')}
+      {info.label} · {live ? t('Produção', 'Production') : t('Sandbox — Ambiente de testes', 'Sandbox — Test environment')}
     </span>
   )
 }
