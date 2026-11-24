@@ -1,6 +1,6 @@
 # HOTFIX FIN-01.1: Legacy Recovery, Accounting Integrity & Form Reliability
 
-**HEAD inicial:** `b20675b` (HOTFIX FIN-01) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `b20675b` (HOTFIX FIN-01) · **HEAD final:** `a99d922`
 
 Resultado: **464 testes passando** (eram 454), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma regressão, nenhuma perda de dados, nenhuma duplicação contábil.
 
