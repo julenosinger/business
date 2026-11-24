@@ -3,7 +3,7 @@ import { BarChart3, Boxes, Landmark, Send, Sparkles, Truck } from 'lucide-react'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { accountTotalsForEnvironment, cashBalance, dueSoonForEnvironment, kpisForEnvironment, lowStockForEnvironment, monthPeriod } from '@/lib/selectors'
+import { accountTotalsForEnvironment, cashBalanceForEnvironment, dueSoonForEnvironment, kpisForEnvironment, lowStockForEnvironment, monthPeriod } from '@/lib/selectors'
 import { money, num } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { useNetwork } from '@/lib/network'
@@ -51,7 +51,7 @@ export function AssistantPanel() {
     } else if (id === 'suppliers') {
       const due = dueSoonForEnvironment(data, network, 'payable', 7).filter((a) => a.category === CAT_PURCHASE)
       const total = due.reduce((s, a) => s + a.amount, 0)
-      const cash = cashBalance(data)
+      const cash = cashBalanceForEnvironment(data, network)
       setAnswer({
         q: label,
         lines: due.length

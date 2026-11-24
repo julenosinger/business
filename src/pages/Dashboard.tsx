@@ -11,7 +11,7 @@ import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useGatewayBalances } from '@/lib/gateway'
 import { useNetwork } from '@/lib/network'
-import { accountTotalsForEnvironment, cashBalance, delta, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
+import { accountTotalsForEnvironment, accountsForEnvironment, cashBalanceForEnvironment, delta, entriesForEnvironment, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, salesForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
 import { fmtDate, daysUntil, money, moneyCompact, pct, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { daysSinceBackup, exportBackup } from '@/lib/backup'
@@ -41,7 +41,7 @@ export function Dashboard() {
   const series = monthlySeriesForEnvironment(data, network, 6)
   const totals = accountTotalsForEnvironment(data, network)
   const next = upcomingForEnvironment(data, network, 5)
-  const hasData = data.sales.length + data.entries.length + data.products.length + data.accounts.length > 0
+  const hasData = salesForEnvironment(data, network).length + entriesForEnvironment(data, network).length + productsForEnvironment(data, network).length + accountsForEnvironment(data.accounts, network).length > 0
   const maxAcc = Math.max(totals.receivable, totals.payable, 1)
   const gwConfirmed = gw.data?.total ?? 0
   const gwPending = gw.data?.pending ?? 0
@@ -155,7 +155,7 @@ export function Dashboard() {
               ]}
             >
               <span className="text-[11px] text-subtle">{t('Saldo de caixa', 'Cash balance')}</span>
-              <span className="display num text-sm font-semibold">{moneyCompact(cashBalance(data))}</span>
+              <span className="display num text-sm font-semibold">{moneyCompact(cashBalanceForEnvironment(data, network))}</span>
             </Donut>
             <dl className="min-w-[140px] flex-1 space-y-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">

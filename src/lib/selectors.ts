@@ -166,11 +166,16 @@ export const shipmentsForEnvironment = (data: AppData, network: NetworkId) => sc
 export const carriersForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.carriers, network)
 export const returnsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.returns, network)
 export const receiptsForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.receipts, network)
+export const entriesForEnvironment = (data: AppData, network: NetworkId) => scopedByEnvironment(data.entries, network)
 
 /** KPIs com receita/custo/estoque isolados por ambiente (lançamentos do razão permanecem globais). */
 export function kpisForEnvironment(data: AppData, network: NetworkId, p: Period): Kpis {
-  return kpis({ ...data, sales: salesForEnvironment(data, network) }, p)
+  return kpis({ ...data, sales: salesForEnvironment(data, network), entries: entriesForEnvironment(data, network) }, p)
 }
+
+/** Saldo de caixa isolado por ambiente (lançamentos do ambiente de origem). */
+export const cashBalanceForEnvironment = (data: AppData, network: NetworkId): number =>
+  cashBalance({ ...data, entries: entriesForEnvironment(data, network) })
 
 export const stockValueForEnvironment = (data: AppData, network: NetworkId): number =>
   stockValue({ ...data, products: productsForEnvironment(data, network) })
@@ -182,7 +187,12 @@ export function topProductsForEnvironment(data: AppData, network: NetworkId, p: 
 }
 
 export function monthlySeriesForEnvironment(data: AppData, network: NetworkId, months = 6): MonthPoint[] {
-  return monthlySeries({ ...data, sales: salesForEnvironment(data, network) }, months)
+  return monthlySeries({ ...data, sales: salesForEnvironment(data, network), entries: entriesForEnvironment(data, network) }, months)
+}
+
+/** Despesas por categoria isoladas por ambiente. */
+export function expensesByCategoryForEnvironment(data: AppData, network: NetworkId, p: Period): CategoryTotal[] {
+  return expensesByCategory({ ...data, entries: entriesForEnvironment(data, network) }, p)
 }
 
 export interface Ranked {

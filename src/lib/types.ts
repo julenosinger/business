@@ -80,6 +80,8 @@ export interface Entry {
   category: string
   description: string
   amount: number
+  /** Ambiente financeiro de ORIGEM do lançamento. `unassigned`/ausente = legado sem classificação. */
+  environment?: Environment
 }
 
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'

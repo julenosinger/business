@@ -169,7 +169,8 @@ export function migrateErpEnvironments(data: AppData): AppData {
   const carriers = data.carriers.map((c) => (c.environment ? c : withEnv(c, 'unassigned')))
   const returns = data.returns.map((r) => (r.environment ? r : withEnv(r, 'unassigned')))
   const receipts = data.receipts.map((r) => (r.environment ? r : withEnv(r, 'unassigned')))
-  return changed ? { ...data, sales, products, moves, contacts, employees, purchases, shipments, carriers, returns, receipts } : data
+  const entries = data.entries.map((e) => (e.environment ? e : withEnv(e, 'unassigned')))
+  return changed ? { ...data, sales, products, moves, contacts, employees, purchases, shipments, carriers, returns, receipts, entries } : data
 }
 
 /** Saldo em aberto de uma conta em unidades menores (bigint); null se a moeda for desconhecida. */
@@ -528,6 +529,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         category: acc.category,
         description: acc.description,
         amount: round2(amount),
+        environment: acc.environment ?? 'unassigned',
       }
       return {
         ...d,
@@ -628,7 +630,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return
         }
         set((d) => {
-          const entry = { ...e, id: uid() }
+          const entry = { ...e, id: uid(), environment: getNetwork() }
           return { ...d, entries: [entry, ...d.entries], ledger: guardLedger(d, (ctx) => syncAdded(d.ledger, entry, ctx)) }
         })
       },
@@ -836,6 +838,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 category: CAT_SALES,
                 description: t(`Estorno da venda para ${sale.customerName}`, `Refund of sale to ${sale.customerName}`),
                 amount: sale.total,
+                environment: sale.environment ?? 'unassigned',
               },
               ...d.entries,
             ]
@@ -896,7 +899,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             next.accounts = [acc, ...d.accounts]
           } else {
             next.entries = [
-              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total },
+              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total, environment: getNetwork() },
               ...d.entries,
             ]
           }
@@ -958,7 +961,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
           if (input.paidNow) {
-            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total }, ...d.entries]
+            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: getNetwork() }, ...d.entries]
           } else {
             next.accounts = [
               {
@@ -1042,7 +1045,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           } else {
             next = {
               ...next,
-              entries: [{ id: uid(), date: today(), type: 'in', category: 'Serviços prestados', description: r.description, amount: r.fiatAmount }, ...next.entries],
+              entries: [{ id: uid(), date: today(), type: 'in', category: 'Serviços prestados', description: r.description, amount: r.fiatAmount, environment: getNetwork() }, ...next.entries],
             }
           }
           return next
@@ -1145,6 +1148,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return {
               ...demo,
               accounts: demo.accounts.map((a) => ({ ...a, environment: env })),
+              entries: demo.entries.map((e) => ({ ...e, environment: env })),
               products: demo.products.map((p) => ({ ...p, environment: env })),
               moves: demo.moves.map((m) => ({ ...m, environment: env })),
               contacts: demo.contacts.map((c) => ({ ...c, environment: env })),

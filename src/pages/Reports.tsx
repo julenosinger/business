@@ -9,7 +9,7 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { periodFor, rangeTabs } from '@/pages/Accounting'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { expensesByCategory, kpisForEnvironment, monthlySeriesForEnvironment, topProductsForEnvironment } from '@/lib/selectors'
+import { accountsForEnvironment, expensesByCategoryForEnvironment, kpisForEnvironment, monthlySeriesForEnvironment, productsForEnvironment, salesForEnvironment, topProductsForEnvironment } from '@/lib/selectors'
 import { fmtDate, downloadCsv, money, num } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 
@@ -21,13 +21,15 @@ export function Reports() {
   const [range, setRange] = useState<'month' | 'prev' | 'year'>('month')
   const period = periodFor(range)
   const k = kpisForEnvironment(data, network, period)
-  const cats = expensesByCategory(data, period)
+  const cats = expensesByCategoryForEnvironment(data, network, period)
   const top = topProductsForEnvironment(data, network, period, 8)
   const series = monthlySeriesForEnvironment(data, network, 6)
   const catTotal = cats.reduce((s, c) => s + c.total, 0)
   const margin = k.revenue > 0 ? (k.profit / k.revenue) * 100 : 0
   const topMax = Math.max(...top.map((p) => p.revenue), 1)
-  const liveSales = data.sales.filter((s) => !s.canceledAt)
+  const liveSales = salesForEnvironment(data, network).filter((s) => !s.canceledAt)
+  const scopedProducts = productsForEnvironment(data, network)
+  const scopedAccounts = accountsForEnvironment(data.accounts, network)
   const records = (n: number) => `${n} ${n === 1 ? t('registro', 'record') : t('registros', 'records')}`
 
   const exports: { id: string; title: string; sub: string; disabled: boolean; run: () => void }[] = [
@@ -45,23 +47,23 @@ export function Reports() {
     {
       id: 'inventory',
       title: t('Estoque', 'Inventory'),
-      sub: records(data.products.length),
-      disabled: data.products.length === 0,
+      sub: records(scopedProducts.length),
+      disabled: scopedProducts.length === 0,
       run: () =>
         downloadCsv('inventory.csv', [
           ['SKU', t('Produto', 'Product'), t('Categoria', 'Category'), t('Estoque', 'Stock'), t('Mínimo', 'Minimum'), t('Custo', 'Cost'), t('Preço', 'Price')],
-          ...data.products.map((p) => [p.sku, p.name, p.category, p.stock, p.minStock, p.cost, p.price]),
+          ...scopedProducts.map((p) => [p.sku, p.name, p.category, p.stock, p.minStock, p.cost, p.price]),
         ]),
     },
     {
       id: 'bills',
       title: t('Contas', 'Bills'),
-      sub: records(data.accounts.length),
-      disabled: data.accounts.length === 0,
+      sub: records(scopedAccounts.length),
+      disabled: scopedAccounts.length === 0,
       run: () =>
         downloadCsv('bills.csv', [
           [t('Tipo', 'Type'), t('Descrição', 'Description'), t('Parte', 'Party'), t('Vencimento', 'Due date'), t('Valor', 'Amount'), t('Situação', 'Status')],
-          ...data.accounts.map((a) => [a.kind === 'payable' ? t('A pagar', 'Payable') : t('A receber', 'Receivable'), a.description, a.contactName, fmtDate(a.dueDate), a.amount, a.status === 'paid' ? t('Liquidada', 'Settled') : t('Em aberto', 'Open')]),
+          ...scopedAccounts.map((a) => [a.kind === 'payable' ? t('A pagar', 'Payable') : t('A receber', 'Receivable'), a.description, a.contactName, fmtDate(a.dueDate), a.amount, a.status === 'paid' ? t('Liquidada', 'Settled') : t('Em aberto', 'Open')]),
         ]),
     },
   ]

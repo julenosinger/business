@@ -14,7 +14,8 @@ import { ReconciliationTab } from '@/components/accounting/ReconciliationTab'
 import { PeriodsTab } from '@/components/accounting/PeriodsTab'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
-import { expensesByCategory, inPeriod, kpis, monthPeriod, type Period } from '@/lib/selectors'
+import { useNetwork } from '@/lib/network'
+import { entriesForEnvironment, expensesByCategoryForEnvironment, inPeriod, kpisForEnvironment, monthPeriod, salesForEnvironment, type Period } from '@/lib/selectors'
 import { fmtDate, downloadCsv, iso, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, CAT_PURCHASE, CAT_SALES, type Entry } from '@/lib/types'
@@ -127,6 +128,7 @@ type AccountingTab = 'overview' | 'cashbook' | 'ledger' | 'chart' | 'reconciliat
 export function Accounting() {
   const { data, removeEntry } = useStore()
   const { ledgerFocus, clearLedgerFocus } = useNav()
+  const network = useNetwork()
   const [range, setRange] = useState<Range>('month')
   const [tab, setTab] = useState<AccountingTab>('overview')
   const [target, setTarget] = useState<Entry | 'new' | null>(null)
@@ -136,10 +138,10 @@ export function Accounting() {
   // Foco vindo do "Ver no razão" em outra tela: abre a aba do Razão Geral (sem setState em efeito).
   if (ledgerFocus && tab !== 'ledger') setTab('ledger')
   const period = periodFor(range)
-  const k = kpis(data, period)
-  const cats = expensesByCategory(data, period).filter((c) => c.category !== CAT_PURCHASE && c.category !== CAT_SALES)
-  const salesRev = data.sales.filter((s) => !s.canceledAt && inPeriod(s.date, period)).reduce((s, x) => s + x.total, 0)
-  const entries = data.entries.filter((e) => inPeriod(e.date, period) && (filter === 'all' || e.type === filter))
+  const k = kpisForEnvironment(data, network, period)
+  const cats = expensesByCategoryForEnvironment(data, network, period).filter((c) => c.category !== CAT_PURCHASE && c.category !== CAT_SALES)
+  const salesRev = salesForEnvironment(data, network).filter((s) => !s.canceledAt && inPeriod(s.date, period)).reduce((s, x) => s + x.total, 0)
+  const entries = entriesForEnvironment(data, network).filter((e) => inPeriod(e.date, period) && (filter === 'all' || e.type === filter))
   const shown = entries.slice(0, limit)
   const margin = k.revenue > 0 ? (k.profit / k.revenue) * 100 : null
   const net = k.inflow - k.outflow

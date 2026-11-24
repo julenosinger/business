@@ -12,7 +12,7 @@ import { PurchaseReconciliationPanel } from '@/components/accounting/PurchaseRec
 import { useStore } from '@/lib/store'
 import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
-import { accountsForEnvironment, contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment } from '@/lib/selectors'
+import { accountsForEnvironment, contactsForEnvironment, entriesForEnvironment, inPeriod, monthPeriod, productsForEnvironment } from '@/lib/selectors'
 import { addDays, daysUntil, fmtDate, money, parseNum, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { CAT_PURCHASE } from '@/lib/types'
@@ -77,7 +77,7 @@ export function Purchases() {
   }
 
   const history = [
-    ...data.entries.filter((e) => e.category === CAT_PURCHASE).map((e) => ({ id: e.id, date: e.date, desc: e.description, amount: e.amount, paid: true, contactId: undefined as string | undefined })),
+    ...entriesForEnvironment(data, network).filter((e) => e.category === CAT_PURCHASE).map((e) => ({ id: e.id, date: e.date, desc: e.description, amount: e.amount, paid: true, contactId: undefined as string | undefined })),
     ...scopedAccounts
       .filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
       .map((a) => ({ id: a.id, date: a.dueDate, desc: a.description, amount: a.amount, paid: false, contactId: a.contactId })),
@@ -86,7 +86,7 @@ export function Purchases() {
   const shown = filteredHistory.slice(0, limit)
 
   const month = monthPeriod(0)
-  const paidMonth = data.entries.filter((e) => e.category === CAT_PURCHASE && e.type === 'out' && inPeriod(e.date, month))
+  const paidMonth = entriesForEnvironment(data, network).filter((e) => e.category === CAT_PURCHASE && e.type === 'out' && inPeriod(e.date, month))
   const openPurchases = scopedAccounts.filter((a) => a.kind === 'payable' && a.category === CAT_PURCHASE && a.status === 'open')
   const openTotal = openPurchases.reduce((s, a) => s + a.amount, 0)
   const soon = openPurchases.filter((a) => daysUntil(a.dueDate) <= 7)

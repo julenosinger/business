@@ -10,8 +10,9 @@ g.document = { documentElement: el(), head: el(), body: el(), createElement: el,
 g.window = { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {}, localStorage: g.localStorage }
 
 const { emptyData, migrateAccountEnvironments, migrateErpEnvironments } = await import('../src/lib/store')
-const { accountsForEnvironment, accountTotalsForEnvironment, contactsForEnvironment, employeesForEnvironment, productsForEnvironment, purchasesForEnvironment, salesForEnvironment, scopedByEnvironment, shipmentsForEnvironment, upcomingForEnvironment, dueSoonForEnvironment } = await import('../src/lib/selectors')
-import type { Account, AppData, Contact, Employee, Product, PurchaseRef, Sale, Shipment, TreasuryOp } from '../src/lib/types'
+const { accountsForEnvironment, accountTotalsForEnvironment, cashBalanceForEnvironment, contactsForEnvironment, employeesForEnvironment, entriesForEnvironment, expensesByCategoryForEnvironment, kpisForEnvironment, monthPeriod, productsForEnvironment, purchasesForEnvironment, salesForEnvironment, scopedByEnvironment, shipmentsForEnvironment, upcomingForEnvironment, dueSoonForEnvironment } = await import('../src/lib/selectors')
+import type { Account, AppData, Contact, Employee, Entry, Product, PurchaseRef, Sale, Shipment, TreasuryOp } from '../src/lib/types'
+import { CAT_SALES } from '../src/lib/types'
 
 const acc = (over: Partial<Account> = {}): Account => ({
   id: 'a',
@@ -193,5 +194,131 @@ describe('isolamento operacional do ERP (fase 3.3)', () => {
     const d: AppData = { ...emptyData(), products: [product('p1', 'testnet')] }
     const out = migrateErpEnvironments(d)
     expect(out.products[0]!.environment).toBe('testnet')
+  })
+})
+
+describe('isolamento financeiro de lançamentos (entries) por ambiente', () => {
+  const entry = (id: string, env: Entry['environment'], over: Partial<Entry> = {}): Entry => ({
+    id,
+    date: monthPeriod(0).from,
+    type: 'in',
+    category: 'Vendas',
+    description: 'd',
+    amount: 100,
+    environment: env,
+    ...over,
+  })
+
+  test('entriesForEnvironment separa por ambiente e exclui unassigned', () => {
+    const d: AppData = { ...emptyData(), entries: [entry('m', 'mainnet'), entry('t', 'testnet'), entry('u', 'unassigned'), entry('x', undefined)] }
+    expect(entriesForEnvironment(d, 'mainnet').map((e) => e.id)).toEqual(['m'])
+    expect(entriesForEnvironment(d, 'testnet').map((e) => e.id)).toEqual(['t'])
+  })
+
+  test('cashBalanceForEnvironment só soma lançamentos do ambiente (saldo acumulado)', () => {
+    const d: AppData = {
+      ...emptyData(),
+      entries: [
+        entry('m-in', 'mainnet', { type: 'in', amount: 2400 }),
+        entry('m-out', 'mainnet', { type: 'out', amount: 1760 }),
+        entry('t-in', 'testnet', { type: 'in', amount: 999 }),
+      ],
+    }
+    expect(cashBalanceForEnvironment(d, 'mainnet')).toBe(640)
+    expect(cashBalanceForEnvironment(d, 'testnet')).toBe(999)
+  })
+
+  test('kpisForEnvironment: receita/CMV/lucro/fluxo isolados por ambiente (Cenário A)', () => {
+    const p = monthPeriod(0)
+    const sale = (id: string, env: Sale['environment'], total: number, cogs: number): Sale => ({
+      id,
+      date: p.from,
+      customerName: 'c',
+      items: [],
+      total,
+      cogs,
+      method: 'pix',
+      environment: env,
+    })
+    const d: AppData = {
+      ...emptyData(),
+      sales: [sale('s1', 'mainnet', 2400, 1760)],
+      entries: [entry('e1', 'mainnet', { type: 'in', category: CAT_SALES, amount: 2400 })],
+    }
+    const main = kpisForEnvironment(d, 'mainnet', p)
+    expect(main.revenue).toBe(2400)
+    expect(main.cogs).toBe(1760)
+    expect(main.profit).toBe(640)
+    expect(main.inflow).toBe(2400)
+
+    // Testnet sem operações: tudo zero.
+    const test = kpisForEnvironment(d, 'testnet', p)
+    expect(test.revenue).toBe(0)
+    expect(test.cogs).toBe(0)
+    expect(test.profit).toBe(0)
+    expect(test.inflow).toBe(0)
+    expect(test.outflow).toBe(0)
+  })
+
+  test('Cenário B: Mainnet e Testnet com operações próprias apresentam somente seus dados', () => {
+    const p = monthPeriod(0)
+    const sale = (id: string, env: Sale['environment'], total: number, cogs: number): Sale => ({
+      id,
+      date: p.from,
+      customerName: 'c',
+      items: [],
+      total,
+      cogs,
+      method: 'pix',
+      environment: env,
+    })
+    const d: AppData = {
+      ...emptyData(),
+      sales: [sale('sm', 'mainnet', 2400, 1760), sale('st', 'testnet', 1000, 500)],
+      entries: [
+        entry('em', 'mainnet', { type: 'in', category: CAT_SALES, amount: 2400 }),
+        entry('et', 'testnet', { type: 'in', category: CAT_SALES, amount: 1000 }),
+      ],
+    }
+    const main = kpisForEnvironment(d, 'mainnet', p)
+    const test = kpisForEnvironment(d, 'testnet', p)
+    expect(main.revenue).toBe(2400)
+    expect(main.inflow).toBe(2400)
+    expect(test.revenue).toBe(1000)
+    expect(test.inflow).toBe(1000)
+    expect(test.cogs).toBe(500)
+    expect(test.profit).toBe(500)
+  })
+
+  test('expensesByCategoryForEnvironment só considera o ambiente', () => {
+    const p = monthPeriod(0)
+    const d: AppData = {
+      ...emptyData(),
+      entries: [
+        entry('m', 'mainnet', { type: 'out', category: 'Aluguel', amount: 500 }),
+        entry('t', 'testnet', { type: 'out', category: 'Aluguel', amount: 900 }),
+      ],
+    }
+    expect(expensesByCategoryForEnvironment(d, 'mainnet', p).map((c) => c.total)).toEqual([500])
+    expect(expensesByCategoryForEnvironment(d, 'testnet', p).map((c) => c.total)).toEqual([900])
+  })
+
+  test('migração ERP: entries legadas ficam unassigned (não contaminam totais isolados)', () => {
+    const d: AppData = { ...emptyData(), entries: [entry('e1', undefined)] }
+    const out = migrateErpEnvironments(d)
+    expect(out.entries[0]!.environment).toBe('unassigned')
+    expect(entriesForEnvironment(out, 'mainnet')).toHaveLength(0)
+    expect(entriesForEnvironment(out, 'testnet')).toHaveLength(0)
+    expect(cashBalanceForEnvironment(out, 'mainnet')).toBe(0)
+    expect(cashBalanceForEnvironment(out, 'testnet')).toBe(0)
+  })
+
+  test('migração ERP é idempotente para entries (não altera registros classificados)', () => {
+    const d: AppData = { ...emptyData(), entries: [entry('m', 'mainnet'), entry('u', undefined)] }
+    const once = migrateErpEnvironments(d)
+    const twice = migrateErpEnvironments(once)
+    expect(twice.entries).toEqual(once.entries)
+    expect(twice.entries.find((e) => e.id === 'm')!.environment).toBe('mainnet')
+    expect(twice.entries.find((e) => e.id === 'u')!.environment).toBe('unassigned')
   })
 })
