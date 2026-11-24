@@ -336,6 +336,10 @@ export type AccountingOutcome = { ok: true; status: AccountingStatus } | { ok: f
 export type CancelResult = { ok: true } | { ok: false; reason: string }
 export type BatchCancelResult = { canceled: string[]; refused: { id: string; reason: string }[] }
 export type ClassifyResult = { ok: true } | { ok: false; reason: string }
+/** Resultado explícito de operações sobre lançamentos (criação/edição/exclusão). */
+export type EntryResult = { ok: true } | { ok: false; reason: string }
+/** Resultado de operações do Sandbox (carregar demonstração / limpar Testnet). */
+export type SandboxResult = { ok: true } | { ok: false; reason: 'wrong_environment' }
 
 /** Resultado explícito de gravação de cadastro (fase UI 2.1.1). */
 export type SaveResult = { ok: true; id: string } | { ok: false; code: 'invalid_document' | 'duplicate' | 'not_found' | 'wrong_environment'; message: string }
@@ -370,7 +374,7 @@ export interface Store {
   addContact: (c: Omit<Contact, 'id'>) => SaveResult
   updateContact: (id: string, patch: Partial<Contact>) => SaveResult
   removeContact: (id: string) => void
-  addEntry: (e: Omit<Entry, 'id'>) => void
+  addEntry: (e: Omit<Entry, 'id'>) => EntryResult
   /** Classifica manualmente um lançamento sem ambiente (`unassigned`), com auditoria. */
   setEntryEnvironment: (id: string, environment: NetworkId) => ClassifyResult
   /** Liga/desliga um adaptador do razão contábil. Cada um só trata registros criados DEPOIS de ligado. */
@@ -390,8 +394,8 @@ export interface Store {
   setAccountingPeriodReview: (key: string) => LedgerResult<{ key: string }>
   /** Reconciliação histórica de compras: aplica os lançamentos propostos (dry-run), com aprovação humana. */
   reconcilePurchases: (ids: string[]) => LedgerResult<{ posted: number; duplicates: number; rejected: number }>
-  updateEntry: (id: string, patch: Partial<Entry>) => void
-  removeEntry: (id: string) => void
+  updateEntry: (id: string, patch: Partial<Entry>) => EntryResult
+  removeEntry: (id: string) => EntryResult
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
   updateAccount: (id: string, patch: Partial<Account>) => void
   /** Reclassifica manualmente o ambiente de uma obrigação legada (`unassigned`), com auditoria. */
@@ -454,6 +458,8 @@ export interface Store {
   resetAll: () => void
   /** Limpa apenas os dados da Testnet (Sandbox), preservando Mainnet, unassigned, configurações e o Ledger. */
   clearSandboxData: () => void
+  /** Adiciona dados demonstrativos SOMENTE à Testnet, preservando Mainnet, unassigned, configurações e o Ledger. */
+  loadSandboxDemo: () => SandboxResult
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -654,14 +660,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Livro-Caixa continua sendo a fonte do caixa. O razão acompanha na MESMA atualização de estado
       // (atômico dentro da memória) e nunca derruba o lançamento manual: erros viram eventos rejeitados na auditoria.
       addEntry: (e) => {
-        if (isDateClosed(data.ledger, e.date)) {
+        if (isDateClosed(dataRef.current.ledger, e.date)) {
           toast.error(t('Período fechado: este mês está fechado e não aceita novos lançamentos. Reabra o período para lançar.', 'Closed period: this month is closed and does not accept new entries. Reopen the period to post.'))
-          return
+          return { ok: false, reason: 'period_closed' }
         }
         set((d) => {
           const entry = { ...e, id: uid(), environment: getNetwork() }
           return { ...d, entries: [entry, ...d.entries], ledger: guardLedger(d, (ctx) => syncAdded(d.ledger, entry, ctx)) }
         })
+        return { ok: true }
       },
       createLedgerAccount: (input) => runLedger((l, ctx) => chartOps.createAccount(l, input, ctx)),
       updateLedgerAccount: (code, patch) => runLedger((l, ctx) => chartOps.updateAccount(l, code, patch, ctx)),
@@ -688,22 +695,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setLedgerAdapter: (name, on) => set((d) => ({ ...d, ledger: setAdapterFlag(d.ledger, name, on, ledgerCtx(d)) })),
       updateEntry: (id, patch) => {
         const before = dataRef.current.entries.find((e) => e.id === id)
-        if (!before) return
+        if (!before) return { ok: false, reason: 'not_found' }
         // Proteção (FIN-01.1): não editar lançamento de outro ambiente.
         if (before.environment && before.environment !== 'unassigned' && before.environment !== getNetwork()) {
           toast.error(t('Este lançamento pertence a outro ambiente e não pode ser editado aqui.', 'This entry belongs to another environment and cannot be edited here.'))
-          return
+          return { ok: false, reason: 'wrong_environment' }
         }
         const after = { ...before, ...patch }
         // O ambiente de origem não pode ser alterado por patch comum (classificação é via setEntryEnvironment).
         if (after.environment !== before.environment) {
           toast.error(t('O ambiente do lançamento não pode ser alterado aqui.', 'The entry environment cannot be changed here.'))
-          return
+          return { ok: false, reason: 'env_immutable' }
         }
         const financial = (['type', 'amount', 'date', 'category'] as const).some((k) => before[k] !== after[k])
         if (financial && (isDateClosed(dataRef.current.ledger, before.date) || isDateClosed(dataRef.current.ledger, after.date))) {
           toast.error(t('Período fechado: edições financeiras neste mês estão bloqueadas. Reabra o período para ajustar.', 'Closed period: financial edits in this month are blocked. Reopen the period to adjust.'))
-          return
+          return { ok: false, reason: 'period_closed' }
         }
         set((d) => {
           const b = d.entries.find((e) => e.id === id)
@@ -711,21 +718,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const a = { ...b, ...patch }
           return { ...d, entries: d.entries.map((e) => (e.id === id ? a : e)), ledger: guardLedger(d, (ctx) => syncUpdated(d.ledger, b, a, ctx)) }
         })
+        return { ok: true }
       },
       removeEntry: (id) => {
         const gone = dataRef.current.entries.find((e) => e.id === id)
-        if (gone && gone.environment && gone.environment !== 'unassigned' && gone.environment !== getNetwork()) {
+        if (!gone) return { ok: false, reason: 'not_found' }
+        if (gone.environment && gone.environment !== 'unassigned' && gone.environment !== getNetwork()) {
           toast.error(t('Este lançamento pertence a outro ambiente e não pode ser removido aqui.', 'This entry belongs to another environment and cannot be removed here.'))
-          return
+          return { ok: false, reason: 'wrong_environment' }
         }
-        if (gone && isDateClosed(dataRef.current.ledger, gone.date)) {
+        if (isDateClosed(dataRef.current.ledger, gone.date)) {
           toast.error(t('Período fechado: este lançamento não pode ser removido. Reabra o período para ajustar.', 'Closed period: this entry cannot be removed. Reopen the period to adjust.'))
-          return
+          return { ok: false, reason: 'period_closed' }
         }
         undoable((d) => {
           const g = d.entries.find((e) => e.id === id)
           return { ...d, entries: d.entries.filter((e) => e.id !== id), ledger: g ? guardLedger(d, (ctx) => syncRemoved(d.ledger, g, ctx)) : d.ledger }
         }, t('Lançamento removido.', 'Entry removed.'))
+        return { ok: true }
       },
       setEntryEnvironment: (id, environment) => {
         const cur = dataRef.current.entries.find((e) => e.id === id)
@@ -1263,6 +1273,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           },
           t('Dados de teste da Testnet removidos.', 'Testnet test data cleared.'),
         )
+      },
+      loadSandboxDemo: () => {
+        if (getNetwork() !== 'testnet') {
+          toast.error(t('Os dados demonstrativos do Sandbox só podem ser carregados na Testnet.', 'Sandbox demo data can only be loaded on Testnet.'))
+          return { ok: false, reason: 'wrong_environment' }
+        }
+        // Prefixo único por chamada: evita colisão de IDs entre cargas consecutivas.
+        const prefix = `demo-${uid()}-`
+        const demo = buildDemoData(dataRef.current.settings.currency, prefix)
+        // Adiciona os dados demonstrativos SOMENTE à Testnet; preserva Mainnet, unassigned, configurações e o Ledger.
+        undoable(
+          (d) => {
+            const tag = <T extends { environment?: Environment }>(list: T[]): T[] => list.map((x) => ({ ...x, environment: 'testnet' as const }))
+            return {
+              ...d,
+              products: [...tag(demo.products), ...d.products],
+              contacts: [...tag(demo.contacts), ...d.contacts],
+              employees: [...tag(demo.employees), ...d.employees],
+              sales: [...tag(demo.sales), ...d.sales],
+              entries: [...tag(demo.entries), ...d.entries],
+              accounts: [...tag(demo.accounts), ...d.accounts],
+              shipments: [...tag(demo.shipments), ...d.shipments],
+              carriers: [...tag(demo.carriers), ...d.carriers],
+              returns: [...tag(demo.returns), ...d.returns],
+              purchases: [...tag(demo.purchases), ...d.purchases],
+              receipts: [...tag(demo.receipts), ...d.receipts],
+              moves: [...tag(demo.moves), ...d.moves],
+            }
+          },
+          t('Dados demonstrativos carregados na Testnet.', 'Demo data loaded into Testnet.'),
+          false,
+        )
+        return { ok: true }
       },
     }
   }, [data])

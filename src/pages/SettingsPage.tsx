@@ -15,7 +15,7 @@ import { exportBackup, lastBackupAt, parseBackup } from '@/lib/backup'
 import type { CurrencyCode } from '@/lib/types'
 
 export function SettingsPage() {
-  const { data, updateSettings, loadDemo, resetAll, importData, clearSandboxData } = useStore()
+  const { data, updateSettings, loadDemo, resetAll, importData, clearSandboxData, loadSandboxDemo } = useStore()
   const network = useNetwork()
   const fileRef = useRef<HTMLInputElement>(null)
   const [lastBackup, setLastBackup] = useState<number | null>(lastBackupAt())
@@ -281,8 +281,8 @@ export function SettingsPage() {
                 <Button
                   variant="subtle"
                   onClick={() => {
-                    if (window.confirm(t('Carregar dados demonstrativos na Testnet?', 'Load demo data into Testnet?'))) {
-                      loadDemo()
+                    if (window.confirm(t('Carregar dados demonstrativos na Testnet? Os dados da Mainnet e não classificados serão preservados.', 'Load demo data into Testnet? Mainnet and unclassified data will be preserved.'))) {
+                      loadSandboxDemo()
                     }
                   }}
                 >

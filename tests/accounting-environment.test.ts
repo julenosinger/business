@@ -199,4 +199,68 @@ describe('proteção de lançamentos entre ambientes e classificação', () => {
     expect(d.entries.some((e) => e.id === 'e-u')).toBe(true)
     unmount()
   })
+
+  test('loadSandboxDemo adiciona dados apenas à Testnet, preservando Mainnet e configurações', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      store().importData({
+        ...emptyData(),
+        contacts: [{ id: 'c-m', kind: 'customer', name: 'Mainnet', doc: '', email: '', phone: '', wallet: '', environment: 'mainnet' }],
+        entries: [{ id: 'e-m', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'M', amount: 10, environment: 'mainnet' }],
+        settings: { ...emptyData().settings, company: 'Empresa Real' },
+      })
+    })
+    React.act(() => {
+      setNetwork('testnet')
+      expect(store().loadSandboxDemo()).toEqual({ ok: true })
+    })
+    const d = store().data
+    expect(d.contacts.some((c) => c.id === 'c-m')).toBe(true) // Mainnet preservado
+    expect(d.entries.some((e) => e.id === 'e-m')).toBe(true)
+    expect(d.settings.company).toBe('Empresa Real') // configuração preservada
+    expect(d.products.some((p) => p.environment === 'testnet')).toBe(true) // demo adicionada à Testnet
+    expect(d.contacts.some((c) => c.environment === 'testnet')).toBe(true)
+    expect(d.products.some((p) => p.environment === 'mainnet')).toBe(false)
+    unmount()
+  })
+
+  test('loadSandboxDemo é bloqueado na Mainnet', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    setNetwork('mainnet')
+    let res: unknown
+    React.act(() => {
+      res = store().loadSandboxDemo()
+    })
+    expect(res).toEqual({ ok: false, reason: 'wrong_environment' })
+    unmount()
+  })
+
+  test('loadSandboxDemo gera IDs únicos entre chamadas consecutivas', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      setNetwork('testnet')
+      store().loadSandboxDemo()
+      const before = store().data.products.length
+      store().loadSandboxDemo()
+      expect(store().data.products.length).toBe(before * 2) // sem colisão de IDs
+    })
+    unmount()
+  })
+
+  test('addEntry/updateEntry/removeEntry retornam resultado explícito (sem falso sucesso)', () => {
+    const { store, unmount } = render(React.createElement('div'))
+    setNetwork('mainnet')
+    let entryId = ''
+    React.act(() => {
+      expect(store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'X', amount: 10, date: '2026-11-20' })).toEqual({ ok: true })
+    })
+    entryId = store().data.entries.find((e) => e.description === 'X')!.id
+    React.act(() => {
+      expect(store().updateEntry(entryId, { description: 'Y' })).toEqual({ ok: true })
+      expect(store().updateEntry('nao-existe', { description: 'Z' })).toEqual({ ok: false, reason: 'not_found' })
+      expect(store().removeEntry('nao-existe')).toEqual({ ok: false, reason: 'not_found' })
+    })
+    expect(store().data.entries.find((e) => e.id === entryId)!.description).toBe('Y')
+    unmount()
+  })
 })

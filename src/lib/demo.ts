@@ -25,14 +25,14 @@ import * as returns from './returns'
 
 /** Dados de demonstração gerados localmente. Não representam um negócio real. */
 /** Dados de demonstração. As moedas das remessas e das transportadoras seguem a moeda do app (`currency`). */
-export function buildDemoData(currency: CurrencyCode = 'USDC'): AppData {
+export function buildDemoData(currency: CurrencyCode = 'USDC', prefix = ''): AppData {
   let seed = 7
   const rnd = () => {
     seed = (seed * 16807) % 2147483647
     return seed / 2147483647
   }
   let n = 0
-  const id = (p: string) => `${p}${++n}`
+  const id = (p: string) => `${prefix}${p}${++n}`
 
   const prod = (sku: string, name: string, category: string, cost: number, price: number, stock: number, minStock: number): Product => ({
     id: id('p'),
@@ -186,14 +186,14 @@ export function buildDemoData(currency: CurrencyCode = 'USDC'): AppData {
     ledger: emptyLedger(),
     settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency, usdcRate: null, approvalLimit: null },
   }
-  return { ...base, ...demoShipments(base, now) }
+  return { ...base, ...demoShipments(base, now, prefix) }
 }
 
 /**
  * Remessas de demonstração. Passam pelas mesmas regras do módulo (transições, auditoria), com datas no passado.
  * Transportadoras e códigos são fictícios; nenhuma integração real existe.
  */
-function demoShipments(start: AppData, now: Date): Pick<AppData, 'shipments' | 'purchases' | 'receipts' | 'carriers' | 'returns'> {
+function demoShipments(start: AppData, now: Date, prefix = ''): Pick<AppData, 'shipments' | 'purchases' | 'receipts' | 'carriers' | 'returns'> {
   let d = start
   const stamp = (daysAgo: number, hour: number): string => {
     const x = new Date(now)
@@ -371,7 +371,7 @@ function demoShipments(start: AppData, now: Date): Pick<AppData, 'shipments' | '
   const supplierName = suppliers[0]?.name ?? 'Fornecedor'
   const wait = inLine(2, 30)
   const pur1: PurchaseRef = {
-    id: 'PUR-0001',
+    id: `${prefix}PUR-0001`,
     date: day(5),
     supplierId: suppliers[0]?.id,
     supplierName,
@@ -383,7 +383,7 @@ function demoShipments(start: AppData, now: Date): Pick<AppData, 'shipments' | '
   // 9. Entrada de uma compra já lançada pelo fluxo padrão (estoque já somado): recebida com uma falta registrada.
   const done = inLine(1, 20)
   const pur2: PurchaseRef = {
-    id: 'PUR-0002',
+    id: `${prefix}PUR-0002`,
     date: day(12),
     supplierId: suppliers[1]?.id,
     supplierName: suppliers[1]?.name ?? 'Fornecedor',

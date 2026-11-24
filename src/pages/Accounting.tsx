@@ -101,9 +101,9 @@ function EntryModal({ target, onClose }: { target: Entry | 'new' | null; onClose
             disabled={!(value > 0) || !description.trim() || !isValidIso(date)}
             onClick={() => {
               const payload = { type, category, description: description.trim(), amount: value, date }
-              if (editing) updateEntry(editing.id, payload)
-              else addEntry(payload)
-              onClose()
+              const res = editing ? updateEntry(editing.id, payload) : addEntry(payload)
+              // Fecha somente após sucesso confirmado; em falha, preserva os dados digitados.
+              if (res.ok) onClose()
             }}
           >
             {t('Salvar', 'Save')}
