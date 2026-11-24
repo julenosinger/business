@@ -242,8 +242,11 @@ function AccountModal({ target, preset, onClose }: { target: Account | 'new' | n
               externalRef: externalRef.trim() || undefined,
               recurring: recurring || undefined,
             }
-            if (editing) updateAccount(editing.id, payload)
-            else addAccount({ kind, ...payload })
+            if (editing) {
+              if (!updateAccount(editing.id, payload)) return
+            } else if (addAccount({ kind, ...payload }) === '') {
+              return
+            }
             draft.clear()
             onClose()
           }}

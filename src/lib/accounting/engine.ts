@@ -297,7 +297,9 @@ export function postEvent(ledger: LedgerState, draft: EventDraft, ctx: Ctx): Pos
     return { ok: false, ledger: audited, errors: early }
   }
 
-  const existing = ledger.events.find((e) => e.idempotencyKey === draft.idempotencyKey)
+  // Identidade da operação = chave de idempotência + ambiente: a mesma chave em ambientes diferentes
+  // são operações distintas e não podem colidir; a repetição no MESMO ambiente continua sendo duplicata.
+  const existing = ledger.events.find((e) => e.idempotencyKey === draft.idempotencyKey && e.environment === draft.environment)
   if (existing && existing.status === 'posted') {
     const audited = withAudit(ledger, ctx, 'event.duplicate', `duplicate:${draft.idempotencyKey}`, { eventId: existing.id, ...(existing.journalEntryId ? { entryId: existing.journalEntryId } : {}) })
     return { ok: true, ledger: audited, eventId: existing.id, entryId: existing.journalEntryId ?? null, status: 'posted', duplicate: true }

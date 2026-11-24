@@ -15,6 +15,7 @@ import {
   type PaymentRequest,
   type Product,
   type Sale,
+  type SaleItem,
   type Settings,
   type ShipmentDocumentType,
   type ShipmentStatus,
@@ -42,7 +43,7 @@ import { fromNumber, toDisplayNumber } from './accounting/money'
 import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury-selectors'
 import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
-import { isUnsupportedCategory } from './financial-categories'
+import { categoryById, isUnsupportedCategory } from './financial-categories'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -445,7 +446,7 @@ export interface Store {
   updateEntry: (id: string, patch: Partial<Entry>) => EntryResult
   removeEntry: (id: string) => EntryResult
   addAccount: (a: Omit<Account, 'id' | 'status' | 'source'> & { source?: Account['source'] }) => string
-  updateAccount: (id: string, patch: Partial<Account>) => void
+  updateAccount: (id: string, patch: Partial<Account>) => boolean
   /** Reclassifica manualmente o ambiente de uma obrigação legada (`unassigned`), com auditoria. */
   setAccountEnvironment: (id: string, environment: NetworkId) => ClassifyResult
   /** Reclassifica manualmente o ambiente de um registro operacional legado (`unassigned`), com auditoria. */
@@ -502,7 +503,6 @@ export interface Store {
   resolveReturn: (id: string, input: returns.ResolutionInput) => LogisticsResult<{ id: string }>
   updateSettings: (patch: Partial<Settings>) => void
   importData: (next: AppData) => void
-  loadDemo: () => void
   resetAll: () => void
   /** Limpa apenas os dados da Testnet (Sandbox), preservando Mainnet, unassigned, configurações e o Ledger. */
   clearSandboxData: () => void
@@ -820,7 +820,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => ({ ...d, accounts: [{ ...a, id, status: 'open', source: a.source ?? 'manual', currency: a.currency ?? d.settings.currency, environment: getNetwork() }, ...d.accounts] }))
         return id
       },
-      updateAccount: (id, patch) => set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
+      updateAccount: (id, patch) => {
+        const cur = dataRef.current.accounts.find((a) => a.id === id)
+        if (!cur) {
+          toast.error(t('Conta não encontrada.', 'Bill not found.'))
+          return false
+        }
+        // O ambiente de origem é imutável em edições comuns (classificação é via setAccountEnvironment).
+        if (patch.environment !== undefined && patch.environment !== cur.environment) {
+          toast.error(t('O ambiente da conta não pode ser alterado aqui.', 'The bill environment cannot be changed here.'))
+          return false
+        }
+        // Não editar obrigação de outro ambiente.
+        if (cur.environment && cur.environment !== 'unassigned' && cur.environment !== getNetwork()) {
+          toast.error(t('Esta conta pertence a outro ambiente e não pode ser editada aqui.', 'This bill belongs to another environment and cannot be edited here.'))
+          return false
+        }
+        // Categoria válida e compatível com o tipo da obrigação (P8).
+        if (patch.category !== undefined) {
+          if (isUnsupportedCategory(patch.category)) {
+            toast.error(t('Esta categoria não tem suporte contábil e não pode ser usada nesta conta.', 'This category has no accounting support and cannot be used in this bill.'))
+            return false
+          }
+          const cat = categoryById(patch.category)
+          const expectedKind = cur.kind === 'payable' ? 'expense' : 'income'
+          if (cat && cat.kind !== expectedKind) {
+            toast.error(t('A categoria não é compatível com o tipo desta conta.', 'The category is incompatible with this bill type.'))
+            return false
+          }
+        }
+        set((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, ...patch, environment: cur.environment } : a)) }))
+        return true
+      },
       setAccountEnvironment: (id, environment) => {
         const decision = canClassifyEnvironment(data.accounts.find((a) => a.id === id), data.treasuryOps, environment)
         if (!decision.ok) {
@@ -980,40 +1011,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, t('Venda cancelada. Estoque e caixa foram ajustados.', 'Sale canceled. Stock and cash were adjusted.')),
       recordSale: (input) => {
         const env = getNetwork()
-        const foreignProduct = input.items.some((it) => {
-          const p = data.products.find((x) => x.id === it.productId)
-          return !!p && !!p.environment && p.environment !== env
-        })
-        const customer = data.contacts.find((c) => c.id === input.customerId)
-        const foreignCustomer = !!customer && !!customer.environment && customer.environment !== env
-        if (foreignProduct || foreignCustomer) {
-          toast.error(t('Há produtos ou cliente de outro ambiente neste pedido. Revalide o carrinho.', 'This order has products or a customer from another environment. Revalidate the cart.'))
-          return false
-        }
-        // Revalida quantidade e estoque na camada de execução (P8): nenhuma venda com quantidade inválida ou acima do estoque.
-        for (const it of input.items) {
-          if (!Number.isSafeInteger(it.qty) || it.qty <= 0) {
-            toast.error(t('Quantidade inválida no pedido. Revise o carrinho.', 'Invalid quantity in the order. Review the cart.'))
-            return false
-          }
-          const p = data.products.find((x) => x.id === it.productId)
-          if (!p) {
-            toast.error(t('Produto não encontrado neste ambiente. Revise o carrinho.', 'Product not found in this environment. Review the cart.'))
-            return false
-          }
-          if (it.qty > p.stock) {
-            toast.error(t(`Estoque insuficiente para "${p.name}". Disponíveis: ${p.stock}.`, `Insufficient stock for "${p.name}". Available: ${p.stock}.`))
-            return false
-          }
-        }
+        let recorded = false
+        // Toda a validação e a mutação acontecem DENTRO do updater, contra o estado autoritativo
+        // (dataRef.current via `apply`): nada de snapshot desatualizado. Execução atômica.
         set((d) => {
+          // Consolida produtos repetidos: a quantidade TOTAL por produto é validada contra o estoque.
+          const byProduct = new Map<string, number>()
+          const priceOf = new Map<string, number>()
+          for (const it of input.items) {
+            byProduct.set(it.productId, (byProduct.get(it.productId) ?? 0) + it.qty)
+            if (!priceOf.has(it.productId)) priceOf.set(it.productId, it.price)
+          }
           const customer = d.contacts.find((c) => c.id === input.customerId)
+          if (customer && customer.environment && customer.environment !== env) {
+            toast.error(t('Há cliente de outro ambiente neste pedido. Revalide o carrinho.', 'This order has a customer from another environment. Revalidate the cart.'))
+            return d
+          }
+          const items: SaleItem[] = []
+          for (const [productId, qty] of byProduct) {
+            const p = d.products.find((x) => x.id === productId)
+            if (!p) {
+              toast.error(t('Produto não encontrado neste ambiente. Revise o carrinho.', 'Product not found in this environment. Review the cart.'))
+              return d
+            }
+            if (p.environment && p.environment !== env) {
+              toast.error(t('Há produtos de outro ambiente neste pedido. Revalide o carrinho.', 'This order has products from another environment. Revalidate the cart.'))
+              return d
+            }
+            if (!Number.isSafeInteger(qty) || qty <= 0) {
+              toast.error(t('Quantidade inválida no pedido. Revise o carrinho.', 'Invalid quantity in the order. Review the cart.'))
+              return d
+            }
+            if (qty > p.stock) {
+              toast.error(t(`Estoque insuficiente para "${p.name}". Disponíveis: ${p.stock}.`, `Insufficient stock for "${p.name}". Available: ${p.stock}.`))
+              return d
+            }
+            items.push({ productId: p.id, name: p.name, qty, price: priceOf.get(productId) ?? p.price, cost: p.cost })
+          }
           const date = today()
           const saleId = uid()
-          const items = input.items.flatMap((it) => {
-            const p = d.products.find((x) => x.id === it.productId)
-            return p ? [{ productId: p.id, name: p.name, qty: it.qty, price: it.price, cost: p.cost }] : []
-          })
           const total = round2(items.reduce((s, i) => s + i.qty * i.price, 0))
           const cogs = round2(items.reduce((s, i) => s + i.qty * i.cost, 0))
           const customerName = customer?.name ?? t('Consumidor final', 'Walk-in customer')
@@ -1023,10 +1059,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const it = items.find((i) => i.productId === p.id)
               return it ? { ...p, stock: Math.max(0, p.stock - it.qty) } : p
             }),
-            moves: [
-              ...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`), environment: getNetwork() })),
-              ...d.moves,
-            ],
+            moves: [...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`), environment: env })), ...d.moves],
           }
           let accountId: string | undefined
           if (input.method === 'prazo') {
@@ -1043,20 +1076,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               status: 'open',
               source: 'sale',
               currency: d.settings.currency,
-              environment: getNetwork(),
+              environment: env,
             }
             next.accounts = [acc, ...d.accounts]
           } else {
             next.entries = [
-              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total, environment: getNetwork(), sourceKind: 'sale', sourceId: saleId },
+              { id: uid(), date, type: 'in', category: CAT_SALES, description: t(`Venda para ${customerName} (${input.method})`, `Sale to ${customerName} (${input.method})`), amount: total, environment: env, sourceKind: 'sale', sourceId: saleId },
               ...d.entries,
             ]
           }
-          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: getNetwork() }
+          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: env }
           next.sales = [sale, ...d.sales]
+          recorded = true
           return next
         })
-        return true
+        return recorded
       },
       recordPurchase: (input) => {
         const env = getNetwork()
@@ -1290,35 +1324,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       updateSettings: (patch) => set((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
       importData: (next) => undoable(() => next, t('Backup restaurado.', 'Backup restored.'), false),
-      loadDemo: () =>
-        undoable(
-          (d) => {
-            const demo = buildDemoData(d.settings.currency)
-            // Dados de demonstração pertencem ao ambiente financeiro atualmente selecionado.
-            const env = getNetwork()
-            return {
-              ...demo,
-              accounts: demo.accounts.map((a) => ({ ...a, environment: env })),
-              entries: demo.entries.map((e) => ({ ...e, environment: env })),
-              products: demo.products.map((p) => ({ ...p, environment: env })),
-              moves: demo.moves.map((m) => ({ ...m, environment: env })),
-              contacts: demo.contacts.map((c) => ({ ...c, environment: env })),
-              sales: demo.sales.map((s) => ({ ...s, environment: env })),
-              employees: demo.employees.map((e) => ({ ...e, environment: env })),
-              purchases: demo.purchases.map((p) => ({ ...p, environment: env })),
-              shipments: demo.shipments.map((s) => ({ ...s, environment: env })),
-              carriers: demo.carriers.map((c) => ({ ...c, environment: env })),
-              returns: demo.returns.map((r) => ({ ...r, environment: env })),
-              receipts: demo.receipts.map((r) => ({ ...r, environment: env })),
-              // Mantém a configuração do razão (plano de contas, flags, regras fiscais); os lançamentos antigos
-              // pertencem aos dados substituídos e saem junto com eles (o Desfazer restaura tudo).
-              ledger: { ...emptyLedger(d.ledger.orgId), flags: d.ledger.flags, chart: d.ledger.chart, categoryMap: d.ledger.categoryMap, taxRules: d.ledger.taxRules, fxRates: d.ledger.fxRates },
-              settings: { ...d.settings, company: t('Comércio Demonstração', 'Demo Store') },
-            }
-          },
-          t('Dados de demonstração carregados.', 'Demo data loaded.'),
-          false,
-        ),
       resetAll: () => undoable(() => emptyData(), t('Todos os dados foram apagados.', 'All data was deleted.'), false),
       clearSandboxData: () => {
         if (getNetwork() !== 'testnet') {
