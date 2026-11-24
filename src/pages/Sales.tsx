@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { BarChart3, CalendarDays, Check, Coins, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, TableWrap, inputCls, td, th } from '@/components/ui'
@@ -124,7 +124,12 @@ export function Sales() {
     }
   }
 
-  const blurQty = (id: string) => clearDraft(id)
+  // Perder o foco NÃO descarta uma edição inválida: o valor e a mensagem permanecem visíveis até correção
+  // (digitar valor válido) ou cancelamento explícito (Escape reverte para a última quantidade válida).
+  const qtyKeyDown = (id: string, e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') clearDraft(id)
+    else if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+  }
 
   const qtyMessage = (err: QuantityError): string => {
     switch (err) {
@@ -260,10 +265,11 @@ export function Sales() {
                       <input
                         value={drafts[l.p.id] ?? String(l.qty)}
                         onChange={(e) => changeQty(l.p.id, e.target.value)}
-                        onBlur={() => blurQty(l.p.id)}
+                        onKeyDown={(e) => qtyKeyDown(l.p.id, e)}
                         onFocus={(e) => e.target.select()}
                         inputMode="numeric"
                         aria-label={t(`Quantidade de ${l.p.name}`, `Quantity of ${l.p.name}`)}
+                        aria-invalid={err !== null}
                         className={`num h-9 w-16 rounded-lg border bg-transparent text-center text-sm font-semibold outline-none focus:ring-2 focus:ring-violet/60 ${err ? 'border-bad text-bad' : 'border-line'}`}
                       />
                       <button aria-label={t('Aumentar', 'Increase')} onClick={() => add(l.p.id)} disabled={l.qty >= l.p.stock} className="flex size-9 items-center justify-center rounded-lg border border-line hover:bg-fill/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60 disabled:opacity-40">
