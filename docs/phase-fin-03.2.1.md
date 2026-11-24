@@ -1,6 +1,6 @@
 # FIN-03.2.1: Financial Integrity, Sales Execution & Dashboard Responsive Hardening
 
-**HEAD inicial:** `be2f4c3` (FIN-03.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `be2f4c3` (FIN-03.2) · **HEAD final:** `d33a6a6`
 
 Resultado: **519 testes passando** (eram 508) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
