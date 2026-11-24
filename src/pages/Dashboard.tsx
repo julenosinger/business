@@ -1,6 +1,6 @@
 import { useAccount } from 'wagmi'
 import { useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, Banknote, Boxes, CalendarClock, Database, DownloadCloud, Landmark, LineChart, PieChart, Receipt, Trash2, TrendingUp, Wallet } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, AlertTriangle, Banknote, Boxes, CalendarClock, Database, DownloadCloud, Landmark, LineChart, Package, PieChart, Receipt, Trash2, TrendingUp, Wallet } from 'lucide-react'
 import { Bar, AreaChart, C, Donut } from '@/components/charts'
 import { AssistantPanel } from '@/components/AssistantPanel'
 import { Badge, Button, Empty, Skeleton } from '@/components/ui'
@@ -12,7 +12,7 @@ import { useNav } from '@/lib/nav'
 import { useGatewayBalances } from '@/lib/gateway'
 import { useNetwork } from '@/lib/network'
 import { accountTotalsForEnvironment, accountsForEnvironment, cashBalanceForEnvironment, delta, entriesForEnvironment, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, salesForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
-import { fmtDate, daysUntil, money, moneyCompact, pct, usdcFmt } from '@/lib/format'
+import { fmtDate, daysUntil, money, moneyCompact, num, pct, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { daysSinceBackup, exportBackup } from '@/lib/backup'
 
@@ -46,6 +46,7 @@ export function Dashboard() {
   const gwConfirmed = gw.data?.total ?? 0
   const gwPending = gw.data?.pending ?? 0
   const net = cur.inflow - cur.outflow
+  const margin = cur.revenue > 0 ? (cur.profit / cur.revenue) * 100 : null
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -99,19 +100,61 @@ export function Dashboard() {
         </TCard>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
-        <KpiTile tone="ok" icon={<Banknote size={20} />} label={t('Faturamento', 'Revenue')} value={money(cur.revenue)} sub={<Delta value={delta(cur.revenue, old.revenue)} />} />
+      {hasData && cur.cogsIncomplete ? (
+        <div className="tcard flex flex-wrap items-center gap-3 !border-warn/40 !bg-warn/10 p-4 text-sm" role="status">
+          <AlertTriangle size={18} className="text-warn" />
+          <p className="min-w-0 flex-1 text-pretty">
+            {t(
+              'Há receita de mercadorias sem custo (CMV) informado: o lucro líquido está incompleto. Registre a venda no PDV ou informe o custo para apurar o resultado.',
+              'There is merchandise revenue without a reported cost (COGS): net profit is incomplete. Record the sale in the POS or report the cost to compute the result.',
+            )}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <KpiTile
+          tone="ok"
+          icon={<Banknote size={20} />}
+          label={t('Faturamento', 'Revenue')}
+          value={money(cur.revenue)}
+          hint={t('Vendas do PDV + outras receitas de natureza "receita".', 'POS sales + other revenue of a "revenue" nature.')}
+          sub={<Delta value={delta(cur.revenue, old.revenue)} />}
+        />
+        <KpiTile
+          tone="violet"
+          icon={<TrendingUp size={20} />}
+          label={t('Lucro bruto', 'Gross profit')}
+          value={money(cur.grossProfit)}
+          valueTone={cur.grossProfit < 0 ? 'bad' : undefined}
+          hint={t('Faturamento menos o custo das mercadorias vendidas (CMV).', 'Revenue minus cost of goods sold (COGS).')}
+          sub={<Delta value={delta(cur.grossProfit, old.grossProfit)} />}
+        />
+        <KpiTile
+          tone="warn"
+          icon={<Package size={20} />}
+          label={t('CMV', 'COGS')}
+          value={money(cur.cogs)}
+          hint={t('Custo das mercadorias vendidas, apurado pelas vendas — nunca inferido de pagamentos a fornecedores.', 'Cost of goods sold, derived from sales — never inferred from supplier payments.')}
+          sub={t('Custo das mercadorias vendidas', 'Cost of goods sold')}
+        />
+        <KpiTile tone="sky" icon={<Wallet size={20} />} label={t('Despesas operacionais', 'Operating expenses')} value={money(cur.opex)} sub={<Delta value={delta(cur.opex, old.opex)} />} />
         <KpiTile
           tone="violet"
           icon={<TrendingUp size={20} />}
           label={t('Lucro líquido', 'Net profit')}
           value={money(cur.profit)}
           valueTone={cur.profit < 0 ? 'bad' : undefined}
-          sub={<Delta value={delta(cur.profit, old.profit)} />}
+          hint={t('Lucro bruto menos despesas operacionais.', 'Gross profit minus operating expenses.')}
+          sub={
+            <>
+              <Delta value={delta(cur.profit, old.profit)} />
+              {margin !== null ? <span className="text-subtle">{t('margem', 'margin')} {num(margin)}%</span> : null}
+            </>
+          }
         />
-        <KpiTile tone="warn" icon={<Wallet size={20} />} label={t('Despesas operacionais', 'Operating expenses')} value={money(cur.opex)} sub={<Delta value={delta(cur.opex, old.opex)} />} />
         <KpiTile
-          tone="sky"
+          tone="warn"
           icon={<Boxes size={20} />}
           label={t('Valor em estoque', 'Inventory value')}
           value={money(stockValueForEnvironment(data, network))}

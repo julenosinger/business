@@ -253,6 +253,15 @@ export function Accounting() {
         </div>
       ) : null}
 
+      {k.cogsIncomplete ? (
+        <div className="rounded-xl border border-warn/40 bg-warn/10 p-4 text-sm" role="status">
+          <p className="flex items-center gap-2 text-warn">
+            <AlertTriangle size={16} />
+            {t('Resultado incompleto: há receita de mercadorias sem custo (CMV) informado.', 'Incomplete result: there is merchandise revenue without a reported cost (COGS).')}
+          </p>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="ok" icon={<TrendingUp size={20} />} label={t('Receita bruta', 'Gross revenue')} value={money(k.revenue)} sub={`${t('Vendas', 'Sales')} ${money(salesRev)}`} />
         <KpiTile
