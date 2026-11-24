@@ -30,6 +30,10 @@ export default {
         sans: ['"DM Sans"', 'sans-serif'],
         display: ['"Space Grotesk"', 'sans-serif'],
       },
+      screens: {
+        // Ultrawide: somente aqui os seis cards financeiros cabem lado a lado com folga.
+        '3xl': '1920px',
+      },
     },
   },
   plugins: [],

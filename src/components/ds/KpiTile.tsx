@@ -40,8 +40,8 @@ export function KpiTile({ tone, icon, label, value, unit, sub, hint, valueTone, 
       <span className={`flex size-10 shrink-0 items-center justify-center rounded-xl sm:size-11 ${ICON_TONE[tone]}`}>{icon}</span>
       <Box className={`${block}min-w-0 sm:flex-1`}>
         <Box className={`${block}text-xs font-semibold text-muted`}>{label}</Box>
-        <Box className={`display num mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-semibold leading-tight ${veryLong ? 'text-base sm:text-lg' : long ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'} ${valueTone === 'bad' ? 'text-bad' : ''}`}>
-          <span className="whitespace-nowrap">{value}</span>
+        <Box className={`display num mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 font-semibold leading-tight ${veryLong ? 'text-base sm:text-lg' : long ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'} ${valueTone === 'bad' ? 'text-bad' : ''}`}>
+          <span className="min-w-0 break-words">{value}</span>
           {unit ? <span className="text-sm font-medium text-muted">{unit}</span> : null}
         </Box>
         <Box className="mt-0.5 flex min-h-4 flex-wrap items-center gap-x-1.5 text-xs text-subtle">

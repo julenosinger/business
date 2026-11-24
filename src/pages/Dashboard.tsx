@@ -11,7 +11,7 @@ import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useGatewayBalances } from '@/lib/gateway'
 import { useNetwork } from '@/lib/network'
-import { accountTotalsForEnvironment, accountsForEnvironment, cashBalanceForEnvironment, delta, entriesForEnvironment, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, salesForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
+import { accountTotalsForEnvironment, accountsForEnvironment, delta, entriesForEnvironment, kpisForEnvironment, monthPeriod, monthlySeriesForEnvironment, productsForEnvironment, salesForEnvironment, stockValueForEnvironment, upcomingForEnvironment } from '@/lib/selectors'
 import { fmtDate, daysUntil, money, moneyCompact, num, pct, usdcFmt } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { daysSinceBackup, exportBackup } from '@/lib/backup'
@@ -27,7 +27,7 @@ function Delta({ value }: { value: number | null }) {
 }
 
 export function Dashboard() {
-  const { data, loadDemo, cancelAccount } = useStore()
+  const { data, loadSandboxDemo, cancelAccount } = useStore()
   const { go, requestPay } = useNav()
   const network = useNetwork()
   const [sinceBackup, setSinceBackup] = useState<number | null>(daysSinceBackup())
@@ -54,8 +54,8 @@ export function Dashboard() {
         title={t(`Olá, ${data.settings.owner}!`, `Hello, ${data.settings.owner}!`)}
         subtitle={t(`Visão geral de ${data.settings.company} em ${now.label}.`, `Overview of ${data.settings.company} for ${now.label}.`)}
         actions={
-          !hasData ? (
-            <Button variant="ghost" onClick={loadDemo}>
+          !hasData && network === 'testnet' ? (
+            <Button variant="ghost" onClick={loadSandboxDemo}>
               <Database size={16} /> {t('Carregar dados de demonstração', 'Load demo data')}
             </Button>
           ) : undefined
@@ -91,9 +91,11 @@ export function Dashboard() {
             action={
               <div className="mt-2 flex flex-wrap justify-center gap-2">
                 <Button onClick={() => go('stock')}>{t('Cadastrar produtos', 'Add products')}</Button>
-                <Button variant="ghost" onClick={loadDemo}>
-                  {t('Carregar demonstração', 'Load demo')}
-                </Button>
+                {network === 'testnet' ? (
+                  <Button variant="ghost" onClick={loadSandboxDemo}>
+                    {t('Carregar demonstração', 'Load demo')}
+                  </Button>
+                ) : null}
               </div>
             }
           />
@@ -112,7 +114,7 @@ export function Dashboard() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-3 3xl:grid-cols-6">
         <KpiTile
           tone="ok"
           icon={<Banknote size={20} />}
@@ -197,8 +199,8 @@ export function Dashboard() {
                 { label: 'out', value: cur.outflow, color: C.bad },
               ]}
             >
-              <span className="text-[11px] text-subtle">{t('Saldo de caixa', 'Cash balance')}</span>
-              <span className="display num text-sm font-semibold">{moneyCompact(cashBalanceForEnvironment(data, network))}</span>
+              <span className="text-[11px] text-subtle">{t('Resultado do mês', "Month's result")}</span>
+              <span className={`display num text-sm font-semibold ${net < 0 ? 'text-bad' : 'text-ok'}`}>{moneyCompact(net)}</span>
             </Donut>
             <dl className="min-w-[140px] flex-1 space-y-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">

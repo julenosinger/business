@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { moneyCompact } from '@/lib/format'
+import { money, moneyCompact } from '@/lib/format'
 import { t } from '@/lib/i18n'
 
 /** Theme-aware colors (resolve to the active theme's CSS variables). */
@@ -62,7 +62,9 @@ export function AreaChart({ labels, series, height = 220 }: { labels: string[]; 
             <path d={area} fill={`url(#${gid}-${si})`} />
             <polyline points={pts.join(' ')} fill="none" style={{ stroke: s.color }} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
             {s.values.map((v, i) => (
-              <circle key={i} cx={x(i)} cy={y(v)} r="3" style={{ fill: s.color }} />
+              <circle key={i} cx={x(i)} cy={y(v)} r="3" style={{ fill: s.color }}>
+                <title>{`${s.name}: ${money(v)}`}</title>
+              </circle>
             ))}
           </g>
         )
