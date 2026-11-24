@@ -1,6 +1,6 @@
 # Fase HOTFIX FIN-01: Financial Environment Isolation & Accounting Integrity
 
-**HEAD inicial:** `c6fb3da` (Fase UI 2.4.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `c6fb3da` (Fase UI 2.4.2) · **HEAD final:** `adca94f`
 
 Resultado: **454 testes passando** (eram 446), typecheck (app + servidor) limpo, lint limpo, build de produção OK. Nenhuma perda de dados, nenhuma alteração indevida de valores contábeis, nenhuma transação real executada.
 
