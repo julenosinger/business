@@ -1,6 +1,6 @@
 # HOTFIX FIN-02.0.1 — Purchase Independence & First Stock Entry
 
-**HEAD inicial:** `d07cf76` (FIN-02 hotfix) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `d07cf76` (FIN-02 hotfix) · **HEAD final:** `f996cbd`
 
 Resultado: **537 testes passando** (eram 532) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
