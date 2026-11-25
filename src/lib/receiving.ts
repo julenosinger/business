@@ -45,27 +45,21 @@ const isQty = (n: unknown): n is number => typeof n === 'number' && Number.isFin
 
 /**
  * Valor de aquisição alocado a `needed` unidades, consumindo as linhas da compra em ordem
- * (alocação determinística e auditável). Excedente além da compra usa o último custo conhecido.
+ * (alocação determinística e auditável). Devolve também `excess` (quantidade além da compra),
+ * que NÃO é valorizada automaticamente pelo último custo — exige tratamento explícito.
  */
-export function allocatePurchaseValue(queue: { cost: number; qty: number }[], needed: number, fallbackCost: number): number {
-  if (needed <= 0) return 0
+export function allocatePurchaseValue(queue: { cost: number; qty: number }[], needed: number): { value: number; excess: number } {
   let value = 0
   let remaining = needed
-  let lastCost = fallbackCost
-  while (remaining > 0) {
+  while (remaining > 0 && queue.length > 0) {
     const head = queue[0]
-    if (!head) {
-      value += remaining * lastCost
-      break
-    }
-    lastCost = head.cost
     const take = Math.min(head.qty, remaining)
     value += take * head.cost
     head.qty -= take
     remaining -= take
     if (head.qty <= 0) queue.shift()
   }
-  return value
+  return { value, excess: remaining }
 }
 
 /** Consome `needed` unidades da fila (FIFO) sem devolver valor — usado para os recebimentos anteriores. */
@@ -164,6 +158,7 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
   const posted: { productId: string; qty: number }[] = []
   let products = d.products
   const moves: StockMove[] = []
+  let hasExcess = false
   // Alocação determinística: fila RESTANTE após consumir os recebimentos anteriores (histórico imutável).
   const allocQueue = purchase ? remainingPurchaseAllocation(purchase, d.receipts) : new Map<string, { cost: number; qty: number }[]>()
   if (stockMode === 'posted') {
@@ -171,7 +166,15 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
       if (!l.productId || l.acceptedQty <= 0) continue
       const product = products.find((p) => p.id === l.productId)
       if (!product) return fail('unknown_product')
-      const value = allocatePurchaseValue(allocQueue.get(l.productId) ?? [], l.acceptedQty, product.cost)
+      // Produto na compra: aloca por linha (excedente não é valorizado automaticamente). Fora da compra: custo atual.
+      let value: number
+      if (allocQueue.has(l.productId)) {
+        const r = allocatePurchaseValue(allocQueue.get(l.productId) ?? [], l.acceptedQty)
+        value = r.value
+        if (r.excess > 0) hasExcess = true
+      } else {
+        value = l.acceptedQty * product.cost
+      }
       products = products.map((p) =>
         p.id === l.productId
           ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: weightedAverageFromValue(p.stock, p.cost, l.acceptedQty, value) }
@@ -195,7 +198,7 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
     receivedBy: clean(actor, 60),
     environment: cur.environment ?? env,
   }
-  const ev = event({ kind: 'receipt', at: now, description: receiptId, fields: [stockMode], actor: clean(actor, 60) })
+  const ev = event({ kind: 'receipt', at: now, description: receiptId, fields: [stockMode, ...(hasExcess ? ['excess'] : [])], actor: clean(actor, 60) })
   const next: AppData = {
     ...replace(d, { ...cur, receiptId, events: [...cur.events, ev], updatedAt: now }),
     products,

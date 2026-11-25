@@ -26,11 +26,26 @@ export type ProductErrorCode =
   | 'purchase_price_invalid'
   | 'non_finite'
   | 'barcode_invalid'
+  | 'barcode_check'
   | 'sku_duplicate'
 
 /** Código de barras GTIN/EAN/UPC válido (8, 12, 13 ou 14 dígitos). */
 export function barcodeIsValid(barcode: string): boolean {
   return /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(barcode.trim())
+}
+
+/** Valida também o DÍGITO VERIFICADOR (GS1), aplicável à Mainnet. */
+export function gtinCheckDigitValid(barcode: string): boolean {
+  const digits = barcode.trim()
+  if (!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(digits)) return false
+  const check = Number(digits[digits.length - 1])
+  const body = digits.slice(0, -1)
+  let sum = 0
+  for (let i = body.length - 1, weight = 3; i >= 0; i--) {
+    sum += Number(body[i]) * weight
+    weight = weight === 3 ? 1 : 3
+  }
+  return (10 - (sum % 10)) % 10 === check
 }
 
 export interface ProductValidation {
@@ -87,7 +102,10 @@ export function validateProduct(input: ProductValues, network: NetworkId, skuTak
   nonNeg(input.depth, 'non_finite')
   nonNeg(input.unitsPerPackage, 'non_finite')
   if (!isSandbox(network)) {
-    if (input.barcode && input.barcode.trim() && !barcodeIsValid(input.barcode)) errors.push('barcode_invalid')
+    if (input.barcode && input.barcode.trim()) {
+      if (!barcodeIsValid(input.barcode)) errors.push('barcode_invalid')
+      else if (!gtinCheckDigitValid(input.barcode)) errors.push('barcode_check')
+    }
     if (input.sku.trim() && skuTaken) errors.push('sku_duplicate')
   }
   return { ok: errors.length === 0, errors }

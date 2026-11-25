@@ -224,6 +224,8 @@ export interface Sale {
   canceledAt?: string
   /** Ambiente de origem da venda. Imutável após criação. */
   environment?: Environment
+  /** Intenção estável da operação (idempotência). Reenvios com a mesma chave não duplicam. */
+  intentId?: string
 }
 
 export interface Employee {
@@ -500,6 +502,8 @@ export interface PurchaseRef {
   receiptId?: string
   /** Quantidade aceita acumulada (soma dos recebimentos parciais). Ausente = 0/legado. */
   receivedQty?: number
+  /** Intenção estável da operação (idempotência). Reenvios com a mesma chave não duplicam. */
+  intentId?: string
   createdAt: string
   /** Ambiente de origem da compra. Imutável após criação. */
   environment?: Environment

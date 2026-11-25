@@ -344,6 +344,8 @@ function productErrorMessage(code: ProductErrorCode): string {
       return t('Valor inválido: use um número finito e não negativo.', 'Invalid value: use a finite, non-negative number.')
     case 'barcode_invalid':
       return t('Código de barras inválido: use GTIN/EAN/UPC com 8, 12, 13 ou 14 dígitos.', 'Invalid barcode: use a GTIN/EAN/UPC with 8, 12, 13 or 14 digits.')
+    case 'barcode_check':
+      return t('Código de barras com dígito verificador inválido.', 'Barcode with an invalid check digit.')
     case 'sku_duplicate':
       return t('Já existe um produto com este SKU neste ambiente.', 'A product with this SKU already exists in this environment.')
     default:
@@ -436,6 +438,8 @@ export interface SaleInput {
   method: PayMethod
   dueDate?: string
   items: { productId: string; qty: number; price: number }[]
+  /** Intenção estável da operação (idempotência). Reenvios com a mesma chave não duplicam. */
+  intentId?: string
 }
 
 export interface PurchaseInput {
@@ -445,6 +449,8 @@ export interface PurchaseInput {
   items: { productId: string; qty: number; cost: number }[]
   /** Registra a compra sem somar o estoque: ele só entra no recebimento de mercadorias (aba Logística). */
   awaitReceipt?: boolean
+  /** Intenção estável da operação (idempotência). Reenvios com a mesma chave não duplicam. */
+  intentId?: string
 }
 
 /** Resultado de uma operação de logística para a interface (sem o estado interno). */
@@ -1112,6 +1118,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Toda a validação e a mutação acontecem DENTRO do updater, contra o estado autoritativo
         // (dataRef.current via `apply`): nada de snapshot desatualizado. Execução atômica.
         set((d) => {
+          // Idempotência por intenção: a mesma chave não gera duas vendas.
+          if (input.intentId && d.sales.some((s) => s.intentId === input.intentId)) {
+            toast.error(t('Operação já registrada.', 'Operation already recorded.'))
+            return d
+          }
           // Consolida produtos repetidos: a quantidade TOTAL por produto é validada contra o estoque.
           const byProduct = new Map<string, number>()
           const priceOf = new Map<string, number>()
@@ -1183,7 +1194,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...d.entries,
             ]
           }
-          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: env }
+          const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: env, ...(input.intentId ? { intentId: input.intentId } : {}) }
           next.sales = [sale, ...d.sales]
           recorded = true
           return next
@@ -1195,6 +1206,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         let recorded = false
         // Validação e mutação DENTRO do updater (estado autoritativo) — nada de snapshot desatualizado.
         set((d) => {
+          // Idempotência por intenção: a mesma chave não gera duas compras.
+          if (input.intentId && d.purchases.some((p) => p.intentId === input.intentId)) {
+            toast.error(t('Operação já registrada.', 'Operation already recorded.'))
+            return d
+          }
           const supplier = d.contacts.find((c) => c.id === input.supplierId)
           if (supplier && supplier.environment && supplier.environment !== env) {
             toast.error(t('Fornecedor de outro ambiente nesta compra.', 'Supplier from another environment in this purchase.'))
@@ -1267,6 +1283,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 stockPosted: !awaiting,
                 createdAt: new Date().toISOString(),
                 environment: env,
+                ...(input.intentId ? { intentId: input.intentId } : {}),
               },
               ...d.purchases,
             ],

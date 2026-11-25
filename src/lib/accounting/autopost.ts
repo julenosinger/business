@@ -92,8 +92,8 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
     for (const s of next.sales) {
       const old: Sale | undefined = before.get(s.id)
       if (!old) {
-        // Vínculo determinístico: a entrada de caixa da venda carrega sourceKind/sourceId.
-        const cashEntryId = s.method !== 'prazo' ? claim((e) => e.sourceKind === 'sale' && e.sourceId === s.id) : undefined
+        // Vínculo determinístico (ID + ambiente): a entrada de caixa da venda carrega sourceKind/sourceId.
+        const cashEntryId = s.method !== 'prazo' ? claim((e) => e.sourceKind === 'sale' && e.sourceId === s.id && e.environment === s.environment) : undefined
         const res = saleEvent(ledger, { id: s.id, date: s.date, total: s.total, cogs: s.cogs, method: s.method, canceled: !!s.canceledAt }, currency)
         if (res.ok) post({ ...res.draft, environment: s.environment, payload: { ...res.draft.payload, saleId: s.id, cashEntryId: str(cashEntryId), accountId: str(s.accountId) } })
       } else if (!old.canceledAt && s.canceledAt) {
@@ -116,7 +116,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       const account = next.accounts.find((a) => a.source === 'purchase' && a.kind === 'payable' && a.sourceId === p.id && !linkedAcc.has(a.id))
       let cashEntryId: string | undefined
       if (!account) {
-        cashEntryId = claim((e) => e.sourceKind === 'purchase' && e.sourceId === p.id)
+        cashEntryId = claim((e) => e.sourceKind === 'purchase' && e.sourceId === p.id && e.environment === p.environment)
       }
       if (!account && !cashEntryId) continue // não dá para saber como foi paga: revisão manual
       if (account) linkedAcc.add(account.id)
@@ -193,8 +193,8 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       if (!amountMinor) return
       // Vínculo individual por liquidação (settlementId) quando disponível; legado cai no vínculo pela conta.
       const cashEntryId = settlementId
-        ? claim((e) => e.sourceKind === 'account' && e.sourceId === a.id && e.settlementId === settlementId)
-        : claim((e) => e.sourceKind === 'account' && e.sourceId === a.id)
+        ? claim((e) => e.sourceKind === 'account' && e.sourceId === a.id && e.settlementId === settlementId && e.environment === a.environment)
+        : claim((e) => e.sourceKind === 'account' && e.sourceId === a.id && e.environment === a.environment)
       const viaTreasury = !!treasuryTx
       const type: EventType = a.source === 'payroll' ? 'payroll.paid' : a.kind === 'payable' ? 'payable.settled' : 'receivable.settled'
       post(
