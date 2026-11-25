@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge, Button, Empty, Field, inputCls } from '@/components/ui'
+import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
 import { DateField } from '@/components/DateField'
 import { isValidIso } from '@/lib/dates'
 import { KpiTile } from '@/components/ds/KpiTile'
@@ -26,6 +26,82 @@ interface Line {
 
 let seq = 1
 
+interface QuickForm {
+  name: string
+  sku: string
+  category: string
+  unit: string
+  cost: string
+  price: string
+  minStock: string
+}
+
+const quickBlank: QuickForm = { name: '', sku: '', category: '', unit: 'un', cost: '', price: '', minStock: '0' }
+
+/** Cadastro rápido de produto a partir da aba Compras (quantidade inicial zero, sem movimentação). */
+function QuickAddProductModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string, cost: number) => void }) {
+  const { addProduct } = useStore()
+  const [form, setForm] = useState<QuickForm>(quickBlank)
+  const [loaded, setLoaded] = useState(false)
+  if (open && !loaded) {
+    setLoaded(true)
+    setForm(quickBlank)
+  } else if (!open && loaded) {
+    setLoaded(false)
+  }
+  const set = (k: keyof QuickForm) => (e: ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const cost = parseNum(form.cost)
+  const price = parseNum(form.price)
+  const valid = form.name.trim() !== '' && cost >= 0 && price >= 0 && !Number.isNaN(cost) && !Number.isNaN(price)
+  const save = () => {
+    const id = addProduct({
+      sku: form.sku.trim(),
+      name: form.name.trim(),
+      category: form.category.trim() || 'Geral',
+      unit: form.unit.trim() || 'un',
+      cost,
+      price,
+      minStock: Math.max(0, parseNum(form.minStock) || 0),
+      stock: 0,
+    })
+    onCreated(id, cost)
+    onClose()
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={t('Cadastrar novo produto', 'Add new product')} subtitle={t('O produto entra com quantidade zero; o estoque muda somente na compra.', 'The product starts with zero quantity; stock changes only on purchase.')}>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <Field label={t('Nome', 'Name')} required>
+            <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Ex.: Arroz 1kg', 'E.g. Rice 1kg')} />
+          </Field>
+        </div>
+        <Field label="SKU">
+          <input className={inputCls} value={form.sku} onChange={set('sku')} />
+        </Field>
+        <Field label={t('Categoria', 'Category')}>
+          <input className={inputCls} value={form.category} onChange={set('category')} />
+        </Field>
+        <Field label={t('Custo de aquisição', 'Purchase cost')}>
+          <input className={inputCls} inputMode="decimal" value={form.cost} onChange={set('cost')} placeholder="0,00" />
+        </Field>
+        <Field label={t('Preço de venda', 'Sale price')}>
+          <input className={inputCls} inputMode="decimal" value={form.price} onChange={set('price')} placeholder="0,00" />
+        </Field>
+        <Field label={t('Estoque mínimo', 'Minimum stock')}>
+          <input className={inputCls} inputMode="decimal" value={form.minStock} onChange={set('minStock')} />
+        </Field>
+        <Field label={t('Unidade', 'Unit')}>
+          <input className={inputCls} value={form.unit} onChange={set('unit')} />
+        </Field>
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>{t('Cancelar', 'Cancel')}</Button>
+        <Button disabled={!valid} onClick={save}>{t('Salvar', 'Save')}</Button>
+      </div>
+    </Modal>
+  )
+}
+
 export function Purchases() {
   const { data, recordPurchase } = useStore()
   const { profileIntent, clearProfileIntent } = useNav()
@@ -38,6 +114,8 @@ export function Purchases() {
   const [awaitReceipt, setAwaitReceipt] = useState(false)
   const [dueDate, setDueDate] = useState(addDays(today(), 15))
   const [lines, setLines] = useState<Line[]>([{ key: seq++, productId: '', qty: '', cost: '' }])
+  const [quickAdd, setQuickAdd] = useState(false)
+  const [quickAddLine, setQuickAddLine] = useState<number | null>(null)
   const [limit, setLimit] = useState(15)
   const [supplierFilter, setSupplierFilter] = useState<{ id: string; name: string } | null>(null)
 
@@ -94,6 +172,12 @@ export function Purchases() {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
   const statusBadge = (paid: boolean) => (paid ? <Badge tone="ok">{t('Paga', 'Paid')}</Badge> : <Badge tone="warn">{t('A pagar', 'Payable')}</Badge>)
+
+  // Após cadastrar um produto pelo formulário, seleciona-o na linha de origem e preenche o custo.
+  const handleQuickCreated = (id: string, cost: number) => {
+    if (quickAddLine != null) patch(quickAddLine, { productId: id, cost: String(cost) })
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
       <PageTop
@@ -119,11 +203,8 @@ export function Purchases() {
         <TCard className="p-4 sm:p-5">
           <PanelTitle icon={<ShoppingBag size={18} />} title={t('Nova compra', 'New purchase')} subtitle={t('Entrada de mercadorias no estoque', 'Goods received into inventory')} />
           <div className="mt-4">
-            {products.length === 0 ? (
-              <Empty icon={<ShoppingBag size={22} />} title={t('Cadastre produtos primeiro', 'Add products first')} text={t('Para comprar, os produtos precisam existir no estoque.', 'To buy, products must exist in inventory.')} />
-            ) : (
-              <div className="space-y-4">
-                <Field label={t('Fornecedor', 'Supplier')} hint={suppliers.length ? undefined : t('Cadastre fornecedores na aba Fornecedores.', 'Add suppliers in the Suppliers tab.')}>
+            <div className="space-y-4">
+              <Field label={t('Fornecedor', 'Supplier')} hint={suppliers.length ? undefined : t('Cadastre fornecedores na aba Fornecedores.', 'Add suppliers in the Suppliers tab.')}>
                   <select className={inputCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                     <option value="">{t('Fornecedor avulso', 'One-off supplier')}</option>
                     {suppliers.map((s) => (
@@ -144,6 +225,11 @@ export function Purchases() {
                           className={`${inputCls} col-span-3 sm:col-span-1`}
                           value={l.productId}
                           onChange={(e) => {
+                            if (e.target.value === '__new__') {
+                              setQuickAddLine(l.key)
+                              setQuickAdd(true)
+                              return
+                            }
                             const p = products.find((x) => x.id === e.target.value)
                             patch(l.key, { productId: e.target.value, cost: p && !l.cost ? String(p.cost) : l.cost })
                           }}
@@ -154,6 +240,7 @@ export function Purchases() {
                               {p.name}
                             </option>
                           ))}
+                          <option value="__new__">{t('+ Cadastrar novo produto', '+ Add new product')}</option>
                         </select>
                         <input aria-label={t('Quantidade', 'Quantity')} className={inputCls} inputMode="decimal" placeholder={t('Qtd', 'Qty')} value={l.qty} onChange={(e) => patch(l.key, { qty: e.target.value })} />
                         <input aria-label={t('Custo unitário', 'Unit cost')} className={inputCls} inputMode="decimal" placeholder={t('Custo', 'Cost')} value={l.cost} onChange={(e) => patch(l.key, { cost: e.target.value })} />
@@ -220,7 +307,6 @@ export function Purchases() {
                   {t('Registrar compra', 'Record purchase')}
                 </Button>
               </div>
-            )}
           </div>
         </TCard>
 
@@ -270,6 +356,8 @@ export function Purchases() {
       </div>
 
       <PurchaseReconciliationPanel />
+
+      <QuickAddProductModal open={quickAdd} onClose={() => setQuickAdd(false)} onCreated={handleQuickCreated} />
     </div>
   )
 }

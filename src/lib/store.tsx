@@ -417,7 +417,7 @@ export type LogisticsResult<T> = { ok: true; value: T } | { ok: false; errors: l
 
 export interface Store {
   data: AppData
-  addProduct: (p: Omit<Product, 'id'>) => void
+  addProduct: (p: Omit<Product, 'id'>) => string
   updateProduct: (id: string, patch: Partial<Product>) => void
   removeProduct: (id: string) => void
   moveStock: (productId: string, kind: 'in' | 'out' | 'adjust', qty: number, note: string) => void
@@ -670,13 +670,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return {
       data,
-      addProduct: (p) =>
+      addProduct: (p) => {
+        const id = uid()
         set((d) => {
-          const id = uid()
           const env = getNetwork()
           const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock'), environment: env }] : []
           return { ...d, products: [{ ...p, id, environment: env }, ...d.products], moves: [...first, ...d.moves] }
-        }),
+        })
+        return id
+      },
       updateProduct: (id, patch) => set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
       removeProduct: (id) => undoable((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) }), t('Produto removido.', 'Product removed.')),
       moveStock: (productId, kind, qty, note) =>
