@@ -212,7 +212,7 @@ describe('inbound receiving: the only place that adds stock', () => {
     expect(r.value.posted).toEqual([{ productId: 'p1', qty: 7 }])
     const p1 = r.data.products.find((p) => p.id === 'p1')!
     expect(p1.stock).toBe(17) // 10 + (9 - 2)
-    expect(p1.cost).toBe(12) // custo da compra
+    expect(p1.cost).toBeCloseTo((10 * 10 + 7 * 12) / 17, 10) // custo médio ponderado móvel (10@10 + 7@12)
     expect(r.data.moves[0]).toMatchObject({ productId: 'p1', kind: 'in', qty: 7 })
     expect(r.data.purchases.find((p) => p.id === 'PUR-0001')).toMatchObject({ stockPosted: true, receiptId: 'GR-0001' })
     expect(r.data.receipts[0]?.lines[0]).toMatchObject({ expectedQty: 10, receivedQty: 9, damagedQty: 2, acceptedQty: 7, discrepancy: 'damaged' })

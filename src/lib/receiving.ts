@@ -9,6 +9,7 @@
 // - Itens danificados não entram no estoque. A decisão sobre eles (devolver, descartar, reestocar) fica para a fase de devoluções.
 import type { AppData, GoodsReceipt, ReceiptLine, ReceiptStockMode, StockMove } from './types'
 import type { NetworkId } from './network'
+import { weightedAverageCost } from './costing'
 import { DEFAULT_ORG, clean, event, fail, replace, round2, uid, type Outcome } from './logistics'
 
 export interface ReceiptLineInput {
@@ -104,7 +105,11 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
       const product = products.find((p) => p.id === l.productId)
       if (!product) return fail('unknown_product')
       const cost = purchase?.items.find((i) => i.productId === l.productId)?.cost
-      products = products.map((p) => (p.id === l.productId ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: cost ?? p.cost } : p))
+      products = products.map((p) =>
+        p.id === l.productId
+          ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: cost !== undefined ? weightedAverageCost(p.stock, p.cost, l.acceptedQty, cost) : p.cost }
+          : p,
+      )
       moves.push({ id: uid(), productId: l.productId, kind: 'in', qty: l.acceptedQty, date: today, note: `${receiptId} · ${cur.id}`, environment: cur.environment ?? env })
       posted.push({ productId: l.productId, qty: l.acceptedQty })
     }

@@ -23,6 +23,7 @@ import {
   type CurrencyCode,
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
+import { weightedAverageCost } from './costing'
 import { accountOutstanding } from './selectors'
 import * as logistics from './logistics'
 import * as fulfillment from './fulfillment'
@@ -1118,7 +1119,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? d.products
               : d.products.map((p) => {
                   const it = input.items.find((i) => i.productId === p.id)
-                  return it ? { ...p, stock: p.stock + it.qty, cost: it.cost } : p
+                  // Custo médio ponderado móvel (nunca o último custo de aquisição).
+                  return it ? { ...p, stock: p.stock + it.qty, cost: weightedAverageCost(p.stock, p.cost, it.qty, it.cost) } : p
                 }),
             moves: awaiting
               ? d.moves
