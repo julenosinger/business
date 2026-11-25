@@ -1,6 +1,6 @@
 # FIN-04.0.1 — Final Integrity & Deterministic Accounting Linkage
 
-**HEAD inicial:** `0c60f4f` (FIN-04.0) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `0c60f4f` (FIN-04.0) · **HEAD final:** `dd07a3e`
 
 **Status final: APROVADO**
 
