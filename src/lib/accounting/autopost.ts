@@ -16,7 +16,6 @@
  * - Nunca lança exceção: em caso de erro devolve o estado novo sem alteração no razão.
  */
 import type { Account, AppData, Environment, PurchaseRef, Sale, TreasuryOp } from '../types'
-import { CAT_PURCHASE, CAT_SALES } from '../types'
 import { fromNumber } from './money'
 import { activeEntryForCashEntry, isReversed, postEvent, reverseEntry, type Ctx } from './engine'
 import { purchaseEvent, saleEvent, treasuryEvent } from './adapters'
@@ -93,7 +92,8 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
     for (const s of next.sales) {
       const old: Sale | undefined = before.get(s.id)
       if (!old) {
-        const cashEntryId = s.method !== 'prazo' ? claim((e) => e.type === 'in' && e.category === CAT_SALES && e.date === s.date && e.amount === s.total) : undefined
+        // Vínculo determinístico: a entrada de caixa da venda carrega sourceKind/sourceId.
+        const cashEntryId = s.method !== 'prazo' ? claim((e) => e.sourceKind === 'sale' && e.sourceId === s.id) : undefined
         const res = saleEvent(ledger, { id: s.id, date: s.date, total: s.total, cogs: s.cogs, method: s.method, canceled: !!s.canceledAt }, currency)
         if (res.ok) post({ ...res.draft, environment: s.environment, payload: { ...res.draft.payload, saleId: s.id, cashEntryId: str(cashEntryId), accountId: str(s.accountId) } })
       } else if (!old.canceledAt && s.canceledAt) {
@@ -108,20 +108,18 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
   // ----- Compras --------------------------------------------------------------------------------------------------
   if (flags.purchases) {
     const before = new Map(prev.purchases.map((p) => [p.id, p]))
-    const linkedCash = new Set(ledger.journal.map((j) => j.links.cashEntryId).filter((x): x is string => !!x))
     const linkedAcc = new Set(ledger.events.map((e) => e.payload.accountId).filter((x): x is string => typeof x === 'string'))
     for (const p of next.purchases) {
       const old: PurchaseRef | undefined = before.get(p.id)
       if (!p.stockPosted || (old && old.stockPosted)) continue
-      const account = next.accounts.find((a) => a.source === 'purchase' && a.kind === 'payable' && a.amount === p.total && a.contactName === p.supplierName && !linkedAcc.has(a.id))
+      // Vínculo determinístico: a obrigação da compra carrega sourceId = purchaseId.
+      const account = next.accounts.find((a) => a.source === 'purchase' && a.kind === 'payable' && a.sourceId === p.id && !linkedAcc.has(a.id))
       let cashEntryId: string | undefined
       if (!account) {
-        cashEntryId = claim((e) => e.type === 'out' && e.category === CAT_PURCHASE && e.date === p.date && e.amount === p.total)
-        if (!cashEntryId) cashEntryId = next.entries.find((e) => !linkedCash.has(e.id) && e.type === 'out' && e.category === CAT_PURCHASE && e.date === p.date && e.amount === p.total)?.id
+        cashEntryId = claim((e) => e.sourceKind === 'purchase' && e.sourceId === p.id)
       }
       if (!account && !cashEntryId) continue // não dá para saber como foi paga: revisão manual
       if (account) linkedAcc.add(account.id)
-      if (cashEntryId) linkedCash.add(cashEntryId)
       const res = purchaseEvent(ledger, { id: p.id, date: p.date, total: p.total, paidNow: !account, stockPosted: true }, currency)
       if (res.ok) post({ ...res.draft, environment: p.environment, payload: { ...res.draft.payload, purchaseId: p.id, cashEntryId: str(cashEntryId), accountId: str(account?.id) } })
     }
@@ -193,7 +191,7 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       if (!hasActiveObligation(ledger, a.id)) return
       const amountMinor = minor(amount)
       if (!amountMinor) return
-      const cashEntryId = claim((e) => e.type === (a.kind === 'payable' ? 'out' : 'in') && e.category === a.category && e.description === a.description && e.amount === amount)
+      const cashEntryId = claim((e) => e.sourceKind === 'account' && e.sourceId === a.id)
       const viaTreasury = !!treasuryTx
       const type: EventType = a.source === 'payroll' ? 'payroll.paid' : a.kind === 'payable' ? 'payable.settled' : 'receivable.settled'
       post(

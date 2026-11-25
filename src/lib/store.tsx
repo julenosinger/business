@@ -1171,6 +1171,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               category: CAT_SALES,
               status: 'open',
               source: 'sale',
+              sourceId: saleId,
               currency: d.settings.currency,
               environment: env,
             }
@@ -1285,6 +1286,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 category: CAT_PURCHASE,
                 status: 'open',
                 source: 'purchase',
+                sourceId: purchaseId,
                 currency: d.settings.currency,
                 environment: env,
               },

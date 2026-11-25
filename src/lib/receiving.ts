@@ -9,7 +9,7 @@
 // - Itens danificados não entram no estoque. A decisão sobre eles (devolver, descartar, reestocar) fica para a fase de devoluções.
 import type { AppData, GoodsReceipt, ReceiptLine, ReceiptStockMode, StockMove } from './types'
 import type { NetworkId } from './network'
-import { weightedAverageCost } from './costing'
+import { weightedAverageFromValue } from './costing'
 import { DEFAULT_ORG, clean, event, fail, replace, round2, uid, type Outcome } from './logistics'
 
 export interface ReceiptLineInput {
@@ -42,6 +42,31 @@ export function nextReceiptId(receipts: readonly GoodsReceipt[]): string {
 }
 
 const isQty = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+
+/**
+ * Valor de aquisição alocado a `needed` unidades, consumindo as linhas da compra em ordem
+ * (alocação determinística e auditável). Excedente além da compra usa o último custo conhecido.
+ */
+export function allocatePurchaseValue(queue: { cost: number; qty: number }[], needed: number, fallbackCost: number): number {
+  if (needed <= 0) return 0
+  let value = 0
+  let remaining = needed
+  let lastCost = fallbackCost
+  while (remaining > 0) {
+    const head = queue[0]
+    if (!head) {
+      value += remaining * lastCost
+      break
+    }
+    lastCost = head.cost
+    const take = Math.min(head.qty, remaining)
+    value += take * head.cost
+    head.qty -= take
+    remaining -= take
+    if (head.qty <= 0) queue.shift()
+  }
+  return value
+}
 
 export interface ReceiptResult {
   receiptId: string
@@ -99,15 +124,25 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
   const posted: { productId: string; qty: number }[] = []
   let products = d.products
   const moves: StockMove[] = []
+  // Alocação determinística do custo de aquisição: linhas da compra são consumidas em ordem por produto,
+  // permitindo o mesmo produto em múltiplas linhas com custos diferentes (sem depender de `items.find`).
+  const allocQueue = new Map<string, { cost: number; qty: number }[]>()
+  if (purchase) {
+    for (const pi of purchase.items) {
+      const arr = allocQueue.get(pi.productId) ?? []
+      arr.push({ cost: pi.cost, qty: pi.qty })
+      allocQueue.set(pi.productId, arr)
+    }
+  }
   if (stockMode === 'posted') {
     for (const l of lines) {
       if (!l.productId || l.acceptedQty <= 0) continue
       const product = products.find((p) => p.id === l.productId)
       if (!product) return fail('unknown_product')
-      const cost = purchase?.items.find((i) => i.productId === l.productId)?.cost
+      const value = allocatePurchaseValue(allocQueue.get(l.productId) ?? [], l.acceptedQty, product.cost)
       products = products.map((p) =>
         p.id === l.productId
-          ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: cost !== undefined ? weightedAverageCost(p.stock, p.cost, l.acceptedQty, cost) : p.cost }
+          ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: value > 0 ? weightedAverageFromValue(p.stock, p.cost, l.acceptedQty, value) : p.cost }
           : p,
       )
       moves.push({ id: uid(), productId: l.productId, kind: 'in', qty: l.acceptedQty, date: today, note: `${receiptId} · ${cur.id}`, environment: cur.environment ?? env })

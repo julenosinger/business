@@ -168,6 +168,8 @@ export interface Account {
   status: 'open' | 'paid'
   paidAt?: string
   source: AccountSource
+  /** Vínculo determinístico com a operação de origem (sale/purchase/payroll). Ausente em registros legados. */
+  sourceId?: string
   /** Moeda da obrigação. Ausente em registros legados (tratada como desconhecida, nunca adivinhada). */
   currency?: CurrencyCode
   /** Ambiente financeiro de ORIGEM da obrigação (mainnet/testnet/unassigned). */
