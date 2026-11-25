@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { toFunctionSelector, type Address } from 'viem'
-import { gatewayConfigFor, gatewayWalletForChain, encodeDepositFor, ARC_USDC, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } from '../src/lib/gateway-config'
+import { gatewayConfigFor, gatewayWalletForChain, encodeDepositFor, treasuryRecipientFor, ARC_USDC, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } from '../src/lib/gateway-config'
 
 describe('FIN-04.1B.2 — configuração do Circle Gateway por ambiente', () => {
   test('Mainnet resolve contratos oficiais de produção', () => {
@@ -42,5 +42,27 @@ describe('FIN-04.1B.2 — configuração do Circle Gateway por ambiente', () => 
     expect(data.startsWith('0x')).toBe(true)
     expect(data.length).toBe(2 + 8 + 64 * 3) // selector + 3 palavras de 32 bytes
     expect(data.slice(0, 10)).toBe(toFunctionSelector('depositFor(address,address,uint256)'))
+  })
+
+  test('encodeDepositFor rejeita endereço zero, valor zero, negativo e fora do uint256', () => {
+    const depositor = '0x000000000000000000000000000000000000dEaD' as Address
+    expect(() => encodeDepositFor('0x0000000000000000000000000000000000000000' as Address, depositor, 1n)).toThrow()
+    expect(() => encodeDepositFor(ARC_USDC as Address, '0x0000000000000000000000000000000000000000' as Address, 1n)).toThrow()
+    expect(() => encodeDepositFor(ARC_USDC as Address, depositor, 0n)).toThrow()
+    expect(() => encodeDepositFor(ARC_USDC as Address, depositor, -1n)).toThrow()
+    expect(() => encodeDepositFor(ARC_USDC as Address, depositor, 1n << 256n)).toThrow()
+  })
+
+  test('gatewayConfigFor rejeita ambiente desconhecido em runtime', () => {
+    expect(() => gatewayConfigFor('unknown' as never)).toThrow()
+  })
+
+  test('treasuryRecipientFor resolve por ambiente com fallback legado', () => {
+    const s = { treasuryRecipients: { mainnet: '0xMain', testnet: '0xTest' }, treasuryRecipient: '0xLegacy' }
+    expect(treasuryRecipientFor(s, 'mainnet')).toBe('0xMain')
+    expect(treasuryRecipientFor(s, 'testnet')).toBe('0xTest')
+    const legacy = { treasuryRecipients: {}, treasuryRecipient: '0xLegacy' }
+    expect(treasuryRecipientFor(legacy, 'mainnet')).toBe('0xLegacy')
+    expect(treasuryRecipientFor({}, 'mainnet')).toBe('')
   })
 })
