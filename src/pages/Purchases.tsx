@@ -29,6 +29,7 @@ let seq = 1
 interface QuickForm {
   name: string
   sku: string
+  brand: string
   category: string
   unit: string
   cost: string
@@ -36,7 +37,7 @@ interface QuickForm {
   minStock: string
 }
 
-const quickBlank: QuickForm = { name: '', sku: '', category: '', unit: 'un', cost: '', price: '', minStock: '0' }
+const quickBlank: QuickForm = { name: '', sku: '', brand: '', category: '', unit: 'un', cost: '', price: '', minStock: '0' }
 
 /** Cadastro rápido de produto a partir da aba Compras (quantidade inicial zero, sem movimentação). */
 function QuickAddProductModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string, cost: number) => void }) {
@@ -57,13 +58,16 @@ function QuickAddProductModal({ open, onClose, onCreated }: { open: boolean; onC
     const id = addProduct({
       sku: form.sku.trim(),
       name: form.name.trim(),
+      brand: form.brand.trim() || undefined,
       category: form.category.trim() || 'Geral',
       unit: form.unit.trim() || 'un',
       cost,
+      referenceCost: cost,
       price,
       minStock: Math.max(0, parseNum(form.minStock) || 0),
       stock: 0,
     })
+    if (!id) return
     onCreated(id, cost)
     onClose()
   }
@@ -78,10 +82,13 @@ function QuickAddProductModal({ open, onClose, onCreated }: { open: boolean; onC
         <Field label="SKU">
           <input className={inputCls} value={form.sku} onChange={set('sku')} />
         </Field>
+        <Field label={t('Marca', 'Brand')}>
+          <input className={inputCls} value={form.brand} onChange={set('brand')} />
+        </Field>
         <Field label={t('Categoria', 'Category')}>
           <input className={inputCls} value={form.category} onChange={set('category')} />
         </Field>
-        <Field label={t('Custo de aquisição', 'Purchase cost')}>
+        <Field label={t('Custo de referência', 'Reference cost')}>
           <input className={inputCls} inputMode="decimal" value={form.cost} onChange={set('cost')} placeholder="0,00" />
         </Field>
         <Field label={t('Preço de venda', 'Sale price')}>

@@ -8,106 +8,361 @@ import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { lowStockForEnvironment, productsForEnvironment, stockValueForEnvironment } from '@/lib/selectors'
+import { contactsForEnvironment, lowStockForEnvironment, productsForEnvironment, stockValueForEnvironment } from '@/lib/selectors'
 import { fmtDate, money, num, parseNum, pct } from '@/lib/format'
 import { t } from '@/lib/i18n'
+import { barcodeIsValid } from '@/lib/product'
+import { isSandbox } from '@/lib/environment-policy'
 import type { Product } from '@/lib/types'
 
+type Tab = 'general' | 'prices' | 'stock' | 'suppliers' | 'logistics' | 'fiscal'
+
 interface Form {
-  sku: string
   name: string
+  sku: string
+  brand: string
+  manufacturer: string
   category: string
+  subcategory: string
+  barcode: string
   unit: string
+  description: string
+  active: boolean
+  referenceCost: string
   cost: string
   price: string
+  wholesalePrice: string
   stock: string
   minStock: string
+  maxStock: string
+  reorderPoint: string
+  location: string
+  storageUnit: string
+  primarySupplierId: string
+  alternateSupplierIds: string[]
+  supplierSku: string
+  purchasePrice: string
+  leadTimeDays: string
+  minOrderQty: string
+  netWeight: string
+  grossWeight: string
+  height: string
+  width: string
+  depth: string
+  unitsPerPackage: string
+  storageConditions: string
+  originCountry: string
+  hsCode: string
+  ncm: string
+  taxRef: string
 }
 
-const blank: Form = { sku: '', name: '', category: '', unit: 'un', cost: '', price: '', stock: '0', minStock: '0' }
+const blank: Form = {
+  name: '', sku: '', brand: '', manufacturer: '', category: '', subcategory: '', barcode: '', unit: 'un', description: '', active: true,
+  referenceCost: '', cost: '', price: '', wholesalePrice: '', stock: '0', minStock: '0', maxStock: '', reorderPoint: '', location: '', storageUnit: '',
+  primarySupplierId: '', alternateSupplierIds: [], supplierSku: '', purchasePrice: '', leadTimeDays: '', minOrderQty: '',
+  netWeight: '', grossWeight: '', height: '', width: '', depth: '', unitsPerPackage: '', storageConditions: '',
+  originCountry: '', hsCode: '', ncm: '', taxRef: '',
+}
+
+const fromProduct = (p: Product): Form => ({
+  name: p.name, sku: p.sku, brand: p.brand ?? '', manufacturer: p.manufacturer ?? '', category: p.category, subcategory: p.subcategory ?? '',
+  barcode: p.barcode ?? '', unit: p.unit, description: p.description ?? '', active: p.active !== false,
+  referenceCost: p.referenceCost !== undefined ? String(p.referenceCost) : '', cost: String(p.cost), price: String(p.price),
+  wholesalePrice: p.wholesalePrice !== undefined ? String(p.wholesalePrice) : '', stock: String(p.stock), minStock: String(p.minStock),
+  maxStock: p.maxStock !== undefined ? String(p.maxStock) : '', reorderPoint: p.reorderPoint !== undefined ? String(p.reorderPoint) : '',
+  location: p.location ?? '', storageUnit: p.storageUnit ?? '', primarySupplierId: p.primarySupplierId ?? '',
+  alternateSupplierIds: p.alternateSupplierIds ?? [], supplierSku: p.supplierSku ?? '', purchasePrice: p.purchasePrice !== undefined ? String(p.purchasePrice) : '',
+  leadTimeDays: p.leadTimeDays !== undefined ? String(p.leadTimeDays) : '', minOrderQty: p.minOrderQty !== undefined ? String(p.minOrderQty) : '',
+  netWeight: p.netWeight !== undefined ? String(p.netWeight) : '', grossWeight: p.grossWeight !== undefined ? String(p.grossWeight) : '',
+  height: p.height !== undefined ? String(p.height) : '', width: p.width !== undefined ? String(p.width) : '', depth: p.depth !== undefined ? String(p.depth) : '',
+  unitsPerPackage: p.unitsPerPackage !== undefined ? String(p.unitsPerPackage) : '', storageConditions: p.storageConditions ?? '',
+  originCountry: p.originCountry ?? '', hsCode: p.hsCode ?? '', ncm: p.ncm ?? '', taxRef: p.taxRef ?? '',
+})
+
+const optNum = (s: string): number | undefined => {
+  const v = parseNum(s)
+  return s.trim() === '' || Number.isNaN(v) ? undefined : v
+}
 
 function ProductModal({ product, onClose }: { product: Product | 'new' | null; onClose: () => void }) {
-  const { addProduct, updateProduct } = useStore()
+  const { data, addProduct, updateProduct } = useStore()
+  const network = useNetwork()
   const editing = product && product !== 'new' ? product : null
+  const suppliers = contactsForEnvironment(data, network).filter((c) => c.kind === 'supplier')
+  const [tab, setTab] = useState<Tab>('general')
   const [form, setForm] = useState<Form>(blank)
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const key = product === null ? null : editing ? editing.id : 'new'
   if (key !== loadedFor) {
     setLoadedFor(key)
-    setForm(
-      editing
-        ? {
-            sku: editing.sku,
-            name: editing.name,
-            category: editing.category,
-            unit: editing.unit,
-            cost: String(editing.cost),
-            price: String(editing.price),
-            stock: String(editing.stock),
-            minStock: String(editing.minStock),
-          }
-        : blank,
-    )
+    setTab('general')
+    setForm(editing ? fromProduct(editing) : blank)
   }
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
-  const cost = parseNum(form.cost)
-  const price = parseNum(form.price)
-  const valid = form.name.trim() !== '' && cost >= 0 && price >= 0 && !Number.isNaN(cost) && !Number.isNaN(price)
+  const setSelect = (k: keyof Form) => (e: React.ChangeEvent<HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const toggleAlt = (id: string) =>
+    setForm((f) => ({ ...f, alternateSupplierIds: f.alternateSupplierIds.includes(id) ? f.alternateSupplierIds.filter((x) => x !== id) : [...f.alternateSupplierIds, id] }))
+
+  const cost = Math.max(0, parseNum(form.cost) || 0)
+  const price = Math.max(0, parseNum(form.price) || 0)
+  const valid = form.name.trim() !== ''
+  const barcodeInvalid = form.barcode.trim() !== '' && !barcodeIsValid(form.barcode)
+  const margin = price > 0 ? ((price - cost) / price) * 100 : 0
+  const markup = cost > 0 ? ((price - cost) / cost) * 100 : 0
 
   const save = () => {
     const base = {
       sku: form.sku.trim(),
       name: form.name.trim(),
+      brand: form.brand.trim() || undefined,
+      manufacturer: form.manufacturer.trim() || undefined,
       category: form.category.trim() || 'Geral',
+      subcategory: form.subcategory.trim() || undefined,
+      barcode: form.barcode.trim() || undefined,
       unit: form.unit.trim() || 'un',
-      cost,
+      description: form.description.trim() || undefined,
+      active: form.active,
       price,
+      referenceCost: optNum(form.referenceCost),
+      wholesalePrice: optNum(form.wholesalePrice),
       minStock: Math.max(0, parseNum(form.minStock) || 0),
+      maxStock: optNum(form.maxStock),
+      reorderPoint: optNum(form.reorderPoint),
+      location: form.location.trim() || undefined,
+      storageUnit: form.storageUnit.trim() || undefined,
+      primarySupplierId: form.primarySupplierId || undefined,
+      alternateSupplierIds: form.alternateSupplierIds.length ? form.alternateSupplierIds : undefined,
+      supplierSku: form.supplierSku.trim() || undefined,
+      purchasePrice: optNum(form.purchasePrice),
+      leadTimeDays: optNum(form.leadTimeDays),
+      minOrderQty: optNum(form.minOrderQty),
+      netWeight: optNum(form.netWeight),
+      grossWeight: optNum(form.grossWeight),
+      height: optNum(form.height),
+      width: optNum(form.width),
+      depth: optNum(form.depth),
+      unitsPerPackage: optNum(form.unitsPerPackage),
+      storageConditions: form.storageConditions.trim() || undefined,
+      originCountry: form.originCountry.trim() || undefined,
+      hsCode: form.hsCode.trim() || undefined,
+      ncm: form.ncm.trim() || undefined,
+      taxRef: form.taxRef.trim() || undefined,
     }
-    if (editing) updateProduct(editing.id, base)
-    else addProduct({ ...base, stock: Math.max(0, parseNum(form.stock) || 0) })
-    onClose()
+    if (editing) {
+      if (updateProduct(editing.id, base)) onClose()
+    } else {
+      const stock = Math.max(0, parseNum(form.stock) || 0)
+      if (addProduct({ ...base, cost, stock })) onClose()
+    }
   }
 
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'general', label: t('Geral', 'General') },
+    { id: 'prices', label: t('Preços', 'Prices') },
+    { id: 'stock', label: t('Estoque', 'Stock') },
+    { id: 'suppliers', label: t('Fornecedores', 'Suppliers') },
+    { id: 'logistics', label: t('Logística', 'Logistics') },
+    { id: 'fiscal', label: t('Fiscal', 'Fiscal') },
+  ]
+
   return (
-    <Modal open={product !== null} onClose={onClose} title={editing ? t('Editar produto', 'Edit product') : t('Novo produto', 'New product')}>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <Field label={t('Nome', 'Name')}>
-            <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Ex.: Café especial 500g', 'E.g. Specialty coffee 500g')} />
-          </Field>
-        </div>
-        <Field label="SKU">
-          <input className={inputCls} value={form.sku} onChange={set('sku')} />
-        </Field>
-        <Field label={t('Categoria', 'Category')}>
-          <input className={inputCls} value={form.category} onChange={set('category')} />
-        </Field>
-        <Field label={t('Custo', 'Cost')}>
-          <input className={inputCls} inputMode="decimal" value={form.cost} onChange={set('cost')} placeholder="0,00" />
-        </Field>
-        <Field label={t('Preço de venda', 'Sale price')}>
-          <input className={inputCls} inputMode="decimal" value={form.price} onChange={set('price')} placeholder="0,00" />
-        </Field>
-        {!editing ? (
-          <Field label={t('Estoque inicial', 'Opening stock')}>
-            <input className={inputCls} inputMode="decimal" value={form.stock} onChange={set('stock')} />
-          </Field>
-        ) : null}
-        <Field label={t('Estoque mínimo', 'Minimum stock')}>
-          <input className={inputCls} inputMode="decimal" value={form.minStock} onChange={set('minStock')} />
-        </Field>
-        <Field label={t('Unidade', 'Unit')}>
-          <input className={inputCls} value={form.unit} onChange={set('unit')} />
-        </Field>
+    <Modal
+      open={product !== null}
+      onClose={onClose}
+      icon={<Tag size={20} />}
+      title={editing ? t('Editar produto', 'Edit product') : t('Novo produto', 'New product')}
+      subtitle={editing ? editing.name : t('Cadastro completo de produto.', 'Full product registration.')}
+      size="form"
+    >
+      <div className="mb-4">
+        <PillTabs label={t('Abas do produto', 'Product tabs')} value={tab} onChange={(v) => setTab(v)} items={tabs} />
       </div>
-      <div className="mt-6 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>
-          {t('Cancelar', 'Cancel')}
-        </Button>
-        <Button disabled={!valid} onClick={save}>
-          {t('Salvar', 'Save')}
-        </Button>
+
+      {tab === 'general' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Field label={t('Nome', 'Name')} required>
+              <input className={inputCls} value={form.name} onChange={set('name')} placeholder={t('Ex.: Café especial 500g', 'E.g. Specialty coffee 500g')} />
+            </Field>
+          </div>
+          <Field label="SKU">
+            <input className={inputCls} value={form.sku} onChange={set('sku')} />
+          </Field>
+          <Field label={t('Código de barras', 'Barcode')} hint={barcodeInvalid ? t('GTIN/EAN/UPC inválido.', 'Invalid GTIN/EAN/UPC.') : undefined}>
+            <input className={inputCls} inputMode="numeric" value={form.barcode} onChange={set('barcode')} placeholder="789…" />
+          </Field>
+          <Field label={t('Marca', 'Brand')}>
+            <input className={inputCls} value={form.brand} onChange={set('brand')} />
+          </Field>
+          <Field label={t('Fabricante', 'Manufacturer')}>
+            <input className={inputCls} value={form.manufacturer} onChange={set('manufacturer')} />
+          </Field>
+          <Field label={t('Categoria', 'Category')}>
+            <input className={inputCls} value={form.category} onChange={set('category')} />
+          </Field>
+          <Field label={t('Subcategoria', 'Subcategory')}>
+            <input className={inputCls} value={form.subcategory} onChange={set('subcategory')} />
+          </Field>
+          <Field label={t('Unidade de medida', 'Unit of measure')}>
+            <input className={inputCls} value={form.unit} onChange={set('unit')} />
+          </Field>
+          <div className="col-span-2">
+            <Field label={t('Descrição', 'Description')}>
+              <textarea className={`${inputCls} min-h-20 resize-y py-2.5`} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+            </Field>
+          </div>
+          <label className="col-span-2 flex cursor-pointer items-center gap-2.5 rounded-xl border border-line px-3 py-2.5">
+            <input type="checkbox" className="size-4 accent-violet" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} />
+            <span className="text-sm">{t('Produto ativo', 'Active product')}</span>
+          </label>
+        </div>
+      ) : null}
+
+      {tab === 'prices' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Custo de referência comercial', 'Commercial reference cost')}>
+            <input className={inputCls} inputMode="decimal" value={form.referenceCost} onChange={set('referenceCost')} placeholder="0,00" />
+          </Field>
+          <Field label={t('Custo médio contábil', 'Average accounting cost')} hint={editing ? t('Atualizado pelas compras (custo médio ponderado).', 'Updated by purchases (weighted average cost).') : t('Custo inicial (atualizado pelas compras).', 'Initial cost (updated by purchases).')}>
+            <input className={inputCls} inputMode="decimal" value={form.cost} onChange={set('cost')} readOnly={!!editing} disabled={!!editing} placeholder="0,00" />
+          </Field>
+          <Field label={t('Preço de venda', 'Sale price')}>
+            <input className={inputCls} inputMode="decimal" value={form.price} onChange={set('price')} placeholder="0,00" />
+          </Field>
+          <Field label={t('Preço de atacado', 'Wholesale price')}>
+            <input className={inputCls} inputMode="decimal" value={form.wholesalePrice} onChange={set('wholesalePrice')} placeholder="0,00" />
+          </Field>
+          <div className="col-span-2 grid grid-cols-3 gap-2 rounded-xl bg-fill/5 p-3 text-sm">
+            <div>
+              <div className="text-xs text-subtle">{t('Lucro bruto unitário', 'Unit gross profit')}</div>
+              <div className="num font-semibold">{money(price - cost)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-subtle">{t('Margem bruta', 'Gross margin')}</div>
+              <div className={`num font-semibold ${margin < 0 ? 'text-bad' : 'text-ok'}`}>{margin.toFixed(1).replace('.', t(',', '.'))}%</div>
+            </div>
+            <div>
+              <div className="text-xs text-subtle">{t('Markup', 'Markup')}</div>
+              <div className={`num font-semibold ${markup < 0 ? 'text-bad' : 'text-ok'}`}>{markup.toFixed(1).replace('.', t(',', '.'))}%</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'stock' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Quantidade disponível', 'Available quantity')} hint={editing ? t('Alterações de quantidade usam movimentação/ajuste de estoque.', 'Quantity changes use stock movement/adjustment.') : t('Estoque inicial.', 'Opening stock.')}>
+            <input className={inputCls} inputMode="decimal" value={form.stock} onChange={set('stock')} readOnly={!!editing} disabled={!!editing} />
+          </Field>
+          <Field label={t('Estoque mínimo', 'Minimum stock')}>
+            <input className={inputCls} inputMode="decimal" value={form.minStock} onChange={set('minStock')} />
+          </Field>
+          <Field label={t('Estoque máximo', 'Maximum stock')}>
+            <input className={inputCls} inputMode="decimal" value={form.maxStock} onChange={set('maxStock')} />
+          </Field>
+          <Field label={t('Ponto de reposição', 'Reorder point')}>
+            <input className={inputCls} inputMode="decimal" value={form.reorderPoint} onChange={set('reorderPoint')} />
+          </Field>
+          <Field label={t('Localização no depósito', 'Warehouse location')}>
+            <input className={inputCls} value={form.location} onChange={set('location')} />
+          </Field>
+          <Field label={t('Unidade de armazenamento', 'Storage unit')}>
+            <input className={inputCls} value={form.storageUnit} onChange={set('storageUnit')} />
+          </Field>
+          <p className="col-span-2 text-xs text-subtle">{t('Método de valorização: custo médio ponderado móvel.', 'Valuation method: moving weighted average cost.')}</p>
+        </div>
+      ) : null}
+
+      {tab === 'suppliers' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Fornecedor principal', 'Primary supplier')}>
+            <select className={inputCls} value={form.primarySupplierId} onChange={setSelect('primarySupplierId')}>
+              <option value="">{t('Nenhum', 'None')}</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t('Código no fornecedor', 'Supplier SKU')}>
+            <input className={inputCls} value={form.supplierSku} onChange={set('supplierSku')} />
+          </Field>
+          <Field label={t('Preço de referência de aquisição', 'Reference purchase price')}>
+            <input className={inputCls} inputMode="decimal" value={form.purchasePrice} onChange={set('purchasePrice')} placeholder="0,00" />
+          </Field>
+          <Field label={t('Prazo estimado de entrega (dias)', 'Estimated lead time (days)')}>
+            <input className={inputCls} inputMode="numeric" value={form.leadTimeDays} onChange={set('leadTimeDays')} />
+          </Field>
+          <Field label={t('Quantidade mínima do pedido', 'Minimum order quantity')}>
+            <input className={inputCls} inputMode="decimal" value={form.minOrderQty} onChange={set('minOrderQty')} />
+          </Field>
+          {suppliers.length > 1 ? (
+            <div className="col-span-2">
+              <span className="label mb-1.5 block">{t('Fornecedores alternativos', 'Alternate suppliers')}</span>
+              <div className="flex flex-wrap gap-2">
+                {suppliers.filter((s) => s.id !== form.primarySupplierId).map((s) => (
+                  <label key={s.id} className="flex cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs">
+                    <input type="checkbox" className="size-3.5 accent-violet" checked={form.alternateSupplierIds.includes(s.id)} onChange={() => toggleAlt(s.id)} />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {tab === 'logistics' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Peso líquido', 'Net weight')}>
+            <input className={inputCls} inputMode="decimal" value={form.netWeight} onChange={set('netWeight')} />
+          </Field>
+          <Field label={t('Peso bruto', 'Gross weight')}>
+            <input className={inputCls} inputMode="decimal" value={form.grossWeight} onChange={set('grossWeight')} />
+          </Field>
+          <Field label={t('Altura', 'Height')}>
+            <input className={inputCls} inputMode="decimal" value={form.height} onChange={set('height')} />
+          </Field>
+          <Field label={t('Largura', 'Width')}>
+            <input className={inputCls} inputMode="decimal" value={form.width} onChange={set('width')} />
+          </Field>
+          <Field label={t('Profundidade', 'Depth')}>
+            <input className={inputCls} inputMode="decimal" value={form.depth} onChange={set('depth')} />
+          </Field>
+          <Field label={t('Unidades por embalagem', 'Units per package')}>
+            <input className={inputCls} inputMode="decimal" value={form.unitsPerPackage} onChange={set('unitsPerPackage')} />
+          </Field>
+          <div className="col-span-2">
+            <Field label={t('Condições de armazenamento', 'Storage conditions')}>
+              <input className={inputCls} value={form.storageConditions} onChange={set('storageConditions')} />
+            </Field>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'fiscal' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('País de origem', 'Country of origin')}>
+            <input className={inputCls} value={form.originCountry} onChange={set('originCountry')} />
+          </Field>
+          <Field label={t('HS Code', 'HS Code')}>
+            <input className={inputCls} value={form.hsCode} onChange={set('hsCode')} />
+          </Field>
+          <Field label={t('NCM', 'NCM')}>
+            <input className={inputCls} value={form.ncm} onChange={set('ncm')} />
+          </Field>
+          <Field label={t('Referência fiscal complementar', 'Additional tax reference')}>
+            <input className={inputCls} value={form.taxRef} onChange={set('taxRef')} />
+          </Field>
+          <p className="col-span-2 text-xs text-subtle">{t('Informações cadastrais; nenhum cálculo de imposto é feito nesta fase.', 'Registration information; no tax calculation is performed at this stage.')}</p>
+        </div>
+      ) : null}
+
+      {isSandbox(network) ? <p className="mt-3 text-xs text-subtle">{t('Sandbox: validações comerciais relaxadas para experimentação.', 'Sandbox: relaxed business validations for experimentation.')}</p> : null}
+
+      <div className="mt-6 flex justify-end gap-2 border-t border-line pt-4">
+        <Button variant="ghost" onClick={onClose}>{t('Cancelar', 'Cancel')}</Button>
+        <Button disabled={!valid} onClick={save}>{t('Salvar', 'Save')}</Button>
       </div>
     </Modal>
   )
@@ -213,18 +468,28 @@ export function Stock() {
   const products = productsForEnvironment(data, network)
   const [q, setQ] = useState('')
   const [view, setView] = useState<View>('all')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterBrand, setFilterBrand] = useState('')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all')
   const [limit, setLimit] = useState(30)
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const [move, setMove] = useState<{ product: Product; kind: 'in' | 'out' | 'adjust' } | null>(null)
   const [history, setHistory] = useState<Product | null>(null)
 
   const low = lowStockForEnvironment(data, network)
+  const brandSet = useMemo(() => [...new Set(products.map((p) => p.brand).filter((b): b is string => !!b))].sort(), [products])
+  const categorySet = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products])
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
     return products.filter(
-      (p) => (view === 'all' || p.stock <= p.minStock) && (!s || p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s) || p.category.toLowerCase().includes(s)),
+      (p) =>
+        (view === 'all' || p.stock <= p.minStock) &&
+        (!filterCategory || p.category === filterCategory) &&
+        (!filterBrand || p.brand === filterBrand) &&
+        (filterStatus === 'all' || (filterStatus === 'active' ? p.active !== false : p.active === false)) &&
+        (!s || p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s) || p.category.toLowerCase().includes(s) || (p.brand ?? '').toLowerCase().includes(s) || (p.barcode ?? '').toLowerCase().includes(s)),
     )
-  }, [products, q, view])
+  }, [products, q, view, filterCategory, filterBrand, filterStatus])
   const shown = list.slice(0, limit)
   const potential = products.reduce((s, p) => s + p.stock * p.price, 0)
   const cost = stockValueForEnvironment(data, network)
@@ -342,10 +607,29 @@ export function Stock() {
               setQ(e.target.value)
               setLimit(30)
             }}
-            placeholder={t('Buscar por nome, SKU ou categoria', 'Search by name, SKU or category')}
+            placeholder={t('Buscar por nome, marca, SKU ou código de barras', 'Search by name, brand, SKU or barcode')}
             aria-label={t('Buscar produtos', 'Search products')}
             className="min-h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-subtle"
           />
+        </div>
+        <div className="flex flex-wrap gap-2 border-b border-line px-4 py-2 sm:px-5">
+          {categorySet.length > 1 ? (
+            <select className={`${inputCls} !w-auto`} value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setLimit(30) }} aria-label={t('Filtrar por categoria', 'Filter by category')}>
+              <option value="">{t('Todas as categorias', 'All categories')}</option>
+              {categorySet.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          ) : null}
+          {brandSet.length > 1 ? (
+            <select className={`${inputCls} !w-auto`} value={filterBrand} onChange={(e) => { setFilterBrand(e.target.value); setLimit(30) }} aria-label={t('Filtrar por marca', 'Filter by brand')}>
+              <option value="">{t('Todas as marcas', 'All brands')}</option>
+              {brandSet.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          ) : null}
+          <select className={`${inputCls} !w-auto`} value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value as 'all' | 'active' | 'inactive'); setLimit(30) }} aria-label={t('Filtrar por status', 'Filter by status')}>
+            <option value="all">{t('Todos os status', 'All statuses')}</option>
+            <option value="active">{t('Ativos', 'Active')}</option>
+            <option value="inactive">{t('Inativos', 'Inactive')}</option>
+          </select>
         </div>
 
         {list.length === 0 ? (
@@ -381,10 +665,16 @@ export function Stock() {
                     const margin = marginOf(p)
                     const isLow = p.stock <= p.minStock
                     return (
-                      <tr key={p.id} className="transition hover:bg-fill/5">
+                      <tr key={p.id} className={`transition hover:bg-fill/5 ${p.active === false ? 'opacity-60' : ''}`}>
                         <td className={td}>
-                          <div className="font-semibold">{p.name}</div>
-                          <div className="mono text-xs text-subtle">{p.sku || t('sem SKU', 'no SKU')}</div>
+                          <div className="flex items-center gap-2 font-semibold">
+                            {p.name}
+                            {p.active === false ? <Badge tone="neutral">{t('Inativo', 'Inactive')}</Badge> : null}
+                          </div>
+                          <div className="mono text-xs text-subtle">
+                            {p.sku || t('sem SKU', 'no SKU')}
+                            {p.brand ? ` · ${p.brand}` : ''}
+                          </div>
                         </td>
                         <td className={td}>{p.category}</td>
                         <td className={`${td} num text-right`}>
@@ -407,12 +697,15 @@ export function Stock() {
                 const margin = marginOf(p)
                 const isLow = p.stock <= p.minStock
                 return (
-                  <li key={p.id} className="space-y-3 p-4">
+                  <li key={p.id} className={`space-y-3 p-4 ${p.active === false ? 'opacity-60' : ''}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{p.name}</p>
+                        <p className="truncate text-sm font-semibold">
+                          {p.name}
+                          {p.active === false ? <span className="ml-2 align-middle"><Badge tone="neutral">{t('Inativo', 'Inactive')}</Badge></span> : null}
+                        </p>
                         <p className="mono truncate text-xs text-subtle">
-                          {p.sku || t('sem SKU', 'no SKU')} · {p.category}
+                          {p.sku || t('sem SKU', 'no SKU')}{p.brand ? ` · ${p.brand}` : ''} · {p.category}
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
