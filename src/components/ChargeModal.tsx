@@ -41,6 +41,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   const rate = usdcRateOf(data.settings)
+  // Destinatário institucional da Treasury (nunca a carteira conectada do operador).
+  const treasuryRecipient = data.settings.treasuryRecipient?.trim() ?? ''
 
   const [selected, setSelected] = useState('')
   const [desc, setDesc] = useState('')
@@ -88,10 +90,10 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     baseAmount = null
   }
   const chain = chainByKey(chainKey)
-  const valid = Boolean(address && baseAmount && chain && fiatValue > 0 && (selected !== NEW || desc.trim()))
+  const valid = Boolean(address && treasuryRecipient && baseAmount && chain && fiatValue > 0 && (selected !== NEW || desc.trim()))
 
   const create = async () => {
-    if (!address || !baseAmount || !chain) return
+    if (!address || !treasuryRecipient || !baseAmount || !chain) return
     setError(null)
     setBusy(true)
     try {
@@ -123,7 +125,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         amount: exact.toString(),
         chainKey,
         chainId: chain.chainId,
-        recipient: address,
+        recipient: treasuryRecipient,
         fromBlock: head.toString(),
       })
       setCreatedId(id)
@@ -197,7 +199,11 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         </div>
       ) : !address ? (
         <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
-          {t('Conecte a carteira que vai receber o pagamento antes de criar a cobrança.', 'Connect the wallet that will receive the payment before creating the request.')}
+          {t('Conecte a carteira do operador antes de criar a cobrança.', 'Connect the operator wallet before creating the request.')}
+        </p>
+      ) : !treasuryRecipient ? (
+        <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
+          {t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos. A carteira conectada não é usada como destinatário.', 'Configure the institutional Treasury address (Settings) to receive payments. The connected wallet is not used as the recipient.')}
         </p>
       ) : (
         <div className="space-y-4">
@@ -246,7 +252,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
           </Field>
 
           <p className="text-xs text-subtle text-pretty">
-            {t('Recebe na carteira conectada:', 'Receives in the connected wallet:')} <span className="mono">{address}</span>
+            {t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')} <span className="mono">{treasuryRecipient}</span>
           </p>
           {error ? <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{error}</p> : null}
           <Button className="w-full" disabled={!valid || busy} onClick={() => void create()}>

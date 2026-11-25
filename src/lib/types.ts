@@ -322,6 +322,8 @@ export interface Settings {
   usdcRate: number | null
   /** Acima deste total em USDC, a tesouraria exige uma confirmação extra. */
   approvalLimit: number | null
+  /** Endereço institucional da Treasury que RECEBE os pagamentos comerciais (não a carteira do operador). */
+  treasuryRecipient?: string
 }
 
 // ---------- Logística (fase 1A: remessas e rastreamento manual) ----------

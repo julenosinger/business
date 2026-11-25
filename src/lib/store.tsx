@@ -25,7 +25,7 @@ import {
 import { addDays, round2, setCurrency, today } from './format'
 import { weightedAverageFromValue } from './costing'
 import { validateProduct, IMMUTABLE_PRODUCT_FIELDS, type ProductErrorCode } from './product'
-import { accountOutstanding } from './selectors'
+import { accountOutstanding, accountPaidAmount } from './selectors'
 import * as logistics from './logistics'
 import * as fulfillment from './fulfillment'
 import * as receiving from './receiving'
@@ -1076,7 +1076,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (!sale || sale.canceledAt) return d
           const date = today()
           const acc = sale.accountId ? d.accounts.find((a) => a.id === sale.accountId) : undefined
-          const needsRefund = sale.method !== 'prazo' || acc?.status === 'paid'
+          // Valor efetivamente recebido: venda a prazo/USDC → soma das liquidações; demais → caixa imediato (total).
+          const received = acc ? accountPaidAmount(acc) : sale.total
           const next: AppData = {
             ...d,
             sales: d.sales.map((s) => (s.id === id ? { ...s, canceledAt: date } : s)),
@@ -1097,7 +1098,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ],
           }
           if (acc && acc.status === 'open') next.accounts = d.accounts.filter((a) => a.id !== acc.id)
-          if (needsRefund) {
+          if (received > 0) {
             next.entries = [
               {
                 id: uid(),
@@ -1105,7 +1106,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 type: 'out',
                 category: CAT_SALES,
                 description: t(`Estorno da venda para ${sale.customerName}`, `Refund of sale to ${sale.customerName}`),
-                amount: sale.total,
+                amount: received,
                 environment: sale.environment ?? 'unassigned',
                 sourceKind: 'sale',
                 sourceId: sale.id,
@@ -1375,15 +1376,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...d,
             requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
           }
-          if (d.accounts.some((a) => a.id === r.accountId && a.status === 'open')) {
-            const acc = d.accounts.find((a) => a.id === r.accountId && a.status === 'open')
-            if (acc) next = settle(next, r.accountId, accountOutstanding(acc), explorerUrl)
-          } else {
-            next = {
-              ...next,
-              entries: [{ id: uid(), date: today(), type: 'in', category: 'Serviços prestados', description: r.description, amount: r.fiatAmount, environment: getNetwork() }, ...next.entries],
-            }
+          // Liquida exatamente o valor recebido (r.fiatAmount), nunca o saldo em aberto inteiro.
+          const acc = d.accounts.find((a) => a.id === r.accountId && a.status === 'open')
+          if (acc) {
+            next = settle(next, r.accountId, r.fiatAmount, explorerUrl)
           }
+          // Sem obrigação aberta: o recebimento fica preservado na cobrança (paga) e vai para a conciliação
+          // — nenhuma entrada de caixa genérica é fabricada.
           return next
         }),
       // Logística: as regras ficam em lib/logistics.ts. Aqui só se valida no estado atual e aplica no próximo.

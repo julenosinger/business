@@ -22,6 +22,18 @@ export function SettingsPage() {
   const s = data.settings
   const [rate, setRate] = useState(s.usdcRate ? String(s.usdcRate) : '')
   const [limitText, setLimitText] = useState(s.approvalLimit ? String(s.approvalLimit) : '')
+  const [recipient, setRecipient] = useState(s.treasuryRecipient ?? '')
+
+  const saveRecipient = () => {
+    const v = recipient.trim()
+    if (v === '') {
+      updateSettings({ treasuryRecipient: undefined })
+      toast.success(t('Destinatário institucional removido.', 'Institutional recipient removed.'))
+    } else {
+      updateSettings({ treasuryRecipient: v })
+      toast.success(t('Destinatário institucional salvo.', 'Institutional recipient saved.'))
+    }
+  }
 
   const saveLimit = () => {
     const v = parseNum(limitText)
@@ -203,6 +215,22 @@ export function SettingsPage() {
                 >
                   <div className="flex gap-2">
                     <input className={inputCls} inputMode="decimal" value={limitText} onChange={(e) => setLimitText(e.target.value)} placeholder="Ex.: 1000" />
+                    <Button type="submit">{t('Salvar', 'Save')}</Button>
+                  </div>
+                </Field>
+              </form>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveRecipient()
+                }}
+              >
+                <Field
+                  label={t('Endereço institucional da Treasury', 'Institutional Treasury address')}
+                  hint={t('Para onde os clientes pagam. Nunca use a carteira do operador como destinatário comercial.', 'Where customers pay. Never use the operator wallet as the commercial recipient.')}
+                >
+                  <div className="flex gap-2">
+                    <input className={inputCls} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x…" />
                     <Button type="submit">{t('Salvar', 'Save')}</Button>
                   </div>
                 </Field>
