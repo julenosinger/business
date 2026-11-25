@@ -13,6 +13,56 @@ export interface Product {
   minStock: number
   /** Ambiente de origem do produto. Imutável após criação (salvo migração auditada). */
   environment?: Environment
+  // --- Campos opcionais (fase INV-1.0) — retrocompatíveis ---
+  /** Marca. */
+  brand?: string
+  /** Fabricante. */
+  manufacturer?: string
+  /** Subcategoria. */
+  subcategory?: string
+  /** Código de barras GTIN/EAN/UPC. */
+  barcode?: string
+  /** Descrição. */
+  description?: string
+  /** Status. Ausente = ativo (comportamento legado). */
+  active?: boolean
+  /** Custo de referência comercial (≠ `cost`, que é o custo médio contábil). */
+  referenceCost?: number
+  /** Preço de atacado (opcional). */
+  wholesalePrice?: number
+  /** Estoque máximo (referência cadastral). */
+  maxStock?: number
+  /** Ponto de reposição. */
+  reorderPoint?: number
+  /** Localização no depósito. */
+  location?: string
+  /** Unidade de armazenamento (ex.: pallet, caixa). */
+  storageUnit?: string
+  /** Fornecedor principal (ID no mesmo ambiente). */
+  primarySupplierId?: string
+  /** Fornecedores alternativos (IDs no mesmo ambiente). */
+  alternateSupplierIds?: string[]
+  /** Código do produto no fornecedor. */
+  supplierSku?: string
+  /** Preço de referência de aquisição (≠ custo efetivo da compra). */
+  purchasePrice?: number
+  /** Prazo estimado de entrega (dias). */
+  leadTimeDays?: number
+  /** Quantidade mínima do pedido. */
+  minOrderQty?: number
+  // --- Logística (cadastral) ---
+  netWeight?: number
+  grossWeight?: number
+  height?: number
+  width?: number
+  depth?: number
+  unitsPerPackage?: number
+  storageConditions?: string
+  // --- Fiscal (cadastral, internacional) ---
+  originCountry?: string
+  hsCode?: string
+  ncm?: string
+  taxRef?: string
 }
 
 export interface StockMove {

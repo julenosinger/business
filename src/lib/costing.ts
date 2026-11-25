@@ -11,3 +11,13 @@ export function weightedAverageCost(prevStock: number, prevCost: number, addedQt
   if (total <= 0) return prevCost
   return (prevStock * prevCost + addedQty * addedCost) / total
 }
+
+/**
+ * Custo médio ponderado a partir do VALOR TOTAL adquirido (útil quando várias linhas do mesmo
+ * produto são consolidadas): `addedValue = Σ (qty × cost)` de todas as entradas.
+ */
+export function weightedAverageFromValue(prevStock: number, prevCost: number, addedQty: number, addedValue: number): number {
+  const total = prevStock + addedQty
+  if (total <= 0) return prevCost
+  return (prevStock * prevCost + addedValue) / total
+}
