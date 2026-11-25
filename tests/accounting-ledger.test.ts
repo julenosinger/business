@@ -36,7 +36,7 @@ const base = (on: Partial<AppData['ledger']['flags']['adapters']> = {}, currency
   return { ...d, settings: { ...d.settings, currency } }
 }
 const sale = (over: Partial<Sale> = {}): Sale => ({ id: 's1', date: TODAY, customerName: 'Ana', items: [], total: 100, cogs: 40, method: 'dinheiro', ...over })
-const cashIn = (over: Partial<Entry> = {}): Entry => ({ id: 'e1', date: TODAY, type: 'in', category: 'Vendas', description: 'Venda para Ana (dinheiro)', amount: 100, ...over })
+const cashIn = (over: Partial<Entry> = {}): Entry => ({ id: 'e1', date: TODAY, type: 'in', category: 'Vendas', description: 'Venda para Ana (dinheiro)', amount: 100, sourceKind: 'sale', sourceId: 's1', ...over })
 const acct = (over: Partial<Account> = {}): Account => ({ id: 'a1', kind: 'payable', description: 'Aluguel da loja', contactName: 'Imob', amount: 500, dueDate: '2026-12-01', category: 'Aluguel', status: 'open', source: 'manual', ...over })
 const bal = (d: AppData, code: string, cur: 'BRL' | 'USDC' = 'BRL'): bigint => trialBalance(d.ledger, { currency: cur })[0]?.rows.find((r) => r.code === code)?.balance ?? 0n
 
@@ -73,7 +73,7 @@ describe('lançamento automático por diferença de estado (atrás de flags)', (
     expect(bal(s1, '4000')).toBe(10000n)
     expect(s1.ledger.journal).toHaveLength(1) // a conta a receber (source sale) não gera evento próprio
     const paid: Account = { ...ar, status: 'paid', paidAt: TODAY }
-    const settleEntry = cashIn({ id: 'e2', description: ar.description })
+    const settleEntry = cashIn({ id: 'e2', description: ar.description, sourceKind: 'account', sourceId: 'ar1' })
     const s2 = autoPost(s1, { ...s1, accounts: [paid], entries: [settleEntry] }, opts)
     expect(s2.ledger.journal).toHaveLength(2)
     expect(bal(s2, '4000')).toBe(10000n) // não reconheceu de novo
@@ -110,17 +110,17 @@ describe('lançamento automático por diferença de estado (atrás de flags)', (
   test('compra à vista, a prazo e aguardando recebimento (só lança quando o estoque entra)', () => {
     const prev = base({ purchases: true })
     const paidP: PurchaseRef = { id: 'PUR-0001', date: TODAY, supplierName: 'Forn', items: [], total: 200, stockPosted: true, createdAt: NOW }
-    const paidEntry = cashIn({ id: 'p1', type: 'out', category: 'Compra de mercadorias', description: 'Compra', amount: 200 })
+    const paidEntry = cashIn({ id: 'p1', type: 'out', category: 'Compra de mercadorias', description: 'Compra', amount: 200, sourceKind: 'purchase', sourceId: 'PUR-0001' })
     const a = autoPost(prev, { ...prev, purchases: [paidP], entries: [paidEntry] }, opts)
     expect(bal(a, '1200')).toBe(20000n)
     expect(bal(a, '1000')).toBe(-20000n)
     const creditP: PurchaseRef = { ...paidP, id: 'PUR-0002', total: 300 }
-    const ap = acct({ id: 'ap9', source: 'purchase', category: 'Compra de mercadorias', description: 'Compra', contactName: 'Forn', amount: 300 })
+    const ap = acct({ id: 'ap9', source: 'purchase', sourceId: 'PUR-0002', category: 'Compra de mercadorias', description: 'Compra', contactName: 'Forn', amount: 300 })
     const b = autoPost(a, { ...a, purchases: [creditP, paidP], accounts: [ap] }, opts)
     expect(bal(b, '2000')).toBe(30000n)
     // aguardando recebimento: nada lançado
     const waiting: PurchaseRef = { ...paidP, id: 'PUR-0003', total: 80, stockPosted: false }
-    const apW = acct({ id: 'ap10', source: 'purchase', category: 'Compra de mercadorias', description: 'Compra', contactName: 'Forn', amount: 80 })
+    const apW = acct({ id: 'ap10', source: 'purchase', sourceId: 'PUR-0003', category: 'Compra de mercadorias', description: 'Compra', contactName: 'Forn', amount: 80 })
     const c = autoPost(b, { ...b, purchases: [waiting, creditP, paidP], accounts: [apW, ap] }, opts)
     expect(c.ledger.journal).toHaveLength(b.ledger.journal.length)
     // recebimento: o estoque entra e a compra é lançada
@@ -211,9 +211,9 @@ describe('tesouraria: pendente até revisão humana', () => {
     const open = acct({ id: 'gw1', amount: 120.5 })
     const created = autoPost(prev, { ...prev, accounts: [open] }, opts)
     const paid: Account = { ...open, status: 'paid', paidAt: TODAY, treasuryTx: 'https://x.test/tx/0xdef' }
-    const settled = autoPost({ ...created, accounts: [open] }, { ...created, accounts: [paid], entries: [cashIn({ id: 'g1', type: 'out', category: 'Aluguel', description: open.description, amount: 120.5 })] }, opts)
+    const settled = autoPost({ ...created, accounts: [open] }, { ...created, accounts: [paid], entries: [cashIn({ id: 'g1', type: 'out', category: 'Aluguel', description: open.description, amount: 120.5, sourceKind: 'account', sourceId: 'gw1' })] }, opts)
     expect(bal(settled, '2000', 'USDC')).toBe(120_500_000n) // obrigação ainda aberta no razão
-    const all = buildReconciliation({ ...settled, accounts: [paid], entries: [cashIn({ id: 'g1', type: 'out', category: 'Aluguel', description: open.description, amount: 120.5 })] })
+    const all = buildReconciliation({ ...settled, accounts: [paid], entries: [cashIn({ id: 'g1', type: 'out', category: 'Aluguel', description: open.description, amount: 120.5, sourceKind: 'account', sourceId: 'gw1' })] })
     expect(all.find((i) => i.key === 'cashbook:g1')).toMatchObject({ state: 'pending', reason: 'pending_confirmation' }) // caixa aguarda o evento pendente
     const item = all.find((i) => i.state === 'pending' && i.key.startsWith('event:'))!
     expect(item.reason).toBe('pending_confirmation')
