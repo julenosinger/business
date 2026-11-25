@@ -7,6 +7,7 @@ import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
+import { treasuryRecipientFor } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
@@ -41,8 +42,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   const rate = usdcRateOf(data.settings)
-  // Destinatário institucional da Treasury (nunca a carteira conectada do operador).
-  const treasuryRecipient = data.settings.treasuryRecipient?.trim() ?? ''
+  // Destinatário institucional da Treasury (nunca a carteira conectada do operador), resolvido por ambiente.
+  const treasuryRecipient = treasuryRecipientFor(data.settings, network)
 
   const [selected, setSelected] = useState('')
   const [desc, setDesc] = useState('')
@@ -102,7 +103,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
       const head = await client.getBlockNumber()
       const taken = new Set(
         data.requests
-          .filter((r) => r.status === 'open' && r.chainKey === chainKey && r.recipient.toLowerCase() === address.toLowerCase())
+          .filter((r) => r.status === 'open' && r.chainKey === chainKey && r.recipient.toLowerCase() === treasuryRecipient.toLowerCase())
           .map((r) => Amount.parse(r.amount, USDC_DECIMALS).raw),
       )
       const exact = withTag(baseAmount, taken)

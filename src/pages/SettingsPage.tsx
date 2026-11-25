@@ -7,6 +7,7 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
+import { gatewayConfigFor } from '@/lib/gateway-config'
 import { isSandbox } from '@/lib/environment-policy'
 import { EnvironmentReview } from '@/components/EnvironmentReview'
 import { num, parseNum } from '@/lib/format'
@@ -22,17 +23,21 @@ export function SettingsPage() {
   const s = data.settings
   const [rate, setRate] = useState(s.usdcRate ? String(s.usdcRate) : '')
   const [limitText, setLimitText] = useState(s.approvalLimit ? String(s.approvalLimit) : '')
-  const [recipient, setRecipient] = useState(s.treasuryRecipient ?? '')
+  const [recipient, setRecipient] = useState(s.treasuryRecipients?.[network] ?? s.treasuryRecipient ?? '')
+  const gw = (() => {
+    try {
+      return gatewayConfigFor(network)
+    } catch {
+      return null
+    }
+  })()
 
   const saveRecipient = () => {
     const v = recipient.trim()
-    if (v === '') {
-      updateSettings({ treasuryRecipient: undefined })
-      toast.success(t('Destinatário institucional removido.', 'Institutional recipient removed.'))
-    } else {
-      updateSettings({ treasuryRecipient: v })
-      toast.success(t('Destinatário institucional salvo.', 'Institutional recipient saved.'))
-    }
+    updateSettings({
+      treasuryRecipients: { ...(s.treasuryRecipients ?? {}), [network]: v },
+    })
+    toast.success(t('Beneficiário institucional salvo para este ambiente.', 'Institutional recipient saved for this environment.'))
   }
 
   const saveLimit = () => {
@@ -226,8 +231,8 @@ export function SettingsPage() {
                 }}
               >
                 <Field
-                  label={t('Endereço institucional da Treasury', 'Institutional Treasury address')}
-                  hint={t('Para onde os clientes pagam. Nunca use a carteira do operador como destinatário comercial.', 'Where customers pay. Never use the operator wallet as the commercial recipient.')}
+                  label={t('Beneficiário institucional (este ambiente)', 'Institutional recipient (this environment)')}
+                  hint={t('Para onde os clientes pagam, neste ambiente. Nunca use a carteira do operador nem o GatewayWallet.', 'Where customers pay in this environment. Never use the operator wallet or the GatewayWallet.')}
                 >
                   <div className="flex gap-2">
                     <input className={inputCls} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x…" />
@@ -236,6 +241,29 @@ export function SettingsPage() {
                 </Field>
               </form>
             </div>
+          </TCard>
+
+          <TCard className="p-4 sm:p-5">
+            <PanelTitle icon={<ShieldCheck size={18} />} title={t('Circle Gateway — Configuração institucional', 'Circle Gateway — Institutional configuration')} subtitle={t('Contratos oficiais do ambiente ativo (somente leitura)', 'Official contracts of the active environment (read-only)')} />
+            {gw ? (
+              <dl className="mt-4 space-y-2 text-sm">
+                {[
+                  { k: t('Ambiente', 'Environment'), v: network },
+                  { k: t('Chain ID', 'Chain ID'), v: String(gw.chainId) },
+                  { k: t('GatewayWallet', 'GatewayWallet'), v: gw.gatewayWallet },
+                  { k: t('GatewayMinter', 'GatewayMinter'), v: gw.gatewayMinter },
+                  { k: t('USDC ERC-20', 'USDC ERC-20'), v: gw.usdcToken },
+                  { k: t('API Circle', 'Circle API'), v: gw.apiBase },
+                ].map((row) => (
+                  <div key={row.k} className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2">
+                    <dt className="text-muted">{row.k}</dt>
+                    <dd className="mono break-all text-right text-xs">{row.v}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="mt-4 text-sm text-bad">{t('Contratos do ambiente indisponíveis.', 'Contracts for this environment are unavailable.')}</p>
+            )}
           </TCard>
         </div>
 

@@ -324,6 +324,8 @@ export interface Settings {
   approvalLimit: number | null
   /** Endereço institucional da Treasury que RECEBE os pagamentos comerciais (não a carteira do operador). */
   treasuryRecipient?: string
+  /** Beneficiário institucional POR AMBIENTE (substitui progressivamente o campo global). */
+  treasuryRecipients?: Partial<Record<NetworkId, string>>
 }
 
 // ---------- Logística (fase 1A: remessas e rastreamento manual) ----------

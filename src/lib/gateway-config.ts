@@ -7,9 +7,14 @@
  *
  * Os endereços vêm do registro on-chain (`onchain-facts`), gerado pelo Arc Studio — nada é inventado.
  */
-import { encodeFunctionData, type Address } from 'viem'
+import { encodeFunctionData, isAddress, type Address } from 'viem'
 import { getChain, getProtocolContractByName, getUsdc } from '@/onchain-facts'
 import type { NetworkId } from './network'
+
+const ZERO = '0x0000000000000000000000000000000000000000'
+
+/** Endereço válido e não-zero. */
+const isValidNonZeroAddress = (x: string | undefined): x is Address => !!x && isAddress(x) && x.toLowerCase() !== ZERO
 
 export const ARC_MAINNET_CHAIN_ID = 5042
 export const ARC_TESTNET_CHAIN_ID = 5042002
@@ -29,21 +34,25 @@ export interface GatewayConfig {
   explorerBase: string
 }
 
-/** Resolve a configuração oficial do Gateway para o ambiente indicado (rejeita rede desconhecida). */
+/** Resolve a configuração oficial do Gateway para o ambiente indicado. Rejeita ambiente desconhecido (runtime). */
 export function gatewayConfigFor(network: NetworkId): GatewayConfig {
+  if (network !== 'mainnet' && network !== 'testnet') throw new Error(`Unknown environment: ${String(network)}`)
   const chainId = network === 'mainnet' ? ARC_MAINNET_CHAIN_ID : ARC_TESTNET_CHAIN_ID
   const chain = getChain(chainId)
   if (!chain) throw new Error(`Unknown Arc chain id ${chainId}`)
   const gatewayWallet = getProtocolContractByName('GatewayWallet', network === 'mainnet' ? 'mainnet' : 'testnet')?.address
   const gatewayMinter = getProtocolContractByName('GatewayMinter', network === 'mainnet' ? 'mainnet' : 'testnet')?.address
-  if (!gatewayWallet || !gatewayMinter) throw new Error(`Gateway contracts not registered for ${network}`)
+  if (!isValidNonZeroAddress(gatewayWallet)) throw new Error(`GatewayWallet not registered for ${network}`)
+  if (!isValidNonZeroAddress(gatewayMinter)) throw new Error(`GatewayMinter not registered for ${network}`)
+  const usdc = getUsdc(chainId)?.address ?? ARC_USDC
+  if (!isValidNonZeroAddress(usdc)) throw new Error(`USDC token not registered for ${network}`)
   return {
     network,
     chainId,
     cctpDomain: chain.cctpDomain ?? 0,
-    gatewayWallet: gatewayWallet as Address,
-    gatewayMinter: gatewayMinter as Address,
-    usdcToken: (getUsdc(chainId)?.address ?? ARC_USDC) as Address,
+    gatewayWallet: gatewayWallet,
+    gatewayMinter: gatewayMinter,
+    usdcToken: usdc,
     apiBase: network === 'mainnet' ? 'https://gateway-api.circle.com/v1/' : 'https://gateway-api-testnet.circle.com/v1/',
     explorerBase: chain.explorerBase,
   }
@@ -56,6 +65,17 @@ export function gatewayConfigFor(network: NetworkId): GatewayConfig {
 export function gatewayWalletForChain(chainId: number, network: NetworkId): Address | null {
   const cfg = gatewayConfigFor(network)
   return chainId === cfg.chainId ? cfg.gatewayWallet : null
+}
+
+/**
+ * Beneficiário institucional para o ambiente, preferindo a configuração segregada por ambiente
+ * e caindo no campo legado global apenas como compatibilidade. Nunca retorna a carteira do operador.
+ */
+export function treasuryRecipientFor(
+  settings: { treasuryRecipients?: Partial<Record<NetworkId, string>>; treasuryRecipient?: string },
+  network: NetworkId,
+): string {
+  return (settings.treasuryRecipients?.[network] ?? settings.treasuryRecipient ?? '').trim()
 }
 
 /** Assinatura oficial de `depositFor(address token, address depositor, uint256 value)` no GatewayWallet. */
@@ -75,5 +95,8 @@ export const DEPOSIT_FOR_ABI = [
 
 /** Codifica a chamada `depositFor(token, depositor, value)` para envio ao GatewayWallet. */
 export function encodeDepositFor(token: Address, depositor: Address, value: bigint): `0x${string}` {
+  if (!isValidNonZeroAddress(token)) throw new Error('depositFor: invalid token address')
+  if (!isValidNonZeroAddress(depositor)) throw new Error('depositFor: invalid depositor address')
+  if (typeof value !== 'bigint' || value <= 0n || value > (1n << 256n) - 1n) throw new Error('depositFor: invalid value')
   return encodeFunctionData({ abi: DEPOSIT_FOR_ABI, functionName: 'depositFor', args: [token, depositor, value] })
 }
