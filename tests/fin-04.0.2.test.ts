@@ -109,8 +109,8 @@ describe('FIN-04.1A — idempotência persistente por intenção', () => {
   test('mesma intenção de venda não gera duas vendas', () => {
     const { store, unmount } = renderStore()
     const pid = commit(store, (s) => s.addProduct(prod({ stock: 100 })))
-    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] }))).toBe(true)
-    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] }))).toBe(false)
+    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] })).ok).toBe(true)
+    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] })).ok).toBe(false)
     expect(store().data.sales).toHaveLength(1)
     unmount()
   })

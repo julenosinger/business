@@ -89,7 +89,7 @@ describe('integridade da execução de vendas (FIN-03.2.1)', () => {
         ],
       }),
     )
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     expect(store().data.sales).toHaveLength(0)
     expect(store().data.products.find((p) => p.id === pid)?.stock).toBe(100) // estoque intacto
     expect(JSON.stringify(store().data)).toBe(before) // nenhuma mutação parcial
@@ -108,7 +108,7 @@ describe('integridade da execução de vendas (FIN-03.2.1)', () => {
         ],
       }),
     )
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     const sale = store().data.sales[0]!
     expect(sale.items).toHaveLength(1) // consolidado
     expect(sale.items[0]!.qty).toBe(90)
@@ -122,7 +122,7 @@ describe('integridade da execução de vendas (FIN-03.2.1)', () => {
     const { store, unmount } = renderStore()
     const pid = addProduct(store, { stock: 1000000 })
     const ok = commit(store, (s) => s.recordSale({ method: 'pix', items: [{ productId: pid, qty: 2000000, price: 20 }] }))
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     expect(store().data.sales).toHaveLength(0)
     expect(store().data.products.find((p) => p.id === pid)?.stock).toBe(1000000)
     unmount()
