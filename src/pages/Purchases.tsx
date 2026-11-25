@@ -148,13 +148,15 @@ export function Purchases() {
   const total = parsed.reduce((s, l) => s + (l.q > 0 && l.c >= 0 ? l.q * l.c : 0), 0)
 
   const submit = () => {
-    recordPurchase({
+    // Só limpa o formulário e confirma após sucesso efetivo (sem falso sucesso).
+    const ok = recordPurchase({
       supplierId: supplierId || undefined,
       paidNow,
       dueDate,
       awaitReceipt,
       items: parsed.map((l) => ({ productId: l.productId, qty: l.q, cost: l.c })),
     })
+    if (!ok) return
     toast.success(paidNow ? t('Compra registrada e paga.', 'Purchase recorded and paid.') : t('Compra registrada como conta a pagar.', 'Purchase recorded as a payable.'))
     setLines([{ key: seq++, productId: '', qty: '', cost: '' }])
     setSupplierId('')

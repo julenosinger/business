@@ -499,7 +499,7 @@ export interface Store {
   cancelAccounts: (ids: string[]) => BatchCancelResult
   recordSale: (input: SaleInput) => boolean
   cancelSale: (id: string) => void
-  recordPurchase: (input: PurchaseInput) => void
+  recordPurchase: (input: PurchaseInput) => boolean
   addEmployee: (e: Omit<Employee, 'id'>) => SaveResult
   updateEmployee: (id: string, patch: Partial<Employee>) => SaveResult
   removeEmployee: (id: string) => void
@@ -707,17 +707,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       data,
       addProduct: (p) => {
         const env = getNetwork()
-        const skuTaken = dataRef.current.products.some((x) => p.sku.trim() !== '' && x.sku === p.sku.trim() && x.environment === env)
-        const { ok, errors } = validateProduct(p, env, skuTaken)
+        const sku = p.sku.trim()
+        const skuTaken = dataRef.current.products.some((x) => sku !== '' && x.sku === sku && x.environment === env)
+        const { ok, errors } = validateProduct({ ...p, sku }, env, skuTaken)
         if (!ok) {
           toast.error(productErrorMessage(errors[0]))
           return ''
+        }
+        // Vínculos de fornecedor devem ser fornecedores do MESMO ambiente.
+        const linked = [p.primarySupplierId, ...(p.alternateSupplierIds ?? [])].filter((x): x is string => !!x)
+        for (const sid of linked) {
+          const c = dataRef.current.contacts.find((x) => x.id === sid)
+          if (!c || c.kind !== 'supplier' || (c.environment && c.environment !== env)) {
+            toast.error(t('Fornecedor inválido ou de outro ambiente.', 'Invalid supplier or from another environment.'))
+            return ''
+          }
         }
         const id = uid()
         set((d) => {
           const envNow = getNetwork()
           const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock'), environment: envNow }] : []
-          return { ...d, products: [{ ...p, id, environment: envNow }, ...d.products], moves: [...first, ...d.moves] }
+          return { ...d, products: [{ ...p, sku, id, environment: envNow }, ...d.products], moves: [...first, ...d.moves] }
         })
         return id
       },
@@ -750,6 +760,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!ok) {
           toast.error(productErrorMessage(errors[0]))
           return false
+        }
+        // Vínculos de fornecedor devem ser fornecedores do MESMO ambiente.
+        const linked = [merged.primarySupplierId, ...(merged.alternateSupplierIds ?? [])].filter((x): x is string => !!x)
+        for (const sid of linked) {
+          const c = dataRef.current.contacts.find((x) => x.id === sid)
+          if (!c || c.kind !== 'supplier' || (c.environment && c.environment !== cur.environment)) {
+            toast.error(t('Fornecedor inválido ou de outro ambiente.', 'Invalid supplier or from another environment.'))
+            return false
+          }
         }
         set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch, environment: cur.environment } : p)) }))
         return true
@@ -1171,18 +1190,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       recordPurchase: (input) => {
         const env = getNetwork()
-        const foreignProduct = input.items.some((it) => {
-          const p = data.products.find((x) => x.id === it.productId)
-          return !!p && !!p.environment && p.environment !== env
-        })
-        const supplier = data.contacts.find((c) => c.id === input.supplierId)
-        const foreignSupplier = !!supplier && !!supplier.environment && supplier.environment !== env
-        if (foreignProduct || foreignSupplier) {
-          toast.error(t('Há produtos ou fornecedor de outro ambiente nesta compra.', 'This purchase has products or a supplier from another environment.'))
-          return
-        }
+        let recorded = false
+        // Validação e mutação DENTRO do updater (estado autoritativo) — nada de snapshot desatualizado.
         set((d) => {
           const supplier = d.contacts.find((c) => c.id === input.supplierId)
+          if (supplier && supplier.environment && supplier.environment !== env) {
+            toast.error(t('Fornecedor de outro ambiente nesta compra.', 'Supplier from another environment in this purchase.'))
+            return d
+          }
+          if (input.items.length === 0) {
+            toast.error(t('A compra não possui itens.', 'The purchase has no items.'))
+            return d
+          }
+          // Valida cada linha — nunca converte valor inválido em zero.
+          for (const it of input.items) {
+            const p = d.products.find((x) => x.id === it.productId)
+            if (!p) {
+              toast.error(t('Produto não encontrado neste ambiente. Revise a compra.', 'Product not found in this environment. Review the purchase.'))
+              return d
+            }
+            if (p.environment && p.environment !== env) {
+              toast.error(t('Produto de outro ambiente nesta compra.', 'Product from another environment in this purchase.'))
+              return d
+            }
+            if (!Number.isFinite(it.qty) || it.qty <= 0) {
+              toast.error(t('Quantidade inválida na compra.', 'Invalid quantity in the purchase.'))
+              return d
+            }
+            if (!Number.isFinite(it.cost) || it.cost < 0) {
+              toast.error(t('Custo inválido na compra.', 'Invalid cost in the purchase.'))
+              return d
+            }
+          }
           const date = today()
           const total = round2(input.items.reduce((s, i) => s + i.qty * i.cost, 0))
           const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
@@ -1209,7 +1248,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             moves: awaiting
               ? d.moves
               : [
-                  ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`), environment: getNetwork() })),
+                  ...input.items.map((i) => ({ id: uid(), productId: i.productId, kind: 'in' as const, qty: i.qty, date, note: t(`Compra de ${name}`, `Purchase from ${name}`), environment: env })),
                   ...d.moves,
                 ],
             purchases: [
@@ -1225,14 +1264,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 total,
                 stockPosted: !awaiting,
                 createdAt: new Date().toISOString(),
-                environment: getNetwork(),
+                environment: env,
               },
               ...d.purchases,
             ],
           }
           const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
           if (input.paidNow) {
-            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: getNetwork(), sourceKind: 'purchase', sourceId: purchaseId }, ...d.entries]
+            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: env, sourceKind: 'purchase', sourceId: purchaseId }, ...d.entries]
           } else {
             next.accounts = [
               {
@@ -1247,13 +1286,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 status: 'open',
                 source: 'purchase',
                 currency: d.settings.currency,
-                environment: getNetwork(),
+                environment: env,
               },
               ...d.accounts,
             ]
           }
+          recorded = true
           return next
         })
+        return recorded
       },
       addEmployee: (e) => {
         const env = getNetwork()
