@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2 — Native Circle Gateway Merchant Checkout
 
-**HEAD inicial:** `c5b387a` (FIN-04.1B.2.1A) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `c5b387a` (FIN-04.1B.2.1A) · **HEAD final:** `2cab3b1`
 
 Resultado: **591 testes passando** (eram 588) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
