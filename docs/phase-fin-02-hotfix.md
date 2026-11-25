@@ -1,6 +1,6 @@
 # HOTFIX FIN-02 — Accounting Engine, Inventory Valuation & Financial Reconciliation
 
-**HEAD inicial:** `266429b` (FIN-03.2.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `266429b` (FIN-03.2.1) · **HEAD final:** `0a12eb0`
 
 Resultado: **532 testes passando** (eram 519) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
