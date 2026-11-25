@@ -7,7 +7,7 @@ import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
-import { treasuryRecipientFor } from '@/lib/gateway-config'
+import { treasuryRecipientFor, validateBeneficiary } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
@@ -26,13 +26,13 @@ interface Props {
 const NEW = '__new__'
 
 /** Soma uma marca única (100 a 999 unidades mínimas) para identificar o pagamento sem memo. */
-function withTag(base: Amount, taken: Set<bigint>): Amount {
+function withTag(base: Amount, taken: Set<bigint>): Amount | null {
   for (let i = 0; i < 50; i++) {
     const tag = BigInt(100 + Math.floor(Math.random() * 900))
     const candidate = Amount.fromRaw(base.raw + tag, USDC_DECIMALS)
     if (!taken.has(candidate.raw)) return candidate
   }
-  return Amount.fromRaw(base.raw + 100n, USDC_DECIMALS)
+  return null // sem marca disponível: erro explícito (sem fallback de marca fixa)
 }
 
 export function ChargeModal({ open, accountId, onClose }: Props) {
@@ -56,13 +56,15 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const created = createdId ? (data.requests.find((r) => r.id === createdId) ?? null) : null
   const [seed, setSeed] = useState<string | null>(null)
 
-  const seedKey = open ? `open:${accountId ?? ''}` : null
+  // A chave de inicialização inclui o AMBIENTE: ao trocar de rede, o modal reinicializa o estado.
+  const seedKey = open ? `open:${network}:${accountId ?? ''}` : null
   if (seedKey !== seed) {
     setSeed(seedKey)
     setCreatedId(null)
     setError(null)
     setDesc('')
     setFiat('')
+    setChainKey(arcGatewayKeyOf(network))
     const acc = accountId ? receivables.find((a) => a.id === accountId) : undefined
     setSelected(acc ? acc.id : receivables[0] ? receivables[0].id : NEW)
     setUsdcText(acc && rate ? toUsdc(acc.amount, rate).toFixed(2) : '')
@@ -91,10 +93,11 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     baseAmount = null
   }
   const chain = chainByKey(chainKey)
-  const valid = Boolean(address && treasuryRecipient && baseAmount && chain && fiatValue > 0 && (selected !== NEW || desc.trim()))
+  const beneficiary = treasuryRecipient ? validateBeneficiary(treasuryRecipient, network) : null
+  const valid = Boolean(address && beneficiary?.ok && baseAmount && chain && fiatValue > 0 && (selected !== NEW || desc.trim()))
 
   const create = async () => {
-    if (!address || !treasuryRecipient || !baseAmount || !chain) return
+    if (!address || !beneficiary?.ok || !baseAmount || !chain) return
     setError(null)
     setBusy(true)
     try {
@@ -107,6 +110,10 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
           .map((r) => Amount.parse(r.amount, USDC_DECIMALS).raw),
       )
       const exact = withTag(baseAmount, taken)
+      if (!exact) {
+        setError(t('Não há valor marcado disponível para esta cobrança. Tente novamente.', 'No tagged amount available for this charge. Please try again.'))
+        return
+      }
       const description = selected === NEW ? desc.trim() : (account?.description ?? '')
       const accId =
         selected === NEW

@@ -68,14 +68,35 @@ export function gatewayWalletForChain(chainId: number, network: NetworkId): Addr
 }
 
 /**
- * Beneficiário institucional para o ambiente, preferindo a configuração segregada por ambiente
- * e caindo no campo legado global apenas como compatibilidade. Nunca retorna a carteira do operador.
+ * Beneficiário institucional para o ambiente — resolução EXCLUSIVAMENTE por ambiente.
+ * Sem configuração, retorna string vazia (não configurado). Nunca usa fallback legado, carteira
+ * conectada ou outro ambiente.
  */
 export function treasuryRecipientFor(
-  settings: { treasuryRecipients?: Partial<Record<NetworkId, string>>; treasuryRecipient?: string },
+  settings: { treasuryRecipients?: Partial<Record<NetworkId, string>> },
   network: NetworkId,
 ): string {
-  return (settings.treasuryRecipients?.[network] ?? settings.treasuryRecipient ?? '').trim()
+  if (network !== 'mainnet' && network !== 'testnet') throw new Error(`Unknown environment: ${String(network)}`)
+  return (settings.treasuryRecipients?.[network] ?? '').trim()
+}
+
+export type BeneficiaryReason = 'invalid_address' | 'gateway_contract' | 'unknown_environment'
+export type BeneficiaryValidation = { ok: true; value: Address } | { ok: false; reason: BeneficiaryReason }
+
+/**
+ * Valida um endereço candidato a beneficiário institucional: deve ser válido, não-zero e NÃO ser
+ * um contrato de infraestrutura do Gateway (GatewayWallet/GatewayMinter/USDC). Não comprova controle
+ * institucional — apenas formato e compatibilidade funcional.
+ */
+export function validateBeneficiary(address: string, network: NetworkId): BeneficiaryValidation {
+  if (network !== 'mainnet' && network !== 'testnet') return { ok: false, reason: 'unknown_environment' }
+  if (!isValidNonZeroAddress(address)) return { ok: false, reason: 'invalid_address' }
+  const cfg = gatewayConfigFor(network)
+  const lower = address.toLowerCase()
+  if (lower === cfg.gatewayWallet.toLowerCase() || lower === cfg.gatewayMinter.toLowerCase() || lower === cfg.usdcToken.toLowerCase()) {
+    return { ok: false, reason: 'gateway_contract' }
+  }
+  return { ok: true, value: address }
 }
 
 /** Assinatura oficial de `depositFor(address token, address depositor, uint256 value)` no GatewayWallet. */

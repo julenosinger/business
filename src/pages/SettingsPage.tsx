@@ -7,7 +7,7 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { gatewayConfigFor } from '@/lib/gateway-config'
+import { gatewayConfigFor, validateBeneficiary } from '@/lib/gateway-config'
 import { isSandbox } from '@/lib/environment-policy'
 import { EnvironmentReview } from '@/components/EnvironmentReview'
 import { num, parseNum } from '@/lib/format'
@@ -23,7 +23,13 @@ export function SettingsPage() {
   const s = data.settings
   const [rate, setRate] = useState(s.usdcRate ? String(s.usdcRate) : '')
   const [limitText, setLimitText] = useState(s.approvalLimit ? String(s.approvalLimit) : '')
-  const [recipient, setRecipient] = useState(s.treasuryRecipients?.[network] ?? s.treasuryRecipient ?? '')
+  // Beneficiário por ambiente: o estado sincroniza com a rede ativa (nunca transfere entre ambientes).
+  const [recipient, setRecipient] = useState('')
+  const [recipientEnv, setRecipientEnv] = useState<typeof network | null>(null)
+  if (recipientEnv !== network) {
+    setRecipientEnv(network)
+    setRecipient(s.treasuryRecipients?.[network] ?? '')
+  }
   const gw = (() => {
     try {
       return gatewayConfigFor(network)
@@ -34,6 +40,13 @@ export function SettingsPage() {
 
   const saveRecipient = () => {
     const v = recipient.trim()
+    if (v !== '') {
+      const check = validateBeneficiary(v, network)
+      if (!check.ok) {
+        toast.error(t('Beneficiário inválido: use um endereço válido que não seja um contrato do Gateway.', 'Invalid recipient: use a valid address that is not a Gateway contract.'))
+        return
+      }
+    }
     updateSettings({
       treasuryRecipients: { ...(s.treasuryRecipients ?? {}), [network]: v },
     })
