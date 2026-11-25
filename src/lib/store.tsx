@@ -13,6 +13,8 @@ import {
   type Environment,
   type PayMethod,
   type PaymentRequest,
+  type PaymentIntent,
+  type PaymentIntentState,
   type Product,
   type Sale,
   type SaleItem,
@@ -98,6 +100,7 @@ export function emptyData(): AppData {
   returns: [],
   purchases: [],
   receipts: [],
+  paymentIntents: [],
     ledger: emptyLedger(),
     settings: emptySettings(),
   }
@@ -445,6 +448,23 @@ export interface SaleInput {
 /** Resultado explícito do registro de venda. `accountId` presente quando a venda gera uma obrigação a receber. */
 export type SaleResult = { ok: true; saleId: string; accountId?: string } | { ok: false }
 
+export interface PaymentIntentInput {
+  saleId?: string
+  accountId: string
+  customerId?: string
+  amount: number
+  usdcMinor: string
+  chainId: number
+  beneficiary: string
+  gatewayWallet: string
+  token: string
+  currency: CurrencyCode
+  rate?: number
+  expiresAt: string
+}
+
+export type IntentResult = { ok: true; intentId: string } | { ok: false; reason: 'not_found' | 'invalid_amount' | 'already_exists' }
+
 export interface PurchaseInput {
   supplierId?: string
   paidNow: boolean
@@ -553,6 +573,10 @@ export interface Store {
   clearSandboxData: () => void
   /** Adiciona dados demonstrativos SOMENTE à Testnet, preservando Mainnet, unassigned, configurações e o Ledger. */
   loadSandboxDemo: () => SandboxResult
+  /** Cria uma intenção de pagamento USDC (checkout nativo), vinculada a uma obrigação e, opcionalmente, a uma venda. */
+  createPaymentIntent: (input: PaymentIntentInput) => IntentResult
+  /** Transiciona o estado de uma intenção (campos financeiros imutáveis). */
+  transitionPaymentIntent: (intentId: string, state: PaymentIntentState, note?: string) => boolean
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -1424,6 +1448,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ok: true, value: out.value }
       },
       addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString(), status: op.status ?? 'pending' }, ...d.treasuryOps] })),
+      createPaymentIntent: (input) => {
+        const env = getNetwork()
+        const account = dataRef.current.accounts.find((a) => a.id === input.accountId)
+        if (!account) return { ok: false, reason: 'not_found' }
+        if (account.environment && account.environment !== 'unassigned' && account.environment !== env) return { ok: false, reason: 'not_found' }
+        // Obrigação deve estar em aberto (pendente) e vinculada à venda quando saleId é informado.
+        if (account.status !== 'open') return { ok: false, reason: 'not_found' }
+        if (input.saleId) {
+          const sale = dataRef.current.sales.find((s) => s.id === input.saleId)
+          if (!sale || sale.accountId !== input.accountId) return { ok: false, reason: 'not_found' }
+        }
+        if (!Number.isFinite(input.amount) || input.amount <= 0) return { ok: false, reason: 'invalid_amount' }
+        if (!/^\d+$/.test(input.usdcMinor) || BigInt(input.usdcMinor) <= 0n) return { ok: false, reason: 'invalid_amount' }
+        const intentId = uid()
+        const now = new Date().toISOString()
+        const intent: PaymentIntent = {
+          intentId,
+          organizationId: dataRef.current.ledger.orgId,
+          ...(input.saleId ? { saleId: input.saleId } : {}),
+          accountId: input.accountId,
+          ...(input.customerId ? { customerId: input.customerId } : {}),
+          environment: env,
+          chainId: input.chainId,
+          token: input.token,
+          gatewayWallet: input.gatewayWallet,
+          beneficiary: input.beneficiary,
+          amount: input.amount,
+          currency: input.currency,
+          usdcMinor: input.usdcMinor,
+          ...(input.rate !== undefined ? { rate: input.rate } : {}),
+          createdAt: now,
+          expiresAt: input.expiresAt,
+          state: 'CREATED',
+          txHashes: [],
+          history: [{ at: now, state: 'CREATED' }],
+        }
+        set((d) => ({ ...d, paymentIntents: [intent, ...d.paymentIntents] }))
+        return { ok: true, intentId }
+      },
+      transitionPaymentIntent: (intentId, state, note) => {
+        const cur = dataRef.current.paymentIntents.find((i) => i.intentId === intentId)
+        if (!cur) return false
+        set((d) => ({
+          ...d,
+          paymentIntents: d.paymentIntents.map((i) =>
+            i.intentId === intentId ? { ...i, state, history: [...i.history, { at: new Date().toISOString(), state, ...(note ? { note } : {}) }] } : i,
+          ),
+        }))
+        return true
+      },
       verifyAndSettle: async (opId) => {
         const op = data.treasuryOps.find((o) => o.id === opId)
         if (!op) return { ok: false, error: 'not_found' as const }
@@ -1496,6 +1570,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               carriers: keep(d.carriers),
               returns: keep(d.returns),
               receipts: keep(d.receipts),
+              paymentIntents: keep(d.paymentIntents),
               accounts: keep(d.accounts),
               entries: keep(d.entries),
             }

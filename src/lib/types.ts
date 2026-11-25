@@ -313,6 +313,58 @@ export interface PaymentRequest {
   paidAt?: string
 }
 
+// ---------- Payment Intent (FIN-04.1B.2.2: checkout nativo Circle Gateway) ----------
+
+export type PaymentIntentState =
+  | 'CREATED'
+  | 'AWAITING_WALLET'
+  | 'AWAITING_APPROVAL'
+  | 'APPROVAL_PENDING'
+  | 'READY_TO_DEPOSIT'
+  | 'AWAITING_SIGNATURE'
+  | 'SUBMITTED'
+  | 'ONCHAIN_CONFIRMED'
+  | 'AWAITING_GATEWAY_VERIFICATION'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'CANCELED'
+  | 'REQUIRES_REVIEW'
+
+export interface PaymentIntentEvent {
+  at: string
+  state: PaymentIntentState
+  note?: string
+}
+
+/**
+ * Intenção comercial de pagamento USDC via Gateway. Os campos financeiros fundamentais são IMUTÁVEIS
+ * após a emissão (valor, beneficiário, ambiente, token); alterações exigem uma nova intenção.
+ */
+export interface PaymentIntent {
+  intentId: string
+  organizationId: string
+  saleId?: string
+  accountId: string
+  customerId?: string
+  environment: Environment
+  chainId: number
+  token: string
+  gatewayWallet: string
+  beneficiary: string
+  /** Valor na moeda contábil. */
+  amount: number
+  currency: CurrencyCode
+  /** Valor USDC em unidades mínimas (string BigInt). */
+  usdcMinor: string
+  /** Cotação usada na conversão (quando a moeda contábil não é USDC). */
+  rate?: number
+  createdAt: string
+  expiresAt: string
+  state: PaymentIntentState
+  txHashes: string[]
+  history: PaymentIntentEvent[]
+}
+
 export interface Settings {
   company: string
   branch: string
@@ -665,6 +717,8 @@ export interface AppData {
   returns: ReturnAuthorization[]
   purchases: PurchaseRef[]
   receipts: GoodsReceipt[]
+  /** Intenções de pagamento USDC nativas (checkout Circle Gateway). */
+  paymentIntents: PaymentIntent[]
   /** Razão contábil (motor de partida dobrada). Ver docs/accounting-engine.md. */
   ledger: LedgerState
   settings: Settings
