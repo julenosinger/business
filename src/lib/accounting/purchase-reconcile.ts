@@ -12,9 +12,10 @@
  * - A data original da compra é preservada; a moeda usada é a vigente no app (registros antigos não guardam moeda).
  * - Idempotência: a chave `purchase:<id>:recorded` impede lançar a mesma compra duas vezes.
  */
-import type { AppData, CurrencyCode } from '../types'
+import type { Account, AppData, CurrencyCode } from '../types'
 import { CAT_PURCHASE } from '../types'
 import { purchaseEvent } from './adapters'
+import { fromNumber } from './money'
 import { isReversed, postEvent, type Ctx } from './engine'
 import type { EventDraft, LedgerState } from './types'
 
@@ -32,6 +33,8 @@ export interface PurchaseReconItem {
   cashEntryId?: string
   entryId?: string
   draft?: EventDraft
+  /** Liquidação a recuperar quando a obrigação da compra já está paga (reconhecimento + baixa). */
+  settlementDraft?: EventDraft
   reason?: string
   currency: CurrencyCode
 }
@@ -99,9 +102,39 @@ export function planPurchaseReconciliation(data: AppData): PurchaseReconItem[] {
       ...res.draft,
       payload: { ...res.draft.payload, purchaseId: p.id, ...(cashEntryId ? { cashEntryId } : {}), ...(payable ? { accountId: payable.id } : {}) },
     }
-    items.push({ ...base, status: 'ready', paidNow, payableAccountId: payable?.id, cashEntryId, draft })
+
+    // Compra a prazo JÁ paga: recupera também a liquidação (débito contas a pagar, crédito caixa),
+    // para a obrigação não ficar com saldo residual no razão.
+    const settlementDraft = payable ? paidPayableSettlementDraft(ledger, payable, currency, p.date, data) : undefined
+    items.push({ ...base, status: 'ready', paidNow, payableAccountId: payable?.id, cashEntryId, draft, ...(settlementDraft ? { settlementDraft } : {}) })
   }
   return items
+}
+
+/** Liquidação a recuperar de uma compra a prazo já paga (idempotente, sequência 1). */
+function paidPayableSettlementDraft(ledger: LedgerState, payable: Account, currency: CurrencyCode, purchaseDate: string, data: AppData): EventDraft | undefined {
+  const paid = (payable.settlements ?? []).reduce((s, x) => s + x.amount, 0)
+  const isPaid = payable.status === 'paid' || paid >= payable.amount - 1e-9
+  if (!isPaid) return undefined
+  const minor = fromNumber(payable.amount, currency)
+  if (minor === null || minor <= 0n) return undefined
+  const amountMinor = minor.toString()
+  const date = payable.paidAt ?? purchaseDate
+  // Vínculo da saída de caixa da liquidação (rastreabilidade), quando existir.
+  const settleCash = data.entries.find((e) => e.type === 'out' && e.sourceKind === 'account' && e.sourceId === payable.id)?.id
+  return {
+    orgId: ledger.orgId,
+    idempotencyKey: `account:${payable.id}:settle:1`,
+    type: 'payable.settled',
+    source: { module: 'payables', recordId: payable.id },
+    occurredAt: `${date}T12:00:00.000Z`,
+    accountingDate: date,
+    currency,
+    amountMinor,
+    payload: { accountId: payable.id, settleIn: 'cash', ...(settleCash ? { cashEntryId: settleCash } : {}) },
+    confirmation: 'confirmed',
+    ...(payable.environment && payable.environment !== 'unassigned' ? { environment: payable.environment } : {}),
+  }
 }
 
 /** Aplica os lançamentos propostos (somente itens `ready`), com idempotência. Nada além do dry-run é gravado. */
@@ -120,6 +153,13 @@ export function applyPurchaseReconciliation(ledger: LedgerState, items: Purchase
     if (!r.ok) rejected += 1
     else if (r.duplicate) duplicates += 1
     else posted += 1
+    if (item.settlementDraft) {
+      const s = postEvent(next, item.settlementDraft, ctx)
+      next = s.ledger
+      if (!s.ok) rejected += 1
+      else if (s.duplicate) duplicates += 1
+      else posted += 1
+    }
   }
   return { ledger: next, posted, duplicates, rejected }
 }
