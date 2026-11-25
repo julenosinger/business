@@ -23,7 +23,8 @@ import {
   type CurrencyCode,
 } from './types'
 import { addDays, round2, setCurrency, today } from './format'
-import { weightedAverageCost } from './costing'
+import { weightedAverageFromValue } from './costing'
+import { validateProduct, IMMUTABLE_PRODUCT_FIELDS, type ProductErrorCode } from './product'
 import { accountOutstanding } from './selectors'
 import * as logistics from './logistics'
 import * as fulfillment from './fulfillment'
@@ -316,6 +317,40 @@ function employeeSaveMessage(code: SaveCode): string {
   }
 }
 
+/** Mapeia o código de erro de produto para uma mensagem localizada. */
+function productErrorMessage(code: ProductErrorCode): string {
+  switch (code) {
+    case 'name_required':
+      return t('Informe o nome do produto.', 'Enter the product name.')
+    case 'cost_invalid':
+      return t('Custo médio inválido: informe um valor finito e não negativo.', 'Invalid average cost: enter a finite, non-negative value.')
+    case 'price_invalid':
+      return t('Preço de venda inválido.', 'Invalid sale price.')
+    case 'stock_invalid':
+      return t('Quantidade em estoque inválida.', 'Invalid stock quantity.')
+    case 'minstock_invalid':
+      return t('Estoque mínimo inválido.', 'Invalid minimum stock.')
+    case 'maxstock_invalid':
+      return t('Estoque máximo inválido.', 'Invalid maximum stock.')
+    case 'reorder_invalid':
+      return t('Ponto de reposição inválido.', 'Invalid reorder point.')
+    case 'wholesale_invalid':
+      return t('Preço de atacado inválido.', 'Invalid wholesale price.')
+    case 'reference_cost_invalid':
+      return t('Custo de referência inválido.', 'Invalid reference cost.')
+    case 'purchase_price_invalid':
+      return t('Preço de aquisição inválido.', 'Invalid purchase price.')
+    case 'non_finite':
+      return t('Valor inválido: use um número finito e não negativo.', 'Invalid value: use a finite, non-negative number.')
+    case 'barcode_invalid':
+      return t('Código de barras inválido: use GTIN/EAN/UPC com 8, 12, 13 ou 14 dígitos.', 'Invalid barcode: use a GTIN/EAN/UPC with 8, 12, 13 or 14 digits.')
+    case 'sku_duplicate':
+      return t('Já existe um produto com este SKU neste ambiente.', 'A product with this SKU already exists in this environment.')
+    default:
+      return t('Produto inválido.', 'Invalid product.')
+  }
+}
+
 /** Busca um registro operacional (com campo `environment`) por tipo e id. */
 function entityRecord(d: AppData, kind: EntityKind, id: string): { environment?: Environment } | undefined {
   switch (kind) {
@@ -418,7 +453,7 @@ export type LogisticsResult<T> = { ok: true; value: T } | { ok: false; errors: l
 export interface Store {
   data: AppData
   addProduct: (p: Omit<Product, 'id'>) => string
-  updateProduct: (id: string, patch: Partial<Product>) => void
+  updateProduct: (id: string, patch: Partial<Product>) => boolean
   removeProduct: (id: string) => void
   moveStock: (productId: string, kind: 'in' | 'out' | 'adjust', qty: number, note: string) => void
   addContact: (c: Omit<Contact, 'id'>) => SaveResult
@@ -671,15 +706,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return {
       data,
       addProduct: (p) => {
+        const env = getNetwork()
+        const skuTaken = dataRef.current.products.some((x) => p.sku.trim() !== '' && x.sku === p.sku.trim() && x.environment === env)
+        const { ok, errors } = validateProduct(p, env, skuTaken)
+        if (!ok) {
+          toast.error(productErrorMessage(errors[0]))
+          return ''
+        }
         const id = uid()
         set((d) => {
-          const env = getNetwork()
-          const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock'), environment: env }] : []
-          return { ...d, products: [{ ...p, id, environment: env }, ...d.products], moves: [...first, ...d.moves] }
+          const envNow = getNetwork()
+          const first = p.stock > 0 ? [{ id: uid(), productId: id, kind: 'in' as const, qty: p.stock, date: today(), note: t('Estoque inicial', 'Opening stock'), environment: envNow }] : []
+          return { ...d, products: [{ ...p, id, environment: envNow }, ...d.products], moves: [...first, ...d.moves] }
         })
         return id
       },
-      updateProduct: (id, patch) => set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+      updateProduct: (id, patch) => {
+        const cur = dataRef.current.products.find((p) => p.id === id)
+        if (!cur) {
+          toast.error(t('Produto não encontrado.', 'Product not found.'))
+          return false
+        }
+        // Ambiente imutável em edições comuns; não editar produto de outro ambiente.
+        if (patch.environment !== undefined && patch.environment !== cur.environment) {
+          toast.error(t('O ambiente do produto não pode ser alterado aqui.', 'The product environment cannot be changed here.'))
+          return false
+        }
+        if (cur.environment && cur.environment !== 'unassigned' && cur.environment !== getNetwork()) {
+          toast.error(t('Este produto pertence a outro ambiente e não pode ser editado aqui.', 'This product belongs to another environment and cannot be edited here.'))
+          return false
+        }
+        // Custo médio e estoque são imutáveis via cadastro (atualizados por compras/movimentações).
+        for (const f of IMMUTABLE_PRODUCT_FIELDS) {
+          if (f === 'environment') continue
+          if (patch[f] !== undefined && patch[f] !== cur[f]) {
+            toast.error(t('Custo médio e estoque não podem ser alterados diretamente; use compras ou movimentações de estoque.', 'Average cost and stock cannot be changed directly; use purchases or stock movements.'))
+            return false
+          }
+        }
+        const merged = { ...cur, ...patch, environment: cur.environment }
+        const skuTaken = dataRef.current.products.some((x) => x.id !== id && merged.sku.trim() !== '' && x.sku === merged.sku.trim() && x.environment === cur.environment)
+        const { ok, errors } = validateProduct(merged, getNetwork(), skuTaken)
+        if (!ok) {
+          toast.error(productErrorMessage(errors[0]))
+          return false
+        }
+        set((d) => ({ ...d, products: d.products.map((p) => (p.id === id ? { ...p, ...patch, environment: cur.environment } : p)) }))
+        return true
+      },
       removeProduct: (id) => undoable((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) }), t('Produto removido.', 'Product removed.')),
       moveStock: (productId, kind, qty, note) =>
         set((d) => {
@@ -1114,15 +1188,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
           const awaiting = !!input.awaitReceipt
           const purchaseId = receiving.nextPurchaseId(d.purchases)
+          // Consolida produtos repetidos: soma quantidade e valor total por produto (integridade do estoque/custo).
+          const consolidated = new Map<string, { qty: number; value: number }>()
+          for (const it of input.items) {
+            const cur = consolidated.get(it.productId) ?? { qty: 0, value: 0 }
+            cur.qty += it.qty
+            cur.value += it.qty * it.cost
+            consolidated.set(it.productId, cur)
+          }
           const next: AppData = {
             ...d,
             // Fluxo padrão: a compra soma o estoque na hora. Aguardando recebimento: o estoque só entra no recebimento.
             products: awaiting
               ? d.products
               : d.products.map((p) => {
-                  const it = input.items.find((i) => i.productId === p.id)
-                  // Custo médio ponderado móvel (nunca o último custo de aquisição).
-                  return it ? { ...p, stock: p.stock + it.qty, cost: weightedAverageCost(p.stock, p.cost, it.qty, it.cost) } : p
+                  const c = consolidated.get(p.id)
+                  // Custo médio ponderado móvel (nunca o último custo; consolida linhas repetidas).
+                  return c ? { ...p, stock: p.stock + c.qty, cost: weightedAverageFromValue(p.stock, p.cost, c.qty, c.value) } : p
                 }),
             moves: awaiting
               ? d.moves
