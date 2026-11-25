@@ -75,11 +75,11 @@ describe('integridade do cadastro de produto (INV-1.0)', () => {
 
   test('addProduct aceita produto válido e preserva campos novos', () => {
     const { store, unmount } = renderStore()
-    const id = commit(store, (s) => s.addProduct(prod({ name: 'Arroz', brand: 'Marca X', barcode: '7891234567890', referenceCost: 4.5, wholesalePrice: 7, maxStock: 1000, reorderPoint: 50 })))
+    const id = commit(store, (s) => s.addProduct(prod({ name: 'Arroz', brand: 'Marca X', barcode: '4006381333931', referenceCost: 4.5, wholesalePrice: 7, maxStock: 1000, reorderPoint: 50 })))
     expect(id).toBeTruthy()
     const p = store().data.products.find((x) => x.id === id)!
     expect(p.brand).toBe('Marca X')
-    expect(p.barcode).toBe('7891234567890')
+    expect(p.barcode).toBe('4006381333931')
     expect(p.referenceCost).toBe(4.5)
     expect(p.wholesalePrice).toBe(7)
     unmount()

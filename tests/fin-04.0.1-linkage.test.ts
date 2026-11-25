@@ -61,7 +61,7 @@ describe('FIN-04.0.1 — custo de aquisição no recebimento (alocação determi
       { cost: 6, qty: 20 },
     ]
     // Recebe 120 unidades → valor total = 100*5 + 20*6 = 620.
-    expect(allocatePurchaseValue(queue, 120, 0)).toBeCloseTo(620, 10)
+    expect(allocatePurchaseValue(queue, 120)).toEqual({ value: 620, excess: 0 })
     expect(queue).toHaveLength(0) // fila consumida
   })
 
@@ -70,16 +70,16 @@ describe('FIN-04.0.1 — custo de aquisição no recebimento (alocação determi
       { cost: 5, qty: 100 },
       { cost: 6, qty: 20 },
     ]
-    expect(allocatePurchaseValue(queue, 60, 0)).toBeCloseTo(300, 10)
+    expect(allocatePurchaseValue(queue, 60)).toEqual({ value: 300, excess: 0 })
     expect(queue[0]).toEqual({ cost: 5, qty: 40 }) // 40 restantes na primeira linha
   })
 
-  test('excedente além da compra usa o último custo conhecido', () => {
+  test('excedente além da compra NÃO é valorizado pelo último custo', () => {
     const queue = [{ cost: 5, qty: 10 }]
-    expect(allocatePurchaseValue(queue, 15, 5)).toBeCloseTo(75, 10) // 10*5 + 5*5
+    expect(allocatePurchaseValue(queue, 15)).toEqual({ value: 50, excess: 5 }) // só os 10 comprados
   })
 
-  test('sem compra, usa o custo atual do produto', () => {
-    expect(allocatePurchaseValue([], 10, 7)).toBeCloseTo(70, 10)
+  test('sem compra, sem alocação (excedente integral)', () => {
+    expect(allocatePurchaseValue([], 10)).toEqual({ value: 0, excess: 10 })
   })
 })

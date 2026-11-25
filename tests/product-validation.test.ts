@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { barcodeIsValid, validateProduct, marginOf, markupOf, type ProductValues } from '../src/lib/product'
+import { barcodeIsValid, gtinCheckDigitValid, validateProduct, marginOf, markupOf, type ProductValues } from '../src/lib/product'
 
 const base: ProductValues = {
   name: 'Arroz', sku: 'AR1', cost: 5, price: 8, stock: 0, minStock: 0,
@@ -16,6 +16,11 @@ describe('validação de código de barras (INV-1.0)', () => {
     expect(barcodeIsValid('1234567')).toBe(false)
     expect(barcodeIsValid('123456789')).toBe(false)
     expect(barcodeIsValid('abc')).toBe(false)
+  })
+  test('dígito verificador GTIN (GS1)', () => {
+    expect(gtinCheckDigitValid('4006381333931')).toBe(true) // EAN-13 válido
+    expect(gtinCheckDigitValid('7891234567890')).toBe(false) // dígito verificador errado
+    expect(gtinCheckDigitValid('abc')).toBe(false)
   })
 })
 

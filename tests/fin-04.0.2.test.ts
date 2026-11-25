@@ -70,7 +70,7 @@ describe('FIN-04.0.2 — custo zero e alocação determinística', () => {
   })
 
   test('allocatePurchaseValue trata custo zero válido', () => {
-    expect(allocatePurchaseValue([{ cost: 0, qty: 10 }], 10, 5)).toBe(0)
+    expect(allocatePurchaseValue([{ cost: 0, qty: 10 }], 10)).toEqual({ value: 0, excess: 0 })
   })
 
   test('remainingPurchaseAllocation consome recebimentos anteriores (alocação persistente)', () => {
@@ -90,7 +90,29 @@ describe('FIN-04.0.2 — custo zero e alocação determinística', () => {
       { cost: 6, qty: 20 },
     ])
     // Segundo recebimento: 40 a 5 + 20 a 6 = 320.
-    expect(allocatePurchaseValue(remaining.get('p')!, 60, 0)).toBeCloseTo(320, 10)
+    expect(allocatePurchaseValue(remaining.get('p')!, 60)).toEqual({ value: 320, excess: 0 })
+  })
+})
+
+describe('FIN-04.1A — idempotência persistente por intenção', () => {
+  test('mesma intenção de compra não gera duas compras; intenções distintas são permitidas', () => {
+    const { store, unmount } = renderStore()
+    const pid = commit(store, (s) => s.addProduct(prod({ sku: 'P1' })))
+    expect(commit(store, (s) => s.recordPurchase({ intentId: 'int-1', paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 10, cost: 5 }] }))).toBe(true)
+    expect(commit(store, (s) => s.recordPurchase({ intentId: 'int-1', paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 10, cost: 5 }] }))).toBe(false)
+    expect(store().data.purchases).toHaveLength(1)
+    expect(commit(store, (s) => s.recordPurchase({ intentId: 'int-2', paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 10, cost: 5 }] }))).toBe(true)
+    expect(store().data.purchases).toHaveLength(2)
+    unmount()
+  })
+
+  test('mesma intenção de venda não gera duas vendas', () => {
+    const { store, unmount } = renderStore()
+    const pid = commit(store, (s) => s.addProduct(prod({ stock: 100 })))
+    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] }))).toBe(true)
+    expect(commit(store, (s) => s.recordSale({ intentId: 'sale-1', method: 'pix', items: [{ productId: pid, qty: 5, price: 8 }] }))).toBe(false)
+    expect(store().data.sales).toHaveLength(1)
+    unmount()
   })
 })
 
