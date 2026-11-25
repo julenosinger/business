@@ -1,6 +1,6 @@
 # FIN-04.1B.2 — Circle Gateway Native Merchant Settlement
 
-**HEAD inicial:** `3efc293` (FIN-04.1B.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `3efc293` (FIN-04.1B.1) · **HEAD final:** `5e61dfa`
 
 Resultado: **583 testes passando** (eram 578) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
