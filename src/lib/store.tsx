@@ -442,6 +442,9 @@ export interface SaleInput {
   intentId?: string
 }
 
+/** Resultado explícito do registro de venda. `accountId` presente quando a venda gera uma obrigação a receber. */
+export type SaleResult = { ok: true; saleId: string; accountId?: string } | { ok: false }
+
 export interface PurchaseInput {
   supplierId?: string
   paidNow: boolean
@@ -503,7 +506,7 @@ export interface Store {
   cancelAccount: (id: string) => CancelResult
   /** Cancelamento em lote com resultado por item. */
   cancelAccounts: (ids: string[]) => BatchCancelResult
-  recordSale: (input: SaleInput) => boolean
+  recordSale: (input: SaleInput) => SaleResult
   cancelSale: (id: string) => void
   recordPurchase: (input: PurchaseInput) => boolean
   addEmployee: (e: Omit<Employee, 'id'>) => SaveResult
@@ -1114,7 +1117,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, t('Venda cancelada. Estoque e caixa foram ajustados.', 'Sale canceled. Stock and cash were adjusted.')),
       recordSale: (input) => {
         const env = getNetwork()
-        let recorded = false
+        let result: SaleResult = { ok: false }
         // Toda a validação e a mutação acontecem DENTRO do updater, contra o estado autoritativo
         // (dataRef.current via `apply`): nada de snapshot desatualizado. Execução atômica.
         set((d) => {
@@ -1170,16 +1173,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             moves: [...items.map((i) => ({ id: uid(), productId: i.productId, kind: 'out' as const, qty: i.qty, date, note: t(`Venda ${saleId}`, `Sale ${saleId}`), environment: env })), ...d.moves],
           }
           let accountId: string | undefined
-          if (input.method === 'prazo') {
+          // USDC e a prazo geram uma OBRIGAÇÃO a receber (não caixa imediato). USDC aguarda a Treasury confirmar o recebimento.
+          if (input.method === 'prazo' || input.method === 'usdc') {
             accountId = uid()
             const acc: Account = {
               id: accountId,
               kind: 'receivable',
-              description: t(`Venda a prazo (${items.length} ${items.length === 1 ? 'item' : 'itens'})`, `Credit sale (${items.length} ${items.length === 1 ? 'item' : 'items'})`),
+              description: t(`Venda ${input.method === 'usdc' ? 'em USDC' : 'a prazo'} (${items.length} ${items.length === 1 ? 'item' : 'itens'})`, `Sale ${input.method === 'usdc' ? 'in USDC' : 'on credit'} (${items.length} ${items.length === 1 ? 'item' : 'items'})`),
               contactId: customer?.id,
               contactName: customerName,
               amount: total,
-              dueDate: input.dueDate ?? addDays(date, 30),
+              dueDate: input.dueDate ?? addDays(date, input.method === 'usdc' ? 1 : 30),
               category: CAT_SALES,
               status: 'open',
               source: 'sale',
@@ -1196,10 +1200,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const sale: Sale = { id: saleId, date, customerId: customer?.id, customerName, items, total, cogs, method: input.method, accountId, environment: env, ...(input.intentId ? { intentId: input.intentId } : {}) }
           next.sales = [sale, ...d.sales]
-          recorded = true
+          result = { ok: true, saleId, ...(accountId ? { accountId } : {}) }
           return next
         })
-        return recorded
+        return result
       },
       recordPurchase: (input) => {
         const env = getNetwork()

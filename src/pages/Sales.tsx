@@ -8,6 +8,7 @@ import { KpiTile } from '@/components/ds/KpiTile'
 import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { PillTabs } from '@/components/ds/PillTabs'
+import { ChargeModal } from '@/components/ChargeModal'
 import { useStore } from '@/lib/store'
 import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
@@ -40,6 +41,8 @@ export function Sales() {
   const [method, setMethod] = useState<PayMethod>('pix')
   const [dueDate, setDueDate] = useState(addDays(today(), 30))
   const [salesFilter, setSalesFilter] = useState<{ id: string; name: string } | null>(null)
+  const [chargeAccount, setChargeAccount] = useState<string | null>(null)
+  const [intentId, setIntentId] = useState(() => crypto.randomUUID())
 
   const customers = contactsForEnvironment(data, network).filter((c) => c.kind === 'customer')
 
@@ -146,18 +149,28 @@ export function Sales() {
 
   const finish = () => {
     if (lines.length === 0 || overStock || hasInvalidQty) return
-    const ok = recordSale({
+    const result = recordSale({
       customerId: customerId || undefined,
       method,
       dueDate: method === 'prazo' ? dueDate : undefined,
+      intentId,
       items: lines.map((l) => ({ productId: l.p.id, qty: l.qty, price: l.p.price })),
     })
     // Só limpa o carrinho e confirma após sucesso efetivo (sem falso sucesso).
-    if (!ok) return
-    toast.success(method === 'prazo' ? t('Venda registrada como conta a receber.', 'Sale recorded as a receivable.') : t('Venda registrada e caixa atualizado.', 'Sale recorded and cash updated.'))
+    if (!result.ok) return
     setCart({})
     setDrafts({})
     setCustomerId('')
+    setIntentId(crypto.randomUUID())
+    if (method === 'usdc' && result.accountId) {
+      // Venda em USDC: a obrigação fica pendente até a Treasury confirmar o recebimento.
+      toast.success(t('Venda registrada. Gere a cobrança USDC para receber.', 'Sale recorded. Generate the USDC payment request to get paid.'))
+      setChargeAccount(result.accountId)
+    } else if (method === 'prazo') {
+      toast.success(t('Venda registrada como conta a receber.', 'Sale recorded as a receivable.'))
+    } else {
+      toast.success(t('Venda registrada e pagamento confirmado.', 'Sale recorded and payment confirmed.'))
+    }
   }
 
   const cancel = (id: string) => {
@@ -313,7 +326,7 @@ export function Sales() {
             <span className="display num text-2xl font-semibold">{money(total)}</span>
           </div>
           <Button className="mt-3 w-full" disabled={lines.length === 0 || overStock || hasInvalidQty || (method === 'prazo' && !isValidIso(dueDate))} onClick={finish}>
-            <Check size={16} /> {t('Finalizar venda', 'Complete sale')}
+            <Check size={16} /> {method === 'usdc' ? t('Gerar cobrança USDC', 'Generate USDC charge') : method === 'prazo' ? t('Registrar venda a prazo', 'Record credit sale') : t('Registrar e confirmar pagamento', 'Record and confirm payment')}
           </Button>
         </TCard>
       </div>
@@ -410,6 +423,8 @@ export function Sales() {
           </button>
         </div>
       ) : null}
+
+      {chargeAccount !== null ? <ChargeModal open accountId={chargeAccount} onClose={() => setChargeAccount(null)} /> : null}
     </div>
   )
 }
