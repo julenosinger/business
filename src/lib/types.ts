@@ -136,6 +136,8 @@ export interface Entry {
   sourceKind?: 'sale' | 'account' | 'purchase'
   /** ID da operação de origem (venda/conta/compra), quando aplicável. */
   sourceId?: string
+  /** ID da liquidação individual (vínculo inequívoco quando há múltiplas liquidações na mesma conta). */
+  settlementId?: string
 }
 
 export type AccountSource = 'manual' | 'sale' | 'purchase' | 'payroll'
@@ -496,6 +498,8 @@ export interface PurchaseRef {
   stockPosted: boolean
   /** Recebimento que somou o estoque (só quando a compra aguardava recebimento). */
   receiptId?: string
+  /** Quantidade aceita acumulada (soma dos recebimentos parciais). Ausente = 0/legado. */
+  receivedQty?: number
   createdAt: string
   /** Ambiente de origem da compra. Imutável após criação. */
   environment?: Environment

@@ -649,6 +649,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         environment: acc.environment ?? 'unassigned',
         sourceKind: 'account',
         sourceId: acc.id,
+        settlementId: settlement.id,
       }
       return {
         ...d,

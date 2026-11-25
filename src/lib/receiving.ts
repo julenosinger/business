@@ -7,7 +7,7 @@
 // - Compra ligada já lançada (stockPosted = true, fluxo padrão da aba Compras): o estoque já foi somado, então nada é somado de novo.
 // - Sem compra ligada: o usuário precisa escolher explicitamente entre somar ou registrar que o estoque já foi lançado.
 // - Itens danificados não entram no estoque. A decisão sobre eles (devolver, descartar, reestocar) fica para a fase de devoluções.
-import type { AppData, GoodsReceipt, ReceiptLine, ReceiptStockMode, StockMove } from './types'
+import type { AppData, GoodsReceipt, PurchaseRef, ReceiptLine, ReceiptStockMode, StockMove } from './types'
 import type { NetworkId } from './network'
 import { weightedAverageFromValue } from './costing'
 import { DEFAULT_ORG, clean, event, fail, replace, round2, uid, type Outcome } from './logistics'
@@ -68,6 +68,39 @@ export function allocatePurchaseValue(queue: { cost: number; qty: number }[], ne
   return value
 }
 
+/** Consome `needed` unidades da fila (FIFO) sem devolver valor — usado para os recebimentos anteriores. */
+function consumeFifo(queue: { cost: number; qty: number }[], needed: number): void {
+  let remaining = needed
+  while (remaining > 0 && queue.length > 0) {
+    const head = queue[0]
+    const take = Math.min(head.qty, remaining)
+    head.qty -= take
+    remaining -= take
+    if (head.qty <= 0) queue.shift()
+  }
+}
+
+/**
+ * Fila de custos RESTANTE de uma compra, após consumir os recebimentos anteriores em ordem cronológica.
+ * Deriva a alocação do histórico imutável de recebimentos (não reconstrói a fila original a cada recebimento).
+ */
+export function remainingPurchaseAllocation(purchase: PurchaseRef, receipts: readonly GoodsReceipt[]): Map<string, { cost: number; qty: number }[]> {
+  const queue = new Map<string, { cost: number; qty: number }[]>()
+  for (const pi of purchase.items) {
+    const arr = queue.get(pi.productId) ?? []
+    arr.push({ cost: pi.cost, qty: pi.qty })
+    queue.set(pi.productId, arr)
+  }
+  const prior = receipts.filter((r) => r.purchaseId === purchase.id).sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))
+  for (const r of prior) {
+    for (const line of r.lines) {
+      if (!line.productId || line.acceptedQty <= 0) continue
+      consumeFifo(queue.get(line.productId) ?? [], line.acceptedQty)
+    }
+  }
+  return queue
+}
+
 export interface ReceiptResult {
   receiptId: string
   stockMode: ReceiptStockMode
@@ -108,13 +141,20 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
   const notes = clean(input.notes, 300)
   if (lines.some((l) => l.discrepancy !== 'none') && notes.length < 3) return fail('receipt_note_required')
 
-  // Define se o estoque entra agora.
+  // Define se o estoque entra agora (permite recebimentos parciais sucessivos).
   const purchase = cur.orderRef?.kind === 'purchase' && cur.orderRef.id ? d.purchases.find((p) => p.id === cur.orderRef?.id) : undefined
   if (cur.orderRef?.kind === 'purchase' && cur.orderRef.id && !purchase) return fail('unknown_purchase')
+  const totalQty = purchase ? purchase.items.reduce((s, i) => s + i.qty, 0) : 0
+  const receivedSoFar = purchase?.receivedQty ?? 0
   let stockMode: ReceiptStockMode
   if (purchase) {
-    if (!purchase.stockPosted && purchase.receiptId) return fail('purchase_already_received')
-    stockMode = purchase.stockPosted ? 'already_counted' : 'posted'
+    if (!purchase.stockPosted) {
+      stockMode = 'posted' // primeira entrada de estoque de compra que aguardava recebimento
+    } else if (receivedSoFar > 0 && receivedSoFar < totalQty) {
+      stockMode = 'posted' // recebimento parcial: ainda entra estoque
+    } else {
+      stockMode = 'already_counted' // compra imediata ou já integralmente recebida
+    }
   } else {
     if (input.stockChoice !== 'post' && input.stockChoice !== 'already_counted') return fail('stock_mode_required')
     stockMode = input.stockChoice === 'post' ? 'posted' : 'already_counted'
@@ -124,16 +164,8 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
   const posted: { productId: string; qty: number }[] = []
   let products = d.products
   const moves: StockMove[] = []
-  // Alocação determinística do custo de aquisição: linhas da compra são consumidas em ordem por produto,
-  // permitindo o mesmo produto em múltiplas linhas com custos diferentes (sem depender de `items.find`).
-  const allocQueue = new Map<string, { cost: number; qty: number }[]>()
-  if (purchase) {
-    for (const pi of purchase.items) {
-      const arr = allocQueue.get(pi.productId) ?? []
-      arr.push({ cost: pi.cost, qty: pi.qty })
-      allocQueue.set(pi.productId, arr)
-    }
-  }
+  // Alocação determinística: fila RESTANTE após consumir os recebimentos anteriores (histórico imutável).
+  const allocQueue = purchase ? remainingPurchaseAllocation(purchase, d.receipts) : new Map<string, { cost: number; qty: number }[]>()
   if (stockMode === 'posted') {
     for (const l of lines) {
       if (!l.productId || l.acceptedQty <= 0) continue
@@ -142,7 +174,7 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
       const value = allocatePurchaseValue(allocQueue.get(l.productId) ?? [], l.acceptedQty, product.cost)
       products = products.map((p) =>
         p.id === l.productId
-          ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: value > 0 ? weightedAverageFromValue(p.stock, p.cost, l.acceptedQty, value) : p.cost }
+          ? { ...p, stock: round2(p.stock + l.acceptedQty), cost: weightedAverageFromValue(p.stock, p.cost, l.acceptedQty, value) }
           : p,
       )
       moves.push({ id: uid(), productId: l.productId, kind: 'in', qty: l.acceptedQty, date: today, note: `${receiptId} · ${cur.id}`, environment: cur.environment ?? env })
@@ -150,6 +182,7 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
     }
   }
 
+  const acceptedTotal = round2(lines.reduce((s, l) => s + (l.acceptedQty ?? 0), 0))
   const receipt: GoodsReceipt = {
     id: receiptId,
     orgId: DEFAULT_ORG,
@@ -168,7 +201,7 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
     products,
     moves: moves.length ? [...moves, ...d.moves] : d.moves,
     receipts: [receipt, ...d.receipts],
-    purchases: purchase && stockMode === 'posted' ? d.purchases.map((p) => (p.id === purchase.id ? { ...p, stockPosted: true, receiptId } : p)) : d.purchases,
+    purchases: purchase && stockMode === 'posted' ? d.purchases.map((p) => (p.id === purchase.id ? { ...p, stockPosted: true, receiptId, receivedQty: round2(receivedSoFar + acceptedTotal) } : p)) : d.purchases,
   }
   return { ok: true, data: next, value: { receiptId, stockMode, posted } }
 }

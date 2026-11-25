@@ -191,7 +191,10 @@ function run(prev: AppData, next: AppData, opts: AutoPostOptions): LedgerState {
       if (!hasActiveObligation(ledger, a.id)) return
       const amountMinor = minor(amount)
       if (!amountMinor) return
-      const cashEntryId = claim((e) => e.sourceKind === 'account' && e.sourceId === a.id)
+      // Vínculo individual por liquidação (settlementId) quando disponível; legado cai no vínculo pela conta.
+      const cashEntryId = settlementId
+        ? claim((e) => e.sourceKind === 'account' && e.sourceId === a.id && e.settlementId === settlementId)
+        : claim((e) => e.sourceKind === 'account' && e.sourceId === a.id)
       const viaTreasury = !!treasuryTx
       const type: EventType = a.source === 'payroll' ? 'payroll.paid' : a.kind === 'payable' ? 'payable.settled' : 'receivable.settled'
       post(
