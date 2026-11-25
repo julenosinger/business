@@ -1,6 +1,6 @@
 # FIN-04.1 — Unified Operational, Financial & Accounting State Engine
 
-**HEAD inicial:** `70382dd` (FIN-04.0.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `70382dd` (FIN-04.0.2) · **HEAD final:** `990a98c`
 
 Resultado: **571 testes passando** (eram 568) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
