@@ -1,6 +1,6 @@
 # FIN-04.1B.2.1A — Gateway Configuration Integrity & Environment Hardening
 
-**HEAD inicial:** `c284dcc` (FIN-04.1B.2.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `c284dcc` (FIN-04.1B.2.1) · **HEAD final:** `6a3bda5`
 
 Resultado: **588 testes passando** (eram 586) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
