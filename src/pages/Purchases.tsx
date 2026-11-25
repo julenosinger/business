@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
@@ -123,6 +123,7 @@ export function Purchases() {
   const [lines, setLines] = useState<Line[]>([{ key: seq++, productId: '', qty: '', cost: '' }])
   const [quickAdd, setQuickAdd] = useState(false)
   const [quickAddLine, setQuickAddLine] = useState<number | null>(null)
+  const submitting = useRef(false)
   const [limit, setLimit] = useState(15)
   const [supplierFilter, setSupplierFilter] = useState<{ id: string; name: string } | null>(null)
 
@@ -148,19 +149,26 @@ export function Purchases() {
   const total = parsed.reduce((s, l) => s + (l.q > 0 && l.c >= 0 ? l.q * l.c : 0), 0)
 
   const submit = () => {
-    // Só limpa o formulário e confirma após sucesso efetivo (sem falso sucesso).
-    const ok = recordPurchase({
-      supplierId: supplierId || undefined,
-      paidNow,
-      dueDate,
-      awaitReceipt,
-      items: parsed.map((l) => ({ productId: l.productId, qty: l.q, cost: l.c })),
-    })
-    if (!ok) return
-    toast.success(paidNow ? t('Compra registrada e paga.', 'Purchase recorded and paid.') : t('Compra registrada como conta a pagar.', 'Purchase recorded as a payable.'))
-    setLines([{ key: seq++, productId: '', qty: '', cost: '' }])
-    setSupplierId('')
-    setAwaitReceipt(false)
+    // Proteção contra duplo clique/submissão concorrente na mesma intenção.
+    if (submitting.current) return
+    submitting.current = true
+    try {
+      // Só limpa o formulário e confirma após sucesso efetivo (sem falso sucesso).
+      const ok = recordPurchase({
+        supplierId: supplierId || undefined,
+        paidNow,
+        dueDate,
+        awaitReceipt,
+        items: parsed.map((l) => ({ productId: l.productId, qty: l.q, cost: l.c })),
+      })
+      if (!ok) return
+      toast.success(paidNow ? t('Compra registrada e paga.', 'Purchase recorded and paid.') : t('Compra registrada como conta a pagar.', 'Purchase recorded as a payable.'))
+      setLines([{ key: seq++, productId: '', qty: '', cost: '' }])
+      setSupplierId('')
+      setAwaitReceipt(false)
+    } finally {
+      submitting.current = false
+    }
   }
 
   const history = [
