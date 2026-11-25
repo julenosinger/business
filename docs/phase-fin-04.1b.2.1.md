@@ -1,6 +1,6 @@
 # FIN-04.1B.2.1 — Institutional Gateway Configuration & Runtime Isolation
 
-**HEAD inicial:** `ffc1914` (FIN-04.1B.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `ffc1914` (FIN-04.1B.2) · **HEAD final:** `7bd82b7`
 
 Resultado: **586 testes passando** (eram 583) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
