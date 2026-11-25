@@ -1,6 +1,6 @@
 # INV-1.0 — Professional Product Master Data & Inventory Form Integrity
 
-**HEAD inicial:** `08387d4` (FIN-02.0.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `08387d4` (FIN-02.0.1) · **HEAD final:** `5430a91`
 
 Resultado: **552 testes passando** (eram 537) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
