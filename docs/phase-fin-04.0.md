@@ -1,6 +1,6 @@
 # FIN-04.0 — Auditoria obrigatória e baseline
 
-**HEAD inicial:** `fd6e1e7` (INV-1.0) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `fd6e1e7` (INV-1.0) · **HEAD final:** `71e3894`
 
 Resultado: **558 testes passando** (eram 552) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
