@@ -1,6 +1,6 @@
 # FIN-04.1B.1 — Treasury-Centric Sales & Verified Financial Settlement
 
-**HEAD inicial:** `1ba260c` (FIN-04.1B) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `1ba260c` (FIN-04.1B) · **HEAD final:** `f7618b1`
 
 Resultado: **578 testes passando** (eram 574) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
