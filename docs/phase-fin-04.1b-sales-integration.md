@@ -1,6 +1,6 @@
 # FIN-04.1B — Integrated Sales, Treasury & Financial Settlement
 
-**HEAD inicial:** `bf1716b` (FIN-04.1A) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `bf1716b` (FIN-04.1A) · **HEAD final:** `9e07847`
 
 Resultado: **574 testes passando** (eram 571) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
