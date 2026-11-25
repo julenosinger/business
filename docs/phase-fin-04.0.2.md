@@ -1,6 +1,6 @@
 # FIN-04.0.2 — Financial Linkage & Inventory Integrity Certification
 
-**HEAD inicial:** `6f6e95d` (FIN-04.0.1) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `6f6e95d` (FIN-04.0.1) · **HEAD final:** `7c3f225`
 
 **Status final: PARCIALMENTE APROVADO**
 
