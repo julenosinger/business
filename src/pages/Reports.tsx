@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BarChart3, Download, FileSpreadsheet, LineChart, PieChart, PiggyBank, Percent, Trophy, TrendingUp, Wallet } from 'lucide-react'
+import { BarChart3, Download, FileSpreadsheet, LineChart, PieChart, PiggyBank, Percent, Trophy, TrendingUp, Wallet, AlertTriangle } from 'lucide-react'
 import { AreaChart, Bar, C, Donut } from '@/components/charts'
 import { Button, Empty } from '@/components/ui'
 import { KpiTile } from '@/components/ds/KpiTile'
@@ -75,6 +75,15 @@ export function Reports() {
         subtitle={t(`Indicadores de ${period.label}.`, `Indicators for ${period.label}.`)}
         actions={<PillTabs label={t('Período', 'Period')} value={range} onChange={setRange} items={rangeTabs()} />}
       />
+
+      {k.cogsIncomplete ? (
+        <div className="rounded-xl border border-warn/40 bg-warn/10 p-4 text-sm" role="status">
+          <p className="flex items-center gap-2 text-warn">
+            <AlertTriangle size={16} />
+            {t('Resultado provisório: há receita de mercadorias sem custo (CMV) informado. Lucro bruto, lucro líquido e margem estão incompletos.', 'Provisional result: there is merchandise revenue without a reported cost (COGS). Gross profit, net profit and margin are incomplete.')}
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         <KpiTile tone="ok" icon={<TrendingUp size={20} />} label={t('Receita', 'Revenue')} value={money(k.revenue)} sub={period.label} />
