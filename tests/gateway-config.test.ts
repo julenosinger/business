@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { toFunctionSelector, type Address } from 'viem'
-import { gatewayConfigFor, gatewayWalletForChain, encodeDepositFor, treasuryRecipientFor, ARC_USDC, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } from '../src/lib/gateway-config'
+import { decodeFunctionData, toFunctionSelector, type Address } from 'viem'
+import { gatewayConfigFor, gatewayWalletForChain, encodeDepositFor, treasuryRecipientFor, validateBeneficiary, DEPOSIT_FOR_ABI, ARC_USDC, ARC_MAINNET_CHAIN_ID, ARC_TESTNET_CHAIN_ID } from '../src/lib/gateway-config'
 
 describe('FIN-04.1B.2 — configuração do Circle Gateway por ambiente', () => {
   test('Mainnet resolve contratos oficiais de produção', () => {
@@ -42,6 +42,10 @@ describe('FIN-04.1B.2 — configuração do Circle Gateway por ambiente', () => 
     expect(data.startsWith('0x')).toBe(true)
     expect(data.length).toBe(2 + 8 + 64 * 3) // selector + 3 palavras de 32 bytes
     expect(data.slice(0, 10)).toBe(toFunctionSelector('depositFor(address,address,uint256)'))
+    // Decodificação completa comprova token, depositor e valor.
+    const decoded = decodeFunctionData({ abi: DEPOSIT_FOR_ABI, data })
+    expect(decoded.functionName).toBe('depositFor')
+    expect(decoded.args).toEqual([token, depositor, 15_000000n])
   })
 
   test('encodeDepositFor rejeita endereço zero, valor zero, negativo e fora do uint256', () => {
@@ -57,12 +61,24 @@ describe('FIN-04.1B.2 — configuração do Circle Gateway por ambiente', () => 
     expect(() => gatewayConfigFor('unknown' as never)).toThrow()
   })
 
-  test('treasuryRecipientFor resolve por ambiente com fallback legado', () => {
-    const s = { treasuryRecipients: { mainnet: '0xMain', testnet: '0xTest' }, treasuryRecipient: '0xLegacy' }
+  test('treasuryRecipientFor resolve exclusivamente por ambiente, sem fallback legado', () => {
+    const s = { treasuryRecipients: { mainnet: '0xMain', testnet: '0xTest' } }
     expect(treasuryRecipientFor(s, 'mainnet')).toBe('0xMain')
     expect(treasuryRecipientFor(s, 'testnet')).toBe('0xTest')
-    const legacy = { treasuryRecipients: {}, treasuryRecipient: '0xLegacy' }
-    expect(treasuryRecipientFor(legacy, 'mainnet')).toBe('0xLegacy')
+    // Sem configuração do ambiente → não configurado (nunca fallback legado ou outro ambiente).
+    expect(treasuryRecipientFor({ treasuryRecipients: {} }, 'mainnet')).toBe('')
     expect(treasuryRecipientFor({}, 'mainnet')).toBe('')
+    expect(() => treasuryRecipientFor(s, 'unknown' as never)).toThrow()
+  })
+
+  test('validateBeneficiary rejeita endereço zero, inválido e contratos do Gateway', () => {
+    expect(validateBeneficiary('0x0000000000000000000000000000000000000000', 'mainnet').ok).toBe(false)
+    expect(validateBeneficiary('abc', 'mainnet').ok).toBe(false)
+    const cfg = gatewayConfigFor('mainnet')
+    expect(validateBeneficiary(cfg.gatewayWallet, 'mainnet').ok).toBe(false)
+    expect(validateBeneficiary(cfg.gatewayMinter, 'mainnet').ok).toBe(false)
+    expect(validateBeneficiary(cfg.usdcToken, 'mainnet').ok).toBe(false)
+    expect(validateBeneficiary('0x000000000000000000000000000000000000dEaD', 'mainnet').ok).toBe(true)
+    expect(validateBeneficiary('0x000000000000000000000000000000000000dEaD', 'unknown' as never).ok).toBe(false)
   })
 })
