@@ -112,7 +112,7 @@ describe('independência da aba Compras (FIN-02.0.1)', () => {
     const productSelect = [...container.querySelectorAll('select')].find((s) => s.getAttribute('aria-label') === 'Produto')
     expect(productSelect).toBeTruthy()
     setSelect(productSelect as HTMLSelectElement, '__new__')
-    expect(container.textContent).toContain('Custo de aquisição')
+    expect(container.textContent).toContain('Custo de referência')
     expect(container.textContent).toContain('Preço de venda')
     unmount()
   })
