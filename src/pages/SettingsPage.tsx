@@ -7,7 +7,7 @@ import { PageTop } from '@/components/ds/PageTop'
 import { PanelTitle, TCard } from '@/components/ds/Panel'
 import { useStore } from '@/lib/store'
 import { useNetwork } from '@/lib/network'
-import { gatewayConfigFor, validateBeneficiary } from '@/lib/gateway-config'
+import { gatewayConfigFor, validateBeneficiary, resolveGatewayTreasury } from '@/lib/gateway-config'
 import { isSandbox } from '@/lib/environment-policy'
 import { EnvironmentReview } from '@/components/EnvironmentReview'
 import { num, parseNum } from '@/lib/format'
@@ -33,6 +33,13 @@ export function SettingsPage() {
   const gw = (() => {
     try {
       return gatewayConfigFor(network)
+    } catch {
+      return null
+    }
+  })()
+  const treasury = (() => {
+    try {
+      return resolveGatewayTreasury(network)
     } catch {
       return null
     }
@@ -237,6 +244,24 @@ export function SettingsPage() {
                   </div>
                 </Field>
               </form>
+              <Field
+                label={t('Destino Treasury — Circle Gateway', 'Treasury destination — Circle Gateway')}
+                hint={t('Contrato oficial Circle Gateway utilizado pela Treasury neste ambiente. O endereço é selecionado automaticamente conforme a rede.', 'Official Circle Gateway contract used by the Treasury in this environment. The address is selected automatically based on the network.')}
+              >
+                <div className="flex gap-2">
+                  <input className={inputCls} value={treasury?.recipient ?? ''} readOnly aria-label="Circle Gateway Treasury" />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!treasury) return
+                      void navigator.clipboard.writeText(treasury.recipient)
+                      toast.success(t('Endereço copiado.', 'Address copied.'))
+                    }}
+                  >
+                    {t('Copiar', 'Copy')}
+                  </Button>
+                </div>
+              </Field>
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -244,8 +269,8 @@ export function SettingsPage() {
                 }}
               >
                 <Field
-                  label={t('Beneficiário institucional (este ambiente)', 'Institutional recipient (this environment)')}
-                  hint={t('Para onde os clientes pagam, neste ambiente. Nunca use a carteira do operador nem o GatewayWallet.', 'Where customers pay in this environment. Never use the operator wallet or the GatewayWallet.')}
+                  label={t('Beneficiário convencional (legado)', 'Conventional beneficiary (legacy)')}
+                  hint={t('Opcional. Para cobranças legadas por transferência ERC20 simples a uma carteira convencional. O destino Gateway acima é resolvido automaticamente e não deve ser digitado aqui.', 'Optional. For legacy charges via simple ERC20 transfer to a conventional wallet. The Gateway destination above is resolved automatically and should not be entered here.')}
                 >
                   <div className="flex gap-2">
                     <input className={inputCls} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x…" />

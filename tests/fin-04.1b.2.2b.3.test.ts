@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { SessionStore } from '../server/session'
 import { readCheckoutFromLocation, PaymentApiError } from '../src/lib/payment-api'
+import { resolveGatewayTreasury, validateGatewayTreasury, gatewayConfigFor } from '../src/lib/gateway-config'
 
 try {
   GlobalRegistrator.register()
@@ -56,5 +57,25 @@ describe('FIN-04.1B.2.2B.3 — erro de pagamento', () => {
     expect(err.code).toBe('insufficient_balance')
     expect(err.status).toBe(409)
     expect(err).toBeInstanceOf(Error)
+  })
+})
+
+describe('FIN-04.1B.2.2B.3 — destino Circle Gateway (auto-resolvido)', () => {
+  test('resolveGatewayTreasury resolve o GatewayWallet oficial por ambiente', () => {
+    expect(resolveGatewayTreasury('testnet').recipient.toLowerCase()).toBe('0x0077777d7eba4688bdef3e311b846f25870a19b9')
+    expect(resolveGatewayTreasury('mainnet').recipient.toLowerCase()).toBe('0x77777777dcc4d5a8b6e418fd04d8997ef11000ee')
+    expect(resolveGatewayTreasury('testnet').chainId).toBe(5042002)
+    expect(resolveGatewayTreasury('mainnet').chainId).toBe(5042)
+  })
+
+  test('validateGatewayTreasury aceita o GatewayWallet do ambiente e rejeita o de outro ambiente', () => {
+    const testnet = gatewayConfigFor('testnet')
+    const mainnet = gatewayConfigFor('mainnet')
+    expect(validateGatewayTreasury(testnet.gatewayWallet, 'testnet', 5042002)).toBe(true)
+    expect(validateGatewayTreasury(mainnet.gatewayWallet, 'mainnet', 5042)).toBe(true)
+    // GatewayWallet Testnet em Mainnet → rejeitado (isolamento).
+    expect(validateGatewayTreasury(testnet.gatewayWallet, 'mainnet', 5042)).toBe(false)
+    // Endereço convencional não é o GatewayWallet.
+    expect(validateGatewayTreasury('0x000000000000000000000000000000000000000a', 'testnet', 5042002)).toBe(false)
   })
 })

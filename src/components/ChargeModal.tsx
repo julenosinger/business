@@ -6,7 +6,7 @@ import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
-import { treasuryRecipientFor, validateBeneficiary, validateGatewayTreasury } from '@/lib/gateway-config'
+import { treasuryRecipientFor, validateGatewayTreasury, resolveGatewayTreasury } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { checkoutUrlFor, getChargeAvailability } from '@/lib/gateway-charge'
@@ -66,7 +66,9 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   const rate = usdcRateOf(data.settings)
-  // Destino institucional da Treasury (nunca a carteira conectada do operador), resolvido por ambiente.
+  // Destino Gateway oficial (resolvido pelo registry, nunca a carteira do operador).
+  const gatewayTreasury = resolveGatewayTreasury(network)
+  // Beneficiário convencional (legado, transferência ERC20 simples) — opcional.
   const treasuryRecipient = treasuryRecipientFor(data.settings, network)
 
   const [selected, setSelected] = useState('')
@@ -147,10 +149,9 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     baseAmount = null
   }
   const chain = chainByKey(chainKey)
-  // Destino pode ser o GatewayWallet (depósito oficial Circle Gateway) OU um beneficiário convencional (legado).
-  const beneficiary = treasuryRecipient ? validateBeneficiary(treasuryRecipient, network) : null
-  const gatewayValid = chain ? validateGatewayTreasury(treasuryRecipient, network, chain.chainId) : false
-  const destinationValid = Boolean(beneficiary?.ok || gatewayValid)
+  // Destino Gateway oficial (resolvido pelo registry); beneficiário convencional é opcional (legado).
+  const gatewayValid = chain ? validateGatewayTreasury(gatewayTreasury.recipient, network, chain.chainId) : false
+  const destinationValid = gatewayValid
 
   const handleCreateCharge = async () => {
     if (busyRef.current) return
@@ -161,16 +162,12 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
 
     try {
       // Validações autoritativas com erro explicativo (nunca bloqueio silencioso).
-      if (!treasuryRecipient) {
-        setError(t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos.', 'Configure the institutional Treasury address (Settings) to receive payments.'))
-        return
-      }
       if (!chain) {
         setError(t('Rede selecionada inválida.', 'Invalid selected network.'))
         return
       }
-      if (!gatewayValid && !beneficiary?.ok) {
-        setError(t('O destino configurado não é um beneficiário válido nem o GatewayWallet deste ambiente. Revise nas Configurações.', 'The configured destination is neither a valid beneficiary nor the GatewayWallet for this environment. Review in Settings.'))
+      if (!gatewayValid) {
+        setError(t('Destino Circle Gateway indisponível para este ambiente.', 'Circle Gateway destination unavailable for this environment.'))
         return
       }
       if (!baseAmount) {
@@ -344,13 +341,9 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          {!treasuryRecipient ? (
+          {!destinationValid ? (
             <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
-              {t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos. A carteira conectada não é usada como destinatário.', 'Configure the institutional Treasury address (Settings) to receive payments. The connected wallet is not used as the recipient.')}
-            </p>
-          ) : !destinationValid ? (
-            <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
-              {t('O destino configurado não é um beneficiário válido nem o GatewayWallet deste ambiente. Revise nas Configurações.', 'The configured destination is neither a valid beneficiary nor the GatewayWallet for this environment. Review in Settings.')}
+              {t('Destino Circle Gateway indisponível para este ambiente.', 'Circle Gateway destination unavailable for this environment.')}
             </p>
           ) : null}
 
@@ -399,7 +392,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
           </Field>
 
           <p className="text-xs text-subtle text-pretty">
-            {t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')} <span className="mono">{treasuryRecipient}</span>
+            {t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')} <span className="mono">{gatewayTreasury.recipient}</span>
           </p>
           {error ? <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{error}</p> : null}
           <Button className="w-full" disabled={busy} aria-busy={busy} onClick={() => void handleCreateCharge()}>

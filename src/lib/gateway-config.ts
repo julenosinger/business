@@ -226,6 +226,28 @@ export function resolveGatewayReceivingContext(
   }
 }
 
+/**
+ * Destino da Treasury para operações Circle Gateway — resolvido AUTOMATICAMENTE pelo registry
+ * oficial (nunca digitado pelo usuário, nunca a carteira conectada). `recipient` é o GatewayWallet.
+ */
+export function resolveGatewayTreasury(environment: NetworkId): {
+  environment: NetworkId
+  chainId: number
+  recipient: Address
+  paymentRail: 'circle_gateway'
+  token: Address
+} {
+  if (environment !== 'mainnet' && environment !== 'testnet') throw new Error('invalid_environment')
+  const cfg = gatewayConfigFor(environment)
+  return {
+    environment,
+    chainId: cfg.chainId,
+    recipient: cfg.gatewayWallet,
+    paymentRail: 'circle_gateway',
+    token: cfg.usdcToken,
+  }
+}
+
 export type BeneficiaryReason = 'invalid_address' | 'gateway_contract' | 'unknown_environment'
 export type BeneficiaryValidation = { ok: true; value: Address } | { ok: false; reason: BeneficiaryReason }
 
