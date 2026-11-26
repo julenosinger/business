@@ -363,6 +363,8 @@ export interface PaymentIntent {
   state: PaymentIntentState
   txHashes: string[]
   history: PaymentIntentEvent[]
+  /** Chave de idempotência (opcional): a mesma chave retorna a intenção existente. */
+  idempotencyKey?: string
 }
 
 export interface Settings {

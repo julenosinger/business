@@ -48,6 +48,8 @@ import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury
 import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import { categoryById, isUnsupportedCategory } from './financial-categories'
+import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary } from './gateway-config'
+import { canTransitionIntent } from './payment-intent'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -454,16 +456,16 @@ export interface PaymentIntentInput {
   customerId?: string
   amount: number
   usdcMinor: string
-  chainId: number
-  beneficiary: string
-  gatewayWallet: string
-  token: string
   currency: CurrencyCode
   rate?: number
   expiresAt: string
+  /** Chave de idempotência (opcional, recomendada): mesma chave retorna a intenção existente. */
+  idempotencyKey?: string
 }
 
-export type IntentResult = { ok: true; intentId: string } | { ok: false; reason: 'not_found' | 'invalid_amount' | 'already_exists' }
+export type IntentResult =
+  | { ok: true; intentId: string }
+  | { ok: false; reason: 'not_found' | 'invalid_amount' | 'not_configured' | 'invalid_expiration' | 'conflict' }
 
 export interface PurchaseInput {
   supplierId?: string
@@ -1450,17 +1452,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString(), status: op.status ?? 'pending' }, ...d.treasuryOps] })),
       createPaymentIntent: (input) => {
         const env = getNetwork()
+        // Resolve a configuração AUTORITATIVA (não confia nos campos do chamador).
+        const cfg = gatewayConfigFor(env)
+        const beneficiary = treasuryRecipientFor(dataRef.current.settings, env)
+        if (!validateBeneficiary(beneficiary, env).ok) return { ok: false, reason: 'not_configured' }
+
+        // Idempotência: a mesma chave retorna a intenção existente.
+        if (input.idempotencyKey) {
+          const existing = dataRef.current.paymentIntents.find((i) => i.idempotencyKey === input.idempotencyKey)
+          if (existing) {
+            // Chave com parâmetros divergentes → conflito explícito.
+            const same = existing.accountId === input.accountId && existing.amount === input.amount && existing.usdcMinor === input.usdcMinor
+            return same ? { ok: true, intentId: existing.intentId } : { ok: false, reason: 'conflict' }
+          }
+        }
+
         const account = dataRef.current.accounts.find((a) => a.id === input.accountId)
-        if (!account) return { ok: false, reason: 'not_found' }
-        if (account.environment && account.environment !== 'unassigned' && account.environment !== env) return { ok: false, reason: 'not_found' }
-        // Obrigação deve estar em aberto (pendente) e vinculada à venda quando saleId é informado.
-        if (account.status !== 'open') return { ok: false, reason: 'not_found' }
+        if (!account || account.kind !== 'receivable' || account.status !== 'open' || account.canceledAt) return { ok: false, reason: 'not_found' }
+        if (account.environment !== env) return { ok: false, reason: 'not_found' }
+
         if (input.saleId) {
           const sale = dataRef.current.sales.find((s) => s.id === input.saleId)
-          if (!sale || sale.accountId !== input.accountId) return { ok: false, reason: 'not_found' }
+          if (!sale || sale.canceledAt || sale.accountId !== input.accountId) return { ok: false, reason: 'not_found' }
         }
+        // Integridade monetária: valor finito/positivo, usdcMinor inteiro positivo, sem overflow uint256.
         if (!Number.isFinite(input.amount) || input.amount <= 0) return { ok: false, reason: 'invalid_amount' }
-        if (!/^\d+$/.test(input.usdcMinor) || BigInt(input.usdcMinor) <= 0n) return { ok: false, reason: 'invalid_amount' }
+        if (!/^\d+$/.test(input.usdcMinor)) return { ok: false, reason: 'invalid_amount' }
+        const minor = BigInt(input.usdcMinor)
+        if (minor <= 0n || minor > (1n << 256n) - 1n) return { ok: false, reason: 'invalid_amount' }
+        // Correspondência monetária (Gate B): para USDC, usdcMinor deve corresponder a amount em 6 casas.
+        if (input.currency === 'USDC') {
+          const expected = BigInt(Math.round(input.amount * 1_000_000))
+          if (expected !== minor) return { ok: false, reason: 'invalid_amount' }
+        }
+        // Reserva: não pode exceder o saldo pendente menos o já reservado por intenções ativas.
+        const reserved = dataRef.current.paymentIntents
+          .filter((i) => i.accountId === input.accountId && !['EXPIRED', 'CANCELED', 'FAILED'].includes(i.state))
+          .reduce((s, i) => s + i.amount, 0)
+        if (input.amount > accountOutstanding(account) - reserved) return { ok: false, reason: 'invalid_amount' }
+        // Expiração futura válida.
+        const expires = Date.parse(input.expiresAt)
+        if (!Number.isFinite(expires) || expires <= Date.now()) return { ok: false, reason: 'invalid_expiration' }
+
         const intentId = uid()
         const now = new Date().toISOString()
         const intent: PaymentIntent = {
@@ -1470,14 +1503,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           accountId: input.accountId,
           ...(input.customerId ? { customerId: input.customerId } : {}),
           environment: env,
-          chainId: input.chainId,
-          token: input.token,
-          gatewayWallet: input.gatewayWallet,
-          beneficiary: input.beneficiary,
+          chainId: cfg.chainId,
+          token: cfg.usdcToken,
+          gatewayWallet: cfg.gatewayWallet,
+          beneficiary,
           amount: input.amount,
           currency: input.currency,
           usdcMinor: input.usdcMinor,
           ...(input.rate !== undefined ? { rate: input.rate } : {}),
+          ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
           createdAt: now,
           expiresAt: input.expiresAt,
           state: 'CREATED',
@@ -1490,6 +1524,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       transitionPaymentIntent: (intentId, state, note) => {
         const cur = dataRef.current.paymentIntents.find((i) => i.intentId === intentId)
         if (!cur) return false
+        // Máquina de estados protegida: transições explícitas; repetição do mesmo estado é idempotente.
+        if (!canTransitionIntent(cur.state, state)) return false
         set((d) => ({
           ...d,
           paymentIntents: d.paymentIntents.map((i) =>
