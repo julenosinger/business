@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.3.2A — Financial Integration Audit & Automation Core
 
-**HEAD inicial:** `9d012e0` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `9d012e0` · **HEAD final:** `18218f5`
 
 Resultado: **710 testes passando** (eram 704) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -51,4 +51,4 @@ Resultado: **710 testes passando** (eram 704) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert aea731d && git revert e7a104d`
