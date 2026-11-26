@@ -13,6 +13,10 @@
 
 export interface SessionRecord {
   id: string
+  /** Organização vinculada à sessão (derivada no servidor, nunca do cliente). */
+  organizationId: string
+  /** Permissões concedidas na sessão (ex.: 'payments:write', 'chat:write'). */
+  permissions: string[]
   createdAt: number
   expiresAt: number
 }
@@ -28,10 +32,10 @@ export class SessionStore {
 
   constructor(private readonly ttlMs: number = DEFAULT_TTL_MS) {}
 
-  create(): SessionRecord {
+  create(organizationId: string, permissions: string[]): SessionRecord {
     const id = crypto.randomUUID()
     const now = Date.now()
-    const rec: SessionRecord = { id, createdAt: now, expiresAt: now + this.ttlMs }
+    const rec: SessionRecord = { id, organizationId, permissions, createdAt: now, expiresAt: now + this.ttlMs }
     this.sessions.set(id, rec)
     this.cleanup()
     return rec

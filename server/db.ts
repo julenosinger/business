@@ -128,6 +128,11 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS payment_intents_account_idx ON payment_intents (organization_id, environment, account_id);
   `,
+  // v3 — campos de submissão da tentativa (persistência pré-assinatura, FIN-04.1B.2.2B.3).
+  `
+  ALTER TABLE payment_attempts ADD COLUMN submission_started_at TEXT;
+  ALTER TABLE payment_attempts ADD COLUMN submitted_at TEXT;
+  `,
 ]
 
 export interface SettlementRecord {

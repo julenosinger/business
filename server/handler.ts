@@ -7,7 +7,7 @@
 import { UnauthorizedError, type LedgerApi } from './api'
 import type { ChatApi, ChatRequest } from './chat'
 import { CSRF_HEADER, SessionStore, SESSION_COOKIE, clearSessionCookieHeader, parseCookies, sessionCookieHeader } from './session'
-import { getPublicCheckout, type GatewayEnvironment } from './payments'
+import { getPublicCheckout, createCheckoutAttempt, beginDepositSubmission, registerDepositSubmission, getCheckoutStatus, type GatewayEnvironment } from './payments'
 import type { LedgerDb } from './db'
 
 export interface HandlerConfig {
@@ -46,7 +46,7 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
         const body = (await req.json()) as { secret?: string }
         if (!cfg.loginSecret) return json({ error: 'login_disabled' }, 403, cors())
         if (typeof body?.secret !== 'string' || body.secret !== cfg.loginSecret) return json({ error: 'unauthorized' }, 401, cors())
-        const session = cfg.sessions.create()
+        const session = cfg.sessions.create(cfg.api.cfg.orgId, ['chat:write', 'payments:write'])
         return json({ ok: true }, 200, { ...cors(), 'set-cookie': sessionCookieHeader(session.id, cfg.cookieSecure, cfg.sessionMaxAge) })
       }
       if (method === 'POST' && url.pathname === '/api/auth/logout') {
@@ -69,13 +69,38 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
       if (method === 'POST' && url.pathname === '/api/ledger/events') return json(cfg.api.postEvent(auth, (await req.json()) as never))
       if (method === 'POST' && url.pathname === '/api/ledger/settle') return json(await cfg.api.settle(auth, (await req.json()) as never))
 
+      // Autenticação comercial: Bearer (admin) OU sessão com permissão `payments:write`.
+      const resolvePaymentOrg = (req: Request): string => {
+        if (auth === `Bearer ${cfg.api.cfg.token}`) return cfg.api.cfg.orgId
+        const session = cfg.sessions.validate(sessionId(req))
+        if (session && session.permissions.includes('payments:write')) return session.organizationId
+        throw new UnauthorizedError()
+      }
+
       // Cobrança Gateway compartilhável (autenticada pela organização).
       if (method === 'POST' && url.pathname === '/api/payment-intents') {
         const body = (await req.json()) as { environment?: unknown } & Record<string, unknown>
         const environment: GatewayEnvironment | null = body.environment === 'mainnet' || body.environment === 'testnet' ? body.environment : null
         if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
-        const result = cfg.api.createPaymentIntent(auth, environment, body as never)
+        const result = cfg.api.createPaymentIntentForOrg(resolvePaymentOrg(req), environment, body as never)
         return json(result, result.ok ? 200 : 409, cors())
+      }
+      if (method === 'GET' && url.pathname === '/api/payment-intents') {
+        const env = url.searchParams.get('environment')
+        const environment: GatewayEnvironment | null = env === 'mainnet' || env === 'testnet' ? env : null
+        if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
+        return json(cfg.api.listPaymentIntentsForOrg(resolvePaymentOrg(req), environment), 200, cors())
+      }
+      const intentMatch = url.pathname.match(/^\/api\/payment-intents\/([^/]+)$/)
+      if (intentMatch) {
+        if (method === 'GET') {
+          const intent = cfg.api.getPaymentIntent(auth, intentMatch[1]!)
+          return intent ? json(intent, 200, cors()) : json({ error: 'not_found' }, 404, cors())
+        }
+        if (method === 'POST' && url.pathname.endsWith('/share')) {
+          const result = cfg.api.sharePaymentIntentForOrg(resolvePaymentOrg(req), intentMatch[1]!)
+          return json(result, result.ok ? 200 : 404, cors())
+        }
       }
 
       // Checkout público (sem autenticação): dados comerciais mínimos, nunca dados privados.
@@ -85,6 +110,28 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
         const checkout = getPublicCheckout(cfg.db, checkoutMatch[1]!)
         if (!checkout) return json({ error: 'not_found' }, 404, { ...cors(), ...noStore })
         return json(checkout, 200, { ...cors(), ...noStore })
+      }
+      const checkoutStatusMatch = url.pathname.match(/^\/api\/checkout\/([A-Za-z0-9_-]+)\/status$/)
+      if (method === 'GET' && checkoutStatusMatch) {
+        const status = getCheckoutStatus(cfg.db, checkoutStatusMatch[1]!)
+        return status ? json(status, 200, cors()) : json({ error: 'not_found' }, 404, cors())
+      }
+      const attemptMatch = url.pathname.match(/^\/api\/checkout\/([A-Za-z0-9_-]+)\/attempts$/)
+      if (method === 'POST' && attemptMatch) {
+        const body = (await req.json()) as { payer?: unknown }
+        const result = createCheckoutAttempt(cfg.db, attemptMatch[1]!, String(body.payer ?? ''))
+        return json(result, result.ok ? 200 : 409, cors())
+      }
+      const attemptActionMatch = url.pathname.match(/^\/api\/checkout\/([A-Za-z0-9_-]+)\/attempts\/([^/]+)\/(begin|submission)$/)
+      if (method === 'POST' && attemptActionMatch) {
+        const body = (await req.json()) as { payer?: unknown; txHash?: unknown }
+        const [, token, attemptId, action] = attemptActionMatch
+        if (action === 'begin') {
+          const result = beginDepositSubmission(cfg.db, token!, attemptId!, String(body.payer ?? ''))
+          return json(result, result.ok ? 200 : 409, cors())
+        }
+        const result = registerDepositSubmission(cfg.db, token!, attemptId!, String(body.txHash ?? ''))
+        return json(result, result.ok ? 200 : 409, cors())
       }
 
       return json({ error: 'not_found' }, 404)

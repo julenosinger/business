@@ -11,7 +11,7 @@ import { verifyUsdcReceipt } from '../src/lib/accounting/verify'
 import type { EventDraft, LedgerState } from '../src/lib/accounting/types'
 import type { LedgerDb } from './db'
 import { settleOperation, type SettleInput, type SettleResult } from './settle'
-import { createGatewayCharge, type CreateCommercialChargeInput, type CreateGatewayChargeResult } from './payments'
+import { createGatewayCharge, listPaymentIntents, getPaymentIntent, sharePaymentIntent, type CreateCommercialChargeInput, type CreateGatewayChargeResult, type PaymentIntentSummary, type ShareResult } from './payments'
 
 export interface ApiConfig {
   token: string
@@ -36,6 +36,13 @@ export interface LedgerApi {
   settle(auth: string | undefined, input: SettleInput): Promise<SettleResult>
   /** Cria cobrança Gateway compartilhável (autenticada pela organização; autoridade do servidor). */
   createPaymentIntent(auth: string | undefined, environment: 'mainnet' | 'testnet', input: CreateCommercialChargeInput): CreateGatewayChargeResult
+  listPaymentIntents(auth: string | undefined, environment: 'mainnet' | 'testnet'): PaymentIntentSummary[]
+  getPaymentIntent(auth: string | undefined, intentId: string): PaymentIntentSummary | null
+  sharePaymentIntent(auth: string | undefined, intentId: string): ShareResult
+  /** Variantes sem `authorize` (orgId resolvido pelo handler, via sessão comercial). */
+  createPaymentIntentForOrg(orgId: string, environment: 'mainnet' | 'testnet', input: CreateCommercialChargeInput): CreateGatewayChargeResult
+  listPaymentIntentsForOrg(orgId: string, environment: 'mainnet' | 'testnet'): PaymentIntentSummary[]
+  sharePaymentIntentForOrg(orgId: string, intentId: string): ShareResult
   cfg: ApiConfig
 }
 
@@ -77,6 +84,28 @@ export function createApi(db: LedgerDb, cfg: ApiConfig, verify: typeof verifyUsd
       authorize(auth)
       const depositor = cfg.depositors?.[environment]?.trim() || null
       return createGatewayCharge(db, cfg.orgId, environment, input, depositor)
+    },
+    listPaymentIntents(auth, environment) {
+      authorize(auth)
+      return listPaymentIntents(db, cfg.orgId, environment)
+    },
+    getPaymentIntent(auth, intentId) {
+      authorize(auth)
+      return getPaymentIntent(db, cfg.orgId, intentId)
+    },
+    sharePaymentIntent(auth, intentId) {
+      authorize(auth)
+      return sharePaymentIntent(db, cfg.orgId, intentId)
+    },
+    createPaymentIntentForOrg(orgId, environment, input) {
+      const depositor = cfg.depositors?.[environment]?.trim() || null
+      return createGatewayCharge(db, orgId, environment, input, depositor)
+    },
+    listPaymentIntentsForOrg(orgId, environment) {
+      return listPaymentIntents(db, orgId, environment)
+    },
+    sharePaymentIntentForOrg(orgId, intentId) {
+      return sharePaymentIntent(db, orgId, intentId)
     },
   }
 }

@@ -6,8 +6,8 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import type { LedgerDb } from './db'
 import { gatewayConfigFor, validateBeneficiary } from '../src/lib/gateway-config'
-import { parseMinorUnits, parseExactDecimal } from '../src/lib/payment-intent'
-import { EXPONENT } from '../src/lib/accounting/money'
+import { parseMinorUnits, parseExactDecimal, convertToUsdcMinor } from '../src/lib/payment-intent'
+import { EXPONENT, parseRate } from '../src/lib/accounting/money'
 import { emptyLedger, postEvent } from '../src/lib/accounting/engine'
 import { obligationOutstandingMinor, obligationCurrency } from './settle'
 import type { CurrencyCode } from '../src/lib/types'
@@ -155,9 +155,15 @@ export function createGatewayCharge(db: LedgerDb, orgId: string, environment: Ga
         usdcMinor = parseExactDecimal(input.amountDecimal, 6)
         amountMinor = usdcMinor
       } else {
-        // Moeda não-USDC exige cotação autoritativa (razão) — pendente nesta fase.
+        // Moeda não-USDC: reserva em unidades menores da moeda original; transação em USDC
+        // via cotação autoritativa do RAZÃO ("moeda original por 1 USDC"). Sem conversão 1:1.
         amountMinor = parseExactDecimal(input.amountDecimal, exp)
-        return { ok: false, reason: 'invalid_currency' }
+        const fx = ledger.fxRates.find((r) => r.from === 'USDC' && r.to === currency)
+        if (!fx) return { ok: false, reason: 'invalid_currency' }
+        const rate = parseRate(fx.rate)
+        if (!rate) return { ok: false, reason: 'invalid_currency' }
+        const rateDecimals = (fx.rate.split('.')[1] ?? '').length
+        usdcMinor = convertToUsdcMinor(amountMinor, exp, rate.num, rateDecimals)
       }
     } catch {
       return { ok: false, reason: 'invalid_amount' }
@@ -270,4 +276,138 @@ export function getPublicCheckout(db: LedgerDb, token: string): PublicCheckout |
     state: row.state,
     paymentReady,
   }
+}
+
+// -----------------------------------------------------------------------------------------------------------
+// Consulta do comerciante (autenticada)
+// -----------------------------------------------------------------------------------------------------------
+
+export interface PaymentIntentSummary {
+  intentId: string
+  environment: GatewayEnvironment
+  accountId: string
+  currency: string
+  amountMinor: string
+  usdcMinor: string
+  state: string
+  createdAt: string
+  expiresAt: string
+  transactionHash: string | null
+}
+
+export function listPaymentIntents(db: LedgerDb, orgId: string, environment: GatewayEnvironment): PaymentIntentSummary[] {
+  const rows = db.db
+    .query(
+      `SELECT pi.intent_id, pi.environment, pi.account_id, pi.currency, pi.amount_minor, pi.usdc_minor, pi.state, pi.created_at, pi.expires_at,
+              (SELECT deposit_hash FROM payment_attempts pa WHERE pa.intent_id = pi.intent_id AND pa.deposit_hash IS NOT NULL LIMIT 1) AS tx_hash
+       FROM payment_intents pi
+       WHERE pi.organization_id = ? AND pi.environment = ?
+       ORDER BY pi.created_at DESC`,
+    )
+    .all(orgId, environment) as { intent_id: string; environment: string; account_id: string; currency: string; amount_minor: string; usdc_minor: string; state: string; created_at: string; expires_at: string; tx_hash: string | null }[]
+  return rows.map((r) => ({
+    intentId: r.intent_id,
+    environment: r.environment as GatewayEnvironment,
+    accountId: r.account_id,
+    currency: r.currency,
+    amountMinor: r.amount_minor,
+    usdcMinor: r.usdc_minor,
+    state: r.state,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    transactionHash: r.tx_hash,
+  }))
+}
+
+export function getPaymentIntent(db: LedgerDb, orgId: string, intentId: string): PaymentIntentSummary | null {
+  const r = db.db
+    .query(
+      `SELECT intent_id, environment, account_id, currency, amount_minor, usdc_minor, state, created_at, expires_at
+       FROM payment_intents WHERE intent_id = ? AND organization_id = ?`,
+    )
+    .get(intentId, orgId) as { intent_id: string; environment: string; account_id: string; currency: string; amount_minor: string; usdc_minor: string; state: string; created_at: string; expires_at: string } | undefined
+  if (!r) return null
+  return { intentId: r.intent_id, environment: r.environment as GatewayEnvironment, accountId: r.account_id, currency: r.currency, amountMinor: r.amount_minor, usdcMinor: r.usdc_minor, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at, transactionHash: null }
+}
+
+export type ShareResult = { ok: true; checkoutToken: string; expiresAt: string } | { ok: false; reason: 'not_found' }
+
+/** Reemite o link para uma intenção existente (sem duplicar intenção/reserva). */
+export function sharePaymentIntent(db: LedgerDb, orgId: string, intentId: string): ShareResult {
+  const intent = db.db.query('SELECT expires_at FROM payment_intents WHERE intent_id = ? AND organization_id = ?').get(intentId, orgId) as { expires_at: string } | undefined
+  if (!intent) return { ok: false, reason: 'not_found' }
+  const { token, tokenHash } = generateCheckoutToken()
+  const now = new Date().toISOString()
+  db.db.query('INSERT INTO checkout_tokens (token_hash, intent_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(tokenHash, intentId, now, intent.expires_at)
+  return { ok: true, checkoutToken: token, expiresAt: intent.expires_at }
+}
+
+// -----------------------------------------------------------------------------------------------------------
+// Tentativas e execução (checkout público)
+// -----------------------------------------------------------------------------------------------------------
+
+export type AttemptResult = { ok: true; attemptId: string } | { ok: false; reason: string }
+export type HashResult = { ok: true; hash: string; replay: boolean } | { ok: false; reason: string }
+
+const ACTIVE_ATTEMPT_STATES = ['CREATED', 'AWAITING_APPROVAL', 'APPROVAL_PENDING', 'READY_TO_DEPOSIT', 'AWAITING_SIGNATURE', 'SUBMITTED', 'AMBIGUOUS', 'REQUIRES_REVIEW']
+
+function findIntentByToken(db: LedgerDb, token: string): { intent_id: string; organization_id: string; environment: string; state: string; depositor: string | null; expires_at: string } | null {
+  if (!isCheckoutTokenValid(token)) return null
+  const row = db.db
+    .query('SELECT pi.intent_id, pi.organization_id, pi.environment, pi.state, pi.depositor, pi.expires_at FROM checkout_tokens ct JOIN payment_intents pi ON pi.intent_id = ct.intent_id WHERE ct.token_hash = ? AND ct.revoked_at IS NULL')
+    .get(hashCheckoutToken(token)) as { intent_id: string; organization_id: string; environment: string; state: string; depositor: string | null; expires_at: string } | undefined
+  return row ?? null
+}
+
+/** Cria uma tentativa autorizada para uma intenção pagável (uma tentativa ativa por vez). */
+export function createCheckoutAttempt(db: LedgerDb, token: string, payer: string): AttemptResult {
+  const intent = findIntentByToken(db, token)
+  if (!intent) return { ok: false, reason: 'checkout_unavailable' }
+  if (intent.depositor == null || intent.state !== 'CREATED' || Date.parse(intent.expires_at) <= Date.now()) return { ok: false, reason: 'checkout_unavailable' }
+  if (typeof payer !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payer)) return { ok: false, reason: 'invalid_payer' }
+  const active = db.db
+    .query(`SELECT COUNT(*) AS c FROM payment_attempts WHERE intent_id = ? AND state IN (${ACTIVE_ATTEMPT_STATES.map(() => '?').join(',')})`)
+    .get(intent.intent_id, ...ACTIVE_ATTEMPT_STATES) as { c: number }
+  if (active.c > 0) return { ok: false, reason: 'attempt_requires_recovery' }
+  const attemptId = randomUUID()
+  const now = new Date().toISOString()
+  db.db
+    .query('INSERT INTO payment_attempts (attempt_id, intent_id, organization_id, environment, chain_id, payer, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(attemptId, intent.intent_id, intent.organization_id, intent.environment, 0, payer, 'CREATED', now, now)
+  return { ok: true, attemptId }
+}
+
+/** Persiste o início da submissão (AWAITING_SIGNATURE) ANTES da chamada à carteira. */
+export function beginDepositSubmission(db: LedgerDb, token: string, attemptId: string, payer: string): { ok: true } | { ok: false; reason: string } {
+  const intent = findIntentByToken(db, token)
+  if (!intent) return { ok: false, reason: 'checkout_unavailable' }
+  if (typeof payer !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payer)) return { ok: false, reason: 'invalid_payer' }
+  const attempt = db.db.query('SELECT intent_id, state FROM payment_attempts WHERE attempt_id = ?').get(attemptId) as { intent_id: string; state: string } | undefined
+  if (!attempt || attempt.intent_id !== intent.intent_id) return { ok: false, reason: 'attempt_not_found' }
+  if (attempt.state !== 'CREATED' && attempt.state !== 'READY') return { ok: false, reason: 'invalid_attempt_state' }
+  db.db.query('UPDATE payment_attempts SET payer = ?, state = ?, submission_started_at = ?, updated_at = ? WHERE attempt_id = ?').run(payer, 'AWAITING_SIGNATURE', new Date().toISOString(), new Date().toISOString(), attemptId)
+  return { ok: true }
+}
+
+/** Registra o hash do depósito (imutável; replay idempotente). Exige submissão iniciada. */
+export function registerDepositSubmission(db: LedgerDb, token: string, attemptId: string, txHash: string): HashResult {
+  if (typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) return { ok: false, reason: 'invalid_hash' }
+  const hash = txHash.toLowerCase()
+  const attempt = db.db.query('SELECT * FROM payment_attempts WHERE attempt_id = ?').get(attemptId) as { deposit_hash: string | null; state: string; submission_started_at: string | null } | undefined
+  if (!attempt) return { ok: false, reason: 'attempt_not_found' }
+  if (attempt.deposit_hash) return attempt.deposit_hash.toLowerCase() === hash ? { ok: true, hash, replay: true } : { ok: false, reason: 'hash_conflict' }
+  if (attempt.state !== 'AWAITING_SIGNATURE' && attempt.state !== 'AMBIGUOUS') return { ok: false, reason: 'invalid_submission_state' }
+  if (!attempt.submission_started_at) return { ok: false, reason: 'submission_not_started' }
+  db.db.query('UPDATE payment_attempts SET deposit_hash = ?, state = ?, updated_at = ? WHERE attempt_id = ?').run(hash, 'SUBMITTED', new Date().toISOString(), attemptId)
+  return { ok: true, hash, replay: false }
+}
+
+/** Consulta de progresso pública (estado da intenção + tentativas). */
+export function getCheckoutStatus(db: LedgerDb, token: string): { intentId: string; state: string; attempts: { attemptId: string; state: string; depositHash: string | null }[] } | null {
+  const intent = findIntentByToken(db, token)
+  if (!intent) return null
+  const attempts = db.db
+    .query('SELECT attempt_id, state, deposit_hash FROM payment_attempts WHERE intent_id = ? ORDER BY created_at DESC')
+    .all(intent.intent_id) as { attempt_id: string; state: string; deposit_hash: string | null }[]
+  return { intentId: intent.intent_id, state: intent.state, attempts: attempts.map((a) => ({ attemptId: a.attempt_id, state: a.state, depositHash: a.deposit_hash })) }
 }
