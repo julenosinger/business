@@ -50,7 +50,7 @@ import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury
 import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import { categoryById, isUnsupportedCategory } from './financial-categories'
-import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary } from './gateway-config'
+import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary, resolveGatewayReceivingContext } from './gateway-config'
 import {
   authorizeIntentTransition,
   parseMinorUnits,
@@ -484,6 +484,8 @@ export interface PaymentIntentInput {
   expiresAt: string
   /** Chave de idempotência (opcional, recomendada): mesma chave retorna a intenção existente. */
   idempotencyKey?: string
+  /** Referência pública opaca do checkout (ou seu hash). */
+  checkoutToken?: string
 }
 
 export type IntentResult =
@@ -1429,6 +1431,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => {
           const r = d.requests.find((x) => x.id === id)
           if (!r || r.status !== 'open') return d
+          // Cobrança Circle Gateway exige verificação independente: o watcher legado (Transfer) NUNCA a liquida.
+          if (r.paymentRail === 'circle_gateway') return d
           let next: AppData = {
             ...d,
             requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
@@ -1486,8 +1490,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const orgId = dataRef.current.ledger.orgId
         // Resolve a configuração AUTORITATIVA (não confia nos campos do chamador).
         const cfg = gatewayConfigFor(env)
-        const beneficiary = treasuryRecipientFor(dataRef.current.settings, env)
-        if (!validateBeneficiary(beneficiary, env).ok) return { ok: false, reason: 'not_configured' }
+        // Destino do depósito é SEMPRE o GatewayWallet oficial (registry). Sem configuração → falha explícita.
+        const configured = treasuryRecipientFor(dataRef.current.settings, env)
+        if (!configured) return { ok: false, reason: 'not_configured' }
+        // Depositor = conta institucional convencional creditada; '' = configuração pendente (nunca o GatewayWallet).
+        const context = resolveGatewayReceivingContext(dataRef.current.settings, env)
+        const beneficiary = context.depositor ?? ''
 
         // usdcMinor (on-chain) exato: inteiro positivo ≤ uint256, sem float.
         let usdcMinor: bigint
@@ -1603,6 +1611,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           usdcMinor: input.usdcMinor,
           ...(input.rate !== undefined ? { rate: input.rate } : {}),
           ...(scopedKey ? { idempotencyKey: scopedKey } : {}),
+          ...(input.checkoutToken ? { checkoutToken: input.checkoutToken } : {}),
           fingerprint,
           createdAt: now,
           expiresAt: input.expiresAt,

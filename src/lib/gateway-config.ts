@@ -7,9 +7,10 @@
  *
  * Os endereços vêm do registro on-chain (`onchain-facts`), gerado pelo Arc Studio — nada é inventado.
  */
-import { encodeFunctionData, isAddress, type Address } from 'viem'
+import { encodeFunctionData, erc20Abi, isAddress, type Address } from 'viem'
 import { getChain, getProtocolContractByName, getUsdc } from '@/onchain-facts'
 import type { NetworkId } from './network'
+import { parseMinorUnits } from './payment-intent'
 
 const ZERO = '0x0000000000000000000000000000000000000000'
 
@@ -126,6 +127,38 @@ export function resolveTreasuryReceivingConfig(
   }
 }
 
+/**
+ * Contexto de recebimento do Circle Gateway: separa o contrato de DESTINO do depósito
+ * (`gatewayWallet`) da conta institucional CREDITADA pelo protocolo (`depositor`).
+ * `depositor === null` significa configuração pendente (nunca o GatewayWallet nem a carteira do operador).
+ */
+export interface GatewayReceivingContext {
+  environment: 'mainnet' | 'testnet'
+  chainId: number
+  gatewayWallet: Address
+  token: Address
+  depositor: Address | null
+}
+
+/**
+ * Resolve o contexto de recebimento reutilizando `resolveTreasuryReceivingConfig`.
+ * O `depositor` é a conta institucional convencional configurada; quando a configuração contém
+ * o GatewayWallet (ou nada), `depositor` é `null` (configuração pendente) — nunca o contrato.
+ */
+export function resolveGatewayReceivingContext(
+  settings: { treasuryRecipients?: Partial<Record<NetworkId, string>> },
+  environment: NetworkId,
+): GatewayReceivingContext {
+  const receiving = resolveTreasuryReceivingConfig(settings, environment)
+  return {
+    environment: receiving.environment,
+    chainId: receiving.chainId,
+    gatewayWallet: receiving.gatewayWallet as Address,
+    token: receiving.token as Address,
+    depositor: receiving.beneficiary ? (receiving.beneficiary as Address) : null,
+  }
+}
+
 export type BeneficiaryReason = 'invalid_address' | 'gateway_contract' | 'unknown_environment'
 export type BeneficiaryValidation = { ok: true; value: Address } | { ok: false; reason: BeneficiaryReason }
 
@@ -166,4 +199,67 @@ export function encodeDepositFor(token: Address, depositor: Address, value: bigi
   if (!isValidNonZeroAddress(depositor)) throw new Error('depositFor: invalid depositor address')
   if (typeof value !== 'bigint' || value <= 0n || value > (1n << 256n) - 1n) throw new Error('depositFor: invalid value')
   return encodeFunctionData({ abi: DEPOSIT_FOR_ABI, functionName: 'depositFor', args: [token, depositor, value] })
+}
+
+/** Transação preparada do depósito oficial Circle Gateway (destino sempre o GatewayWallet). */
+export interface PreparedGatewayDeposit {
+  chainId: number
+  to: Address
+  value: bigint
+  data: `0x${string}`
+}
+
+/**
+ * Prepara a transação `depositFor(token, depositor, value)` contra o GatewayWallet oficial,
+ * reutilizando `encodeDepositFor` (ABI única, sem conflito). Exige depositor resolvido e configuração
+ * compatível com o registro. Nunca usa transferência ERC20 simples para o GatewayWallet.
+ */
+export function prepareGatewayDeposit(context: GatewayReceivingContext, usdcMinor: string): PreparedGatewayDeposit {
+  if (!context.depositor) throw new Error('depositor_unresolved')
+  if (!validateBeneficiary(context.depositor, context.environment).ok) throw new Error('invalid_depositor')
+  const cfg = gatewayConfigFor(context.environment)
+  if (
+    context.chainId !== cfg.chainId ||
+    context.gatewayWallet.toLowerCase() !== cfg.gatewayWallet.toLowerCase() ||
+    context.token.toLowerCase() !== cfg.usdcToken.toLowerCase()
+  ) {
+    throw new Error('gateway_config_mismatch')
+  }
+  const amount = parseMinorUnits(usdcMinor)
+  const data = encodeDepositFor(context.token, context.depositor, amount)
+  return { chainId: cfg.chainId, to: cfg.gatewayWallet, value: 0n, data }
+}
+
+/** Cliente mínimo de leitura on-chain (viem `PublicClient` é compatível). */
+export interface GatewayReadClient {
+  getChainId(): Promise<number>
+  readContract(args: { address: Address; abi: unknown; functionName: string; args: readonly unknown[] }): Promise<unknown>
+}
+
+export interface PaymentRequirements {
+  balance: bigint
+  allowance: bigint
+  sufficientBalance: boolean
+  needsApproval: boolean
+}
+
+/**
+ * Consulta saldo e allowance do pagador (leitura exclusiva). Spender é o GatewayWallet do ambiente.
+ * Rejeita chainId divergente. Nunca emite transação nem fabrica aprovação.
+ */
+export async function readPaymentRequirements(
+  client: GatewayReadClient,
+  payer: Address,
+  context: GatewayReceivingContext,
+  amount: bigint,
+): Promise<PaymentRequirements> {
+  const chainId = await client.getChainId()
+  if (chainId !== context.chainId) throw new Error('wrong_chain')
+  const [balance, allowance] = await Promise.all([
+    client.readContract({ address: context.token, abi: erc20Abi, functionName: 'balanceOf', args: [payer] }),
+    client.readContract({ address: context.token, abi: erc20Abi, functionName: 'allowance', args: [payer, context.gatewayWallet] }),
+  ])
+  const b = balance as bigint
+  const a = allowance as bigint
+  return { balance: b, allowance: a, sufficientBalance: b >= amount, needsApproval: a < amount }
 }

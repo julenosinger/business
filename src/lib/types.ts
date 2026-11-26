@@ -307,6 +307,8 @@ export interface PaymentRequest {
   fromBlock: string
   scannedTo?: string
   status: 'open' | 'paid' | 'canceled'
+  /** Via de pagamento: transferência legada ou depósito Circle Gateway (verificação independente). */
+  paymentRail?: 'legacy_transfer' | 'circle_gateway'
   txHash?: string
   payer?: string
   explorerUrl?: string
@@ -371,6 +373,8 @@ export interface PaymentIntent {
   idempotencyKey?: string
   /** Fingerprint canônico dos parâmetros financeiros imutáveis (idempotência). */
   fingerprint?: string
+  /** Referência pública opaca do checkout (ou seu hash). Ausente = link ainda não emitido. */
+  checkoutToken?: string
 }
 
 // ---------- Payment Attempt & Reservation (FIN-04.1B.2.2A.1) ----------
