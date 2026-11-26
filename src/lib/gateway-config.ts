@@ -80,6 +80,52 @@ export function treasuryRecipientFor(
   return (settings.treasuryRecipients?.[network] ?? '').trim()
 }
 
+/**
+ * Configuração efetiva de recebimento da Treasury para o fluxo comercial Circle Gateway.
+ * Separa o contrato de infraestrutura (`gatewayWallet`, destino do depósito oficial) do
+ * beneficiário institucional convencional (`beneficiary`, crédito contábil).
+ */
+export interface TreasuryReceivingConfig {
+  environment: 'mainnet' | 'testnet'
+  chainId: number
+  gatewayWallet: string
+  beneficiary: string | null
+  token: string
+}
+
+/**
+ * Valida se um endereço é o GatewayWallet oficial do ambiente (destino de depósito do Circle
+ * Gateway). Diferente de `validateBeneficiary`, que rejeita contratos de infraestrutura.
+ * Aplicável somente ao fluxo comercial Circle Gateway — nunca ao fluxo legado de transferência ERC20 direta.
+ */
+export function validateGatewayTreasury(recipient: string, environment: NetworkId, chainId: number): boolean {
+  if (environment !== 'mainnet' && environment !== 'testnet') return false
+  if (typeof recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) return false
+  const cfg = gatewayConfigFor(environment)
+  return chainId === cfg.chainId && recipient.toLowerCase() === cfg.gatewayWallet.toLowerCase()
+}
+
+/**
+ * Resolve a configuração de recebimento separando GatewayWallet (contrato) de beneficiário
+ * (carteira convencional). Nunca usa o GatewayWallet como beneficiário; sem beneficiário
+ * convencional válido, `beneficiary` é `null` (configuração pendente).
+ */
+export function resolveTreasuryReceivingConfig(
+  settings: { treasuryRecipients?: Partial<Record<NetworkId, string>> },
+  environment: NetworkId,
+): TreasuryReceivingConfig {
+  const cfg = gatewayConfigFor(environment)
+  const candidate = treasuryRecipientFor(settings, environment)
+  const validation = validateBeneficiary(candidate, environment)
+  return {
+    environment,
+    chainId: cfg.chainId,
+    gatewayWallet: cfg.gatewayWallet,
+    beneficiary: validation.ok ? candidate : null,
+    token: cfg.usdcToken,
+  }
+}
+
 export type BeneficiaryReason = 'invalid_address' | 'gateway_contract' | 'unknown_environment'
 export type BeneficiaryValidation = { ok: true; value: Address } | { ok: false; reason: BeneficiaryReason }
 

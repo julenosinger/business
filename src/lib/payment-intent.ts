@@ -5,7 +5,7 @@
  * a repetição do mesmo estado é idempotente. A confirmação on-chain NUNCA é alcançada por
  * transição direta a partir de CREATED — exige o caminho completo (aprovado → assinado → submetido).
  */
-import type { PaymentIntentState } from './types'
+import type { PaymentAttemptState, PaymentIntentState } from './types'
 
 export const PAYMENT_INTENT_TRANSITIONS: Record<PaymentIntentState, PaymentIntentState[]> = {
   CREATED: ['AWAITING_WALLET', 'EXPIRED', 'CANCELED', 'REQUIRES_REVIEW'],
@@ -71,6 +71,78 @@ export function validateUsdcAmount(decimal: string, minor: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Converte um decimal textual em unidades menores exato (sem float).
+ * Rejeita excesso de precisão, notação científica e overflow uint256.
+ */
+export function parseExactDecimal(value: string, decimals: number): bigint {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) throw new Error('invalid_decimals')
+  const text = value.trim()
+  if (text.length > 100 || !/^\d+(?:\.\d+)?$/.test(text)) throw new Error('invalid_amount')
+  const [whole, fraction = ''] = text.split('.')
+  if (fraction.length > decimals) throw new Error('excess_precision')
+  const scale = 10n ** BigInt(decimals)
+  const fractional = fraction ? BigInt(fraction.padEnd(decimals, '0')) : 0n
+  const result = BigInt(whole) * scale + fractional
+  if (result <= 0n || result > UINT256_MAX) throw new Error('invalid_amount')
+  return result
+}
+
+/**
+ * Converte unidades menores da moeda original em unidades menores de USDC (6 casas),
+ * pela cotação expressa em "unidades da moeda original por 1 USDC".
+ * Arredonda para CIMA para nunca cobrar abaixo do valor devido.
+ */
+export function convertToUsdcMinor(amountMinor: bigint, currencyDecimals: number, rateMinor: bigint, rateDecimals: number): bigint {
+  if (amountMinor <= 0n || rateMinor <= 0n) throw new Error('invalid_conversion')
+  if (
+    !Number.isInteger(currencyDecimals) ||
+    !Number.isInteger(rateDecimals) ||
+    currencyDecimals < 0 ||
+    currencyDecimals > 18 ||
+    rateDecimals < 0 ||
+    rateDecimals > 18
+  ) {
+    throw new Error('invalid_scale')
+  }
+  const numerator = amountMinor * 10n ** BigInt(rateDecimals + 6)
+  const denominator = rateMinor * 10n ** BigInt(currencyDecimals)
+  const result = (numerator + denominator - 1n) / denominator
+  if (result <= 0n || result > UINT256_MAX) throw new Error('invalid_conversion')
+  return result
+}
+
+export type PaymentExecutionMode = 'onchain' | 'simulation'
+
+/** Simulação só é permitida na Testnet; on-chain vale para ambos os ambientes. */
+export function validateExecutionMode(environment: 'mainnet' | 'testnet', mode: PaymentExecutionMode): boolean {
+  if (environment !== 'mainnet' && environment !== 'testnet') return false
+  if (mode !== 'onchain' && mode !== 'simulation') return false
+  return mode !== 'simulation' || environment === 'testnet'
+}
+
+/**
+ * Uma tentativa bloqueia uma nova tentativa enquanto não estiver em estado terminal seguro
+ * (CANCELED/REVERTED produzidos por caminho autorizado). REQUIRES_REVIEW e CONFIRMED continuam
+ * bloqueando; AMBIGUOUS/SUBMITTED idem (anti duplo clique/duplicação).
+ */
+export function attemptBlocksRetry(attempt: { state: PaymentAttemptState }): boolean {
+  return !['CANCELED', 'REVERTED'].includes(attempt.state)
+}
+
+/**
+ * Uma reserva só pode ser liberada quando TODAS as tentativas da intenção forem seguras:
+ * nenhuma transmitida (sem hash/submissão), nenhuma ambígua/revisão/confirmada. Tentativas com
+ * hash ou submissão iniciada exigem revert COMPROVADO pelo verificador (ainda não implementado).
+ */
+export function canReleaseReservation(attempts: { state: PaymentAttemptState; depositTxHash?: string; submissionStartedAt?: string }[]): boolean {
+  return attempts.every((attempt) => {
+    if (attempt.state === 'AMBIGUOUS' || attempt.state === 'REQUIRES_REVIEW' || attempt.state === 'CONFIRMED') return false
+    if (attempt.depositTxHash || attempt.submissionStartedAt) return false
+    return ['CREATED', 'READY', 'CANCELED'].includes(attempt.state)
+  })
 }
 
 // -----------------------------------------------------------------------------------------------------------

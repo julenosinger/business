@@ -353,11 +353,15 @@ export interface PaymentIntent {
   beneficiary: string
   /** Valor na moeda contábil. */
   amount: number
+  /** Decimal textual autoritativo na moeda contábil (fonte exata, sem float). */
+  amountDecimal?: string
   currency: CurrencyCode
+  /** Valor na moeda contábil em unidades mínimas (string BigInt). */
+  amountMinor?: string
   /** Valor USDC em unidades mínimas (string BigInt). */
   usdcMinor: string
-  /** Cotação usada na conversão (quando a moeda contábil não é USDC). */
-  rate?: number
+  /** Cotação usada na conversão (unidades da moeda original por 1 USDC, decimal textual). */
+  rate?: string
   createdAt: string
   expiresAt: string
   state: PaymentIntentState

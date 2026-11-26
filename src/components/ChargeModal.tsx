@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useAccount } from 'wagmi'
+import { useEffect, useRef, useState } from 'react'
 import { getPublicClient } from 'wagmi/actions'
 import { CheckCircle2, Copy, Loader2, MessageCircle, Share2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -7,7 +6,7 @@ import { config } from '@/config'
 import { Button, Field, Modal, inputCls } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
-import { treasuryRecipientFor, validateBeneficiary } from '@/lib/gateway-config'
+import { treasuryRecipientFor, validateBeneficiary, validateGatewayTreasury } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { useStore } from '@/lib/store'
@@ -36,13 +35,12 @@ function withTag(base: Amount, taken: Set<bigint>): Amount | null {
 }
 
 export function ChargeModal({ open, accountId, onClose }: Props) {
-  const { address } = useAccount()
   const { data, addAccount, addRequest } = useStore()
   const base = useShareBase()
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
   const rate = usdcRateOf(data.settings)
-  // Destinatário institucional da Treasury (nunca a carteira conectada do operador), resolvido por ambiente.
+  // Destino institucional da Treasury (nunca a carteira conectada do operador), resolvido por ambiente.
   const treasuryRecipient = treasuryRecipientFor(data.settings, network)
 
   const [selected, setSelected] = useState('')
@@ -56,8 +54,16 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const created = createdId ? (data.requests.find((r) => r.id === createdId) ?? null) : null
   const [seed, setSeed] = useState<string | null>(null)
 
+  // Lock imediato (anti duplo clique) e identidade de sessão (invalida respostas assíncronas obsoletas).
+  const busyRef = useRef(false)
+  const sessionRef = useRef(0)
+
   // A chave de inicialização inclui o AMBIENTE: ao trocar de rede, o modal reinicializa o estado.
   const seedKey = open ? `open:${network}:${accountId ?? ''}` : null
+  // Invalida qualquer sessão em voo sempre que o contexto (abertura/rede/obrigação) mudar.
+  useEffect(() => {
+    sessionRef.current += 1
+  }, [seedKey])
   if (seedKey !== seed) {
     setSeed(seedKey)
     setCreatedId(null)
@@ -93,17 +99,62 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     baseAmount = null
   }
   const chain = chainByKey(chainKey)
+  // Destino pode ser o GatewayWallet (depósito oficial Circle Gateway) OU um beneficiário convencional (legado).
   const beneficiary = treasuryRecipient ? validateBeneficiary(treasuryRecipient, network) : null
-  const valid = Boolean(address && beneficiary?.ok && baseAmount && chain && fiatValue > 0 && (selected !== NEW || desc.trim()))
+  const gatewayValid = chain ? validateGatewayTreasury(treasuryRecipient, network, chain.chainId) : false
+  const destinationValid = Boolean(beneficiary?.ok || gatewayValid)
 
-  const create = async () => {
-    if (!address || !beneficiary?.ok || !baseAmount || !chain) return
-    setError(null)
+  const handleCreateCharge = async () => {
+    if (busyRef.current) return
+    const session = sessionRef.current
+    busyRef.current = true
     setBusy(true)
+    setError(null)
+
     try {
+      // Validações autoritativas com erro explicativo (nunca bloqueio silencioso).
+      if (!treasuryRecipient) {
+        setError(t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos.', 'Configure the institutional Treasury address (Settings) to receive payments.'))
+        return
+      }
+      if (!chain) {
+        setError(t('Rede selecionada inválida.', 'Invalid selected network.'))
+        return
+      }
+      if (!gatewayValid && !beneficiary?.ok) {
+        setError(t('O destino configurado não é um beneficiário válido nem o GatewayWallet deste ambiente. Revise nas Configurações.', 'The configured destination is neither a valid beneficiary nor the GatewayWallet for this environment. Review in Settings.'))
+        return
+      }
+      if (!baseAmount) {
+        setError(t('Informe um valor em USDC maior que zero.', 'Enter a USDC amount greater than zero.'))
+        return
+      }
+      if (fiatValue <= 0) {
+        setError(t('Valor inválido.', 'Invalid amount.'))
+        return
+      }
+      if (selected === NEW && !desc.trim()) {
+        setError(t('Informe uma descrição para a cobrança avulsa.', 'Enter a description for the one-off charge.'))
+        return
+      }
+      if (selected !== NEW && !account) {
+        setError(t('Selecione uma conta a receber válida.', 'Select a valid receivable.'))
+        return
+      }
+
+      // Revalida contra o snapshot atual antes da mutação (concorrência/obsoleto).
+      if (session !== sessionRef.current) return
+
+      // RPC exclusivamente de leitura (bloco inicial para conciliação); indisponibilidade não impede a cobrança.
       const client = getPublicClient(config, { chainId: chain.chainId })
-      if (!client) throw new Error(t('Rede indisponível.', 'Network unavailable.'))
-      const head = await client.getBlockNumber()
+      let fromBlock = '0'
+      try {
+        if (client) fromBlock = (await client.getBlockNumber()).toString()
+      } catch {
+        fromBlock = '0'
+      }
+      if (session !== sessionRef.current) return
+
       const taken = new Set(
         data.requests
           .filter((r) => r.status === 'open' && r.chainKey === chainKey && r.recipient.toLowerCase() === treasuryRecipient.toLowerCase())
@@ -134,13 +185,17 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         chainKey,
         chainId: chain.chainId,
         recipient: treasuryRecipient,
-        fromBlock: head.toString(),
+        fromBlock,
       })
+      if (session !== sessionRef.current) return
       setCreatedId(id)
     } catch (err) {
-      setError(explainError(err))
+      if (session === sessionRef.current) setError(explainError(err))
     } finally {
-      setBusy(false)
+      if (session === sessionRef.current) {
+        busyRef.current = false
+        setBusy(false)
+      }
     }
   }
 
@@ -205,16 +260,18 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
             {t('Concluir', 'Done')}
           </Button>
         </div>
-      ) : !address ? (
-        <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
-          {t('Conecte a carteira do operador antes de criar a cobrança.', 'Connect the operator wallet before creating the request.')}
-        </p>
-      ) : !treasuryRecipient ? (
-        <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
-          {t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos. A carteira conectada não é usada como destinatário.', 'Configure the institutional Treasury address (Settings) to receive payments. The connected wallet is not used as the recipient.')}
-        </p>
       ) : (
         <div className="space-y-4">
+          {!treasuryRecipient ? (
+            <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
+              {t('Configure o endereço institucional da Treasury (Configurações) para receber pagamentos. A carteira conectada não é usada como destinatário.', 'Configure the institutional Treasury address (Settings) to receive payments. The connected wallet is not used as the recipient.')}
+            </p>
+          ) : !destinationValid ? (
+            <p className="rounded-xl bg-warn/10 p-3 text-sm text-warn text-pretty">
+              {t('O destino configurado não é um beneficiário válido nem o GatewayWallet deste ambiente. Revise nas Configurações.', 'The configured destination is neither a valid beneficiary nor the GatewayWallet for this environment. Review in Settings.')}
+            </p>
+          ) : null}
+
           <Field label={t('Conta a receber', 'Receivable')}>
             <select className={inputCls} value={selected} onChange={(e) => pickAccount(e.target.value)}>
               {receivables.map((a) => (
@@ -263,8 +320,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
             {t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')} <span className="mono">{treasuryRecipient}</span>
           </p>
           {error ? <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{error}</p> : null}
-          <Button className="w-full" disabled={!valid || busy} onClick={() => void create()}>
-            {busy ? <Loader2 size={16} className="animate-spin" /> : null} {t('Criar cobrança', 'Create payment request')}
+          <Button className="w-full" disabled={busy} aria-busy={busy} onClick={() => void handleCreateCharge()}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : null} {busy ? t('Criando cobrança...', 'Creating charge...') : t('Criar cobrança', 'Create payment request')}
           </Button>
         </div>
       )}
