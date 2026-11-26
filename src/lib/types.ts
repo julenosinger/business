@@ -455,6 +455,8 @@ export interface Settings {
   treasuryRecipient?: string
   /** Beneficiário institucional POR AMBIENTE (substitui progressivamente o campo global). */
   treasuryRecipients?: Partial<Record<NetworkId, string>>
+  /** Conta institucional CREDITADA pelo Circle Gateway (depositor) por ambiente — opcional. */
+  treasuryDepositors?: Partial<Record<NetworkId, string>>
 }
 
 // ---------- Logística (fase 1A: remessas e rastreamento manual) ----------

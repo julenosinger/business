@@ -51,7 +51,7 @@ if (!loginSecret) console.log('Browser login disabled: set GBOS_LOGIN_SECRET to 
 
 Bun.serve({
   port,
-  fetch: createHandler({ api, chat, sessions, loginSecret, allowedOrigin, cookieSecure, sessionMaxAge: 8 * 60 * 60 }),
+  fetch: createHandler({ api, chat, sessions, db, loginSecret, allowedOrigin, cookieSecure, sessionMaxAge: 8 * 60 * 60 }),
 })
 
 console.log(`Global Business OS backend listening on :${port} (org ${orgId}, db ${dbPath ?? ':memory:'})`)

@@ -9,7 +9,7 @@ import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
 import { treasuryRecipientFor, validateBeneficiary, validateGatewayTreasury } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
-import { createCheckoutToken, checkoutUrlFor } from '@/lib/gateway-charge'
+import { createCheckoutToken, checkoutUrlFor, getChargeAvailability } from '@/lib/gateway-charge'
 import { useStore } from '@/lib/store'
 import { money, parseNum, toUsdc, today, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -49,7 +49,7 @@ function defaultExpiryIso(): string {
 }
 
 export function ChargeModal({ open, accountId, onClose }: Props) {
-  const { data, addAccount, addRequest, createPaymentIntent } = useStore()
+  const { data, addAccount, addRequest, createGatewayCharge } = useStore()
   const base = useShareBase()
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
@@ -78,6 +78,16 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   // Idempotência estável durante retries da MESMA operação comercial (reseta ao trocar contexto).
   const idempotencyKeyRef = useRef(newIdempotencyKey())
 
+  // Saldo disponível para nova cobrança (em aberto − reservado), sugerido em USDC — nunca o valor original.
+  const chargeAvailabilityText = (acc: (typeof receivables)[number] | undefined): string => {
+    if (!acc) return ''
+    if (acc.currency === 'USDC') {
+      const minor = getChargeAvailability(acc, data.paymentReservations, { organizationId: data.ledger.orgId, environment: network })
+      return Amount.fromRaw(minor, USDC_DECIMALS).toString()
+    }
+    return rate ? toUsdc(acc.amount, rate).toFixed(2) : ''
+  }
+
   // A chave de inicialização inclui o AMBIENTE: ao trocar de rede, o modal reinicializa o estado.
   const seedKey = open ? `open:${network}:${accountId ?? ''}` : null
   // Invalida qualquer sessão em voo e reemite a chave de idempotência sempre que o contexto mudar.
@@ -97,7 +107,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     setChainKey(arcGatewayKeyOf(network))
     const acc = accountId ? receivables.find((a) => a.id === accountId) : undefined
     setSelected(acc ? acc.id : receivables[0] ? receivables[0].id : NEW)
-    setUsdcText(acc && rate ? toUsdc(acc.amount, rate).toFixed(2) : '')
+    const text = chargeAvailabilityText(acc ?? receivables[0])
+    if (text) setUsdcText(text)
   }
 
   const account = receivables.find((a) => a.id === selected)
@@ -106,7 +117,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const pickAccount = (id: string) => {
     setSelected(id)
     const acc = receivables.find((a) => a.id === id)
-    if (acc && rate) setUsdcText(toUsdc(acc.amount, rate).toFixed(2))
+    const text = chargeAvailabilityText(acc)
+    if (text) setUsdcText(text)
   }
 
   const onFiat = (v: string) => {
@@ -169,23 +181,13 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
       if (session !== sessionRef.current) return
 
       const description = selected === NEW ? desc.trim() : (account?.description ?? '')
-      const accId =
-        selected === NEW
-          ? addAccount({
-              kind: 'receivable',
-              description,
-              contactName: t('Cobrança avulsa', 'One-off charge'),
-              amount: fiatValue,
-              dueDate: today(),
-              category: 'Serviços prestados',
-            })
-          : selected
 
       if (gatewayValid) {
-        // Fluxo Gateway (Payment Intent): sem marca aleatória, sem transferência direta.
+        // Fluxo Gateway (Payment Intent): criação atômica (obrigação avulsa + intenção + reserva), sem marca aleatória.
         const token = createCheckoutToken()
-        const result = createPaymentIntent({
-          accountId: accId,
+        const result = createGatewayCharge({
+          accountId: selected === NEW ? undefined : selected,
+          description: selected === NEW ? description : undefined,
           amount: Number(baseAmount.toString()),
           amountDecimal: baseAmount.toString(),
           usdcMinor: baseAmount.raw.toString(),
@@ -196,16 +198,27 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         })
         if (!result.ok) {
           if (result.reason === 'conflict') setError(t('Já existe uma cobrança com esta operação.', 'A charge already exists for this operation.'))
+          else if (result.reason === 'invalid_amount') setError(t('Valor acima do saldo disponível para esta obrigação.', 'Amount exceeds the available balance for this obligation.'))
           else setError(t('Não foi possível criar a cobrança. Verifique o saldo disponível e a configuração.', 'Could not create the charge. Check the available balance and configuration.'))
           return
         }
         if (session !== sessionRef.current) return
-        // Configuração pendente quando a conta depositante institucional ainda não foi resolvida.
-        setConfigPending(!beneficiary?.ok)
+        setConfigPending(result.configPending)
         setGatewayIntentId(result.intentId)
         setCheckoutUrl(base ? checkoutUrlFor(base, token.token) : null)
       } else {
         // Fluxo legado (transferência ERC20 simples para carteira convencional) — preservado.
+        const accId =
+          selected === NEW
+            ? addAccount({
+                kind: 'receivable',
+                description,
+                contactName: t('Cobrança avulsa', 'One-off charge'),
+                amount: fiatValue,
+                dueDate: today(),
+                category: 'Serviços prestados',
+              })
+            : selected
         const client = getPublicClient(config, { chainId: chain.chainId })
         let fromBlock = '0'
         try {

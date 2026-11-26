@@ -63,6 +63,71 @@ const MIGRATIONS: string[] = [
     detail TEXT NOT NULL
   );
   `,
+  // v2 — checkout comercial Circle Gateway (FIN-04.1B.2.2B.1): persistência compartilhada.
+  `
+  CREATE TABLE IF NOT EXISTS payment_intents (
+    intent_id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL CHECK (environment IN ('mainnet', 'testnet')),
+    account_id TEXT NOT NULL,
+    sale_id TEXT,
+    customer_id TEXT,
+    chain_id INTEGER NOT NULL,
+    token_address TEXT NOT NULL,
+    gateway_wallet TEXT NOT NULL,
+    depositor TEXT,
+    currency TEXT NOT NULL,
+    amount_minor TEXT NOT NULL,
+    usdc_minor TEXT NOT NULL,
+    exchange_rate TEXT,
+    idempotency_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL,
+    company TEXT,
+    description TEXT,
+    reference TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (organization_id, environment, idempotency_key)
+  );
+  CREATE TABLE IF NOT EXISTS payment_reservations (
+    reservation_id TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL UNIQUE,
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount_minor TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (intent_id) REFERENCES payment_intents(intent_id)
+  );
+  CREATE TABLE IF NOT EXISTS payment_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    chain_id INTEGER NOT NULL,
+    payer TEXT,
+    state TEXT NOT NULL,
+    approval_hash TEXT,
+    deposit_hash TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (intent_id) REFERENCES payment_intents(intent_id)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS payment_deposit_hash_unique ON payment_attempts (environment, chain_id, deposit_hash) WHERE deposit_hash IS NOT NULL;
+  CREATE TABLE IF NOT EXISTS checkout_tokens (
+    token_hash TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    FOREIGN KEY (intent_id) REFERENCES payment_intents(intent_id)
+  );
+  CREATE INDEX IF NOT EXISTS payment_intents_account_idx ON payment_intents (organization_id, environment, account_id);
+  `,
 ]
 
 export interface SettlementRecord {

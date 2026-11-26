@@ -50,7 +50,7 @@ import { canCancel, canClassifyEnvironment, inFlightIntentEnv } from './treasury
 import { addContactTransition, addEmployeeTransition, updateContactTransition, updateEmployeeTransition, type SaveCode } from './save-transitions'
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import { categoryById, isUnsupportedCategory } from './financial-categories'
-import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary, resolveGatewayReceivingContext } from './gateway-config'
+import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary, resolveInstitutionalGatewayContext, settingsIdentityRepository } from './gateway-config'
 import {
   authorizeIntentTransition,
   parseMinorUnits,
@@ -69,6 +69,7 @@ import {
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
+import { requiresGatewayVerification } from './gateway-charge'
 import { t } from './i18n'
 
 const STORAGE_KEY = 'gbos:v1'
@@ -492,6 +493,24 @@ export type IntentResult =
   | { ok: true; intentId: string }
   | { ok: false; reason: 'not_found' | 'invalid_amount' | 'not_configured' | 'invalid_expiration' | 'conflict' }
 
+/** Entrada da cobrança Gateway (Gate D): cria obrigação avulsa + intenção + reserva atomicamente. */
+export interface GatewayChargeInput {
+  accountId?: string
+  description?: string
+  amount: number
+  amountDecimal: string
+  usdcMinor: string
+  currency: CurrencyCode
+  rate?: string
+  expiresAt: string
+  idempotencyKey?: string
+  checkoutToken?: string
+}
+
+export type GatewayChargeResult =
+  | { ok: true; intentId: string; configPending: boolean }
+  | { ok: false; reason: 'not_found' | 'invalid_amount' | 'not_configured' | 'invalid_expiration' | 'conflict' }
+
 export interface PurchaseInput {
   supplierId?: string
   paidNow: boolean
@@ -602,6 +621,8 @@ export interface Store {
   loadSandboxDemo: () => SandboxResult
   /** Cria uma intenção de pagamento USDC (checkout nativo), vinculada a uma obrigação e, opcionalmente, a uma venda. */
   createPaymentIntent: (input: PaymentIntentInput) => IntentResult
+  /** Cria cobrança Gateway (obrigação avulsa opcional + intenção + reserva) atomicamente. */
+  createGatewayCharge: (input: GatewayChargeInput) => GatewayChargeResult
   /** Transiciona o estado de uma intenção (campos financeiros imutáveis) com encerramento atômico de reserva. */
   transitionPaymentIntent: (intentId: string, state: PaymentIntentState, note?: string) => boolean
   /** Cria uma tentativa de pagamento para uma intenção (com validação de ciclo de vida). */
@@ -1431,8 +1452,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => {
           const r = d.requests.find((x) => x.id === id)
           if (!r || r.status !== 'open') return d
-          // Cobrança Circle Gateway exige verificação independente: o watcher legado (Transfer) NUNCA a liquida.
-          if (r.paymentRail === 'circle_gateway') return d
+          // Cobrança Circle Gateway (ou antiga apontando para o GatewayWallet) exige verificação independente.
+          if (requiresGatewayVerification(r)) return d
           let next: AppData = {
             ...d,
             requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
@@ -1493,9 +1514,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Destino do depósito é SEMPRE o GatewayWallet oficial (registry). Sem configuração → falha explícita.
         const configured = treasuryRecipientFor(dataRef.current.settings, env)
         if (!configured) return { ok: false, reason: 'not_configured' }
-        // Depositor = conta institucional convencional creditada; '' = configuração pendente (nunca o GatewayWallet).
-        const context = resolveGatewayReceivingContext(dataRef.current.settings, env)
-        const beneficiary = context.depositor ?? ''
+        // Depositor = conta institucional CREDITADA, resolvida pela identidade autorizada (nunca o GatewayWallet).
+        const identity = resolveInstitutionalGatewayContext(orgId, env, settingsIdentityRepository(dataRef.current.settings))
+        const beneficiary = identity.ok ? (identity.context.depositor ?? '') : ''
 
         // usdcMinor (on-chain) exato: inteiro positivo ≤ uint256, sem float.
         let usdcMinor: bigint
@@ -1632,6 +1653,170 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         set((d) => ({ ...d, paymentIntents: [intent, ...d.paymentIntents], paymentReservations: [reservation, ...d.paymentReservations] }))
         return { ok: true, intentId }
+      },
+      createGatewayCharge: (input) => {
+        const env = getNetwork()
+        const orgId = dataRef.current.ledger.orgId
+        const cfg = gatewayConfigFor(env)
+        const configured = treasuryRecipientFor(dataRef.current.settings, env)
+        if (!configured) return { ok: false, reason: 'not_configured' }
+        const identity = resolveInstitutionalGatewayContext(orgId, env, settingsIdentityRepository(dataRef.current.settings))
+        const beneficiary = identity.ok ? (identity.context.depositor ?? '') : ''
+
+        // usdcMinor (on-chain) exato.
+        let usdcMinor: bigint
+        try {
+          usdcMinor = parseMinorUnits(input.usdcMinor)
+        } catch {
+          return { ok: false, reason: 'invalid_amount' }
+        }
+        // amountMinor (moeda contábil) separado de usdcMinor.
+        let amountMinor: bigint
+        if (input.currency === 'USDC') {
+          amountMinor = usdcMinor
+          if (input.amountDecimal !== undefined) {
+            try {
+              if (parseExactDecimal(input.amountDecimal, EXPONENT.USDC) !== usdcMinor) return { ok: false, reason: 'invalid_amount' }
+            } catch {
+              return { ok: false, reason: 'invalid_amount' }
+            }
+          }
+        } else {
+          if (input.amountDecimal === undefined || input.rate === undefined) return { ok: false, reason: 'invalid_amount' }
+          const exp = EXPONENT[input.currency]
+          try {
+            amountMinor = parseExactDecimal(input.amountDecimal, exp)
+          } catch {
+            return { ok: false, reason: 'invalid_amount' }
+          }
+          const rateText = input.rate.trim()
+          const r = parseRate(rateText)
+          if (!r) return { ok: false, reason: 'invalid_amount' }
+          const rateDecimals = (rateText.split('.')[1] ?? '').length
+          let converted: bigint
+          try {
+            converted = convertToUsdcMinor(amountMinor, exp, r.num, rateDecimals)
+          } catch {
+            return { ok: false, reason: 'invalid_amount' }
+          }
+          if (converted !== usdcMinor) return { ok: false, reason: 'invalid_amount' }
+        }
+
+        // Idempotência: mesma chave retorna a intenção existente (estável durante retries).
+        let scopedKey: string | undefined
+        if (input.idempotencyKey) {
+          try {
+            scopedKey = scopedIdempotencyKey({ organizationId: orgId, environment: env }, input.idempotencyKey)
+          } catch {
+            return { ok: false, reason: 'invalid_amount' }
+          }
+          const existing = dataRef.current.paymentIntents.find((i) => i.idempotencyKey === scopedKey)
+          if (existing) return { ok: true, intentId: existing.intentId, configPending: !existing.beneficiary }
+        }
+
+        const now = new Date().toISOString()
+        const intentId = uid()
+        const fingerprint = intentFingerprint({
+          organizationId: orgId,
+          environment: env,
+          accountId: input.accountId ?? '',
+          currency: input.currency,
+          amountMinor: String(amountMinor),
+          usdcMinor: input.usdcMinor,
+          ...(input.rate !== undefined ? { rate: input.rate } : {}),
+          beneficiary,
+          gatewayWallet: cfg.gatewayWallet,
+          token: cfg.usdcToken,
+          chainId: cfg.chainId,
+          expiresAt: input.expiresAt,
+        })
+
+        // Criação atômica: obrigação avulsa (se houver) + intenção + reserva na MESMA mutação.
+        let result: GatewayChargeResult = { ok: false, reason: 'invalid_amount' }
+        set((d) => {
+          let account = input.accountId ? d.accounts.find((a) => a.id === input.accountId) : undefined
+          let accounts = d.accounts
+          if (!account) {
+            if (!input.description) {
+              result = { ok: false, reason: 'not_found' }
+              return d
+            }
+            const accId = uid()
+            account = {
+              id: accId,
+              kind: 'receivable',
+              description: input.description,
+              contactName: t('Cobrança avulsa', 'One-off charge'),
+              amount: input.amount,
+              dueDate: today(),
+              category: 'Serviços prestados',
+              status: 'open',
+              source: 'manual',
+              currency: input.currency,
+              environment: env,
+            }
+            accounts = [account, ...d.accounts]
+          }
+          if (account.kind !== 'receivable' || account.status !== 'open' || account.canceledAt || account.environment !== env) {
+            result = { ok: false, reason: 'not_found' }
+            return d
+          }
+          if (account.currency !== input.currency) {
+            result = { ok: false, reason: 'invalid_amount' }
+            return d
+          }
+          const reservedMinor = d.paymentReservations
+            .filter((r) => r.accountId === account.id && (r.state === 'HELD' || r.state === 'REQUIRES_REVIEW'))
+            .reduce((s, r) => s + BigInt(r.amountMinor), 0n)
+          const outstandingMinor = accountOutstandingMinor(account)
+          if (outstandingMinor === null || amountMinor > availableForReservation(outstandingMinor, reservedMinor)) {
+            result = { ok: false, reason: 'invalid_amount' }
+            return d
+          }
+          const expires = Date.parse(input.expiresAt)
+          if (!Number.isFinite(expires) || expires <= Date.now()) {
+            result = { ok: false, reason: 'invalid_expiration' }
+            return d
+          }
+          const intent: PaymentIntent = {
+            intentId,
+            organizationId: orgId,
+            accountId: account.id,
+            environment: env,
+            chainId: cfg.chainId,
+            token: cfg.usdcToken,
+            gatewayWallet: cfg.gatewayWallet,
+            beneficiary,
+            amount: input.amount,
+            ...(input.amountDecimal !== undefined ? { amountDecimal: input.amountDecimal } : {}),
+            currency: input.currency,
+            amountMinor: String(amountMinor),
+            usdcMinor: input.usdcMinor,
+            ...(input.rate !== undefined ? { rate: input.rate } : {}),
+            ...(scopedKey ? { idempotencyKey: scopedKey } : {}),
+            ...(input.checkoutToken ? { checkoutToken: input.checkoutToken } : {}),
+            fingerprint,
+            createdAt: now,
+            expiresAt: input.expiresAt,
+            state: 'CREATED',
+            txHashes: [],
+            history: [{ at: now, state: 'CREATED' }],
+          }
+          const reservation: PaymentReservation = {
+            reservationId: uid(),
+            intentId,
+            accountId: account.id,
+            organizationId: orgId,
+            environment: env,
+            currency: input.currency,
+            amountMinor: String(amountMinor),
+            state: 'HELD',
+            createdAt: now,
+          }
+          result = { ok: true, intentId, configPending: !beneficiary }
+          return { ...d, accounts, paymentIntents: [intent, ...d.paymentIntents], paymentReservations: [reservation, ...d.paymentReservations] }
+        })
+        return result
       },
       transitionPaymentIntent: (intentId, state, note) => {
         const cur = dataRef.current.paymentIntents.find((i) => i.intentId === intentId)

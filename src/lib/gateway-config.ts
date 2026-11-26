@@ -141,6 +141,73 @@ export interface GatewayReceivingContext {
 }
 
 /**
+ * Identidade institucional autorizada da Treasury: a conta efetivamente creditada pelo Gateway
+ * (`depositor`), vinculada à organização e ao ambiente, com autorização comprovada.
+ */
+export interface TreasuryIdentity {
+  organizationId: string
+  environment: NetworkId
+  depositor: Address
+  authorizationId: string
+  verified: boolean
+}
+
+/** Repositório de identidades Treasury autorizadas (adaptador da infraestrutura real). */
+export interface TreasuryIdentityRepository {
+  findAuthorized(organizationId: string, environment: NetworkId): TreasuryIdentity | null
+}
+
+/**
+ * Resolve a identidade institucional autorizada e o contexto de recebimento. Nunca retorna o
+ * GatewayWallet como depositor, endereço fictício, carteira do cliente ou do operador. Sem
+ * identidade autorizada → `treasury_identity_unresolved` (a cobrança permanece pendente).
+ */
+export function resolveInstitutionalGatewayContext(
+  organizationId: string,
+  environment: NetworkId,
+  identities: TreasuryIdentityRepository,
+): { ok: true; context: GatewayReceivingContext & { organizationId: string; authorizationId: string } } | { ok: false; reason: 'treasury_identity_unresolved' | 'invalid_treasury_identity' } {
+  const cfg = gatewayConfigFor(environment)
+  const identity = identities.findAuthorized(organizationId, environment)
+  if (!identity || !identity.verified || identity.organizationId !== organizationId || identity.environment !== environment) {
+    return { ok: false, reason: 'treasury_identity_unresolved' }
+  }
+  const validation = validateBeneficiary(identity.depositor, environment)
+  if (!validation.ok) return { ok: false, reason: 'invalid_treasury_identity' }
+  return {
+    ok: true,
+    context: {
+      organizationId,
+      environment,
+      chainId: cfg.chainId,
+      gatewayWallet: cfg.gatewayWallet,
+      token: cfg.usdcToken,
+      depositor: identity.depositor,
+      authorizationId: identity.authorizationId,
+    },
+  }
+}
+
+/**
+ * Repositório de identidade baseado na configuração institucional local (`treasuryDepositors`),
+ * com fallback para o beneficiário convencional (`treasuryRecipients`). A autorização é a própria
+ * configuração explícita do dono — nunca o GatewayWallet nem a carteira conectada.
+ */
+export function settingsIdentityRepository(settings: {
+  treasuryDepositors?: Partial<Record<NetworkId, string>>
+  treasuryRecipients?: Partial<Record<NetworkId, string>>
+}): TreasuryIdentityRepository {
+  return {
+    findAuthorized(organizationId, environment) {
+      const candidate = (settings.treasuryDepositors?.[environment] ?? settings.treasuryRecipients?.[environment] ?? '').trim()
+      const validation = validateBeneficiary(candidate, environment)
+      if (!validation.ok) return null
+      return { organizationId, environment, depositor: validation.value, authorizationId: `settings:${environment}`, verified: true }
+    },
+  }
+}
+
+/**
  * Resolve o contexto de recebimento reutilizando `resolveTreasuryReceivingConfig`.
  * O `depositor` é a conta institucional convencional configurada; quando a configuração contém
  * o GatewayWallet (ou nada), `depositor` é `null` (configuração pendente) — nunca o contrato.

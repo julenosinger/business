@@ -11,6 +11,7 @@ import { verifyUsdcReceipt } from '../src/lib/accounting/verify'
 import type { EventDraft, LedgerState } from '../src/lib/accounting/types'
 import type { LedgerDb } from './db'
 import { settleOperation, type SettleInput, type SettleResult } from './settle'
+import { createGatewayCharge, type CreateGatewayChargeInput, type CreateGatewayChargeResult } from './payments'
 
 export interface ApiConfig {
   token: string
@@ -31,6 +32,8 @@ export interface LedgerApi {
   postEvent(auth: string | undefined, draft: EventDraft): PostResult
   /** Liquidação atômica + idempotente por operação, com verificação on-chain server-side. */
   settle(auth: string | undefined, input: SettleInput): Promise<SettleResult>
+  /** Cria cobrança Gateway compartilhável (autenticada pela organização). */
+  createPaymentIntent(auth: string | undefined, environment: 'mainnet' | 'testnet', input: CreateGatewayChargeInput): CreateGatewayChargeResult
   cfg: ApiConfig
 }
 
@@ -67,6 +70,10 @@ export function createApi(db: LedgerDb, cfg: ApiConfig, verify: typeof verifyUsd
     settle(auth, input) {
       authorize(auth)
       return settleOperation(db, cfg.orgId, input, verify)
+    },
+    createPaymentIntent(auth, environment, input) {
+      authorize(auth)
+      return createGatewayCharge(db, cfg.orgId, environment, input)
     },
   }
 }
