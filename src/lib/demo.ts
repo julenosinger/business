@@ -184,6 +184,8 @@ export function buildDemoData(currency: CurrencyCode = 'USDC', prefix = ''): App
     purchases: [],
     receipts: [],
     paymentIntents: [],
+    paymentAttempts: [],
+    paymentReservations: [],
     ledger: emptyLedger(),
     settings: { company: t('Comércio Demonstração', 'Demo Store'), branch: 'Matriz', owner: 'Empreendedor', currency, usdcRate: null, approvalLimit: null },
   }

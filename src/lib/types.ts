@@ -365,6 +365,73 @@ export interface PaymentIntent {
   history: PaymentIntentEvent[]
   /** Chave de idempotência (opcional): a mesma chave retorna a intenção existente. */
   idempotencyKey?: string
+  /** Fingerprint canônico dos parâmetros financeiros imutáveis (idempotência). */
+  fingerprint?: string
+}
+
+// ---------- Payment Attempt & Reservation (FIN-04.1B.2.2A.1) ----------
+
+export type PaymentAttemptState =
+  | 'CREATED'
+  | 'APPROVAL_PENDING'
+  | 'READY'
+  | 'AWAITING_SIGNATURE'
+  | 'SUBMITTED'
+  | 'CONFIRMED'
+  | 'REVERTED'
+  | 'AMBIGUOUS'
+  | 'CANCELED'
+  | 'REQUIRES_REVIEW'
+
+export interface PaymentAttemptEvent {
+  eventId: string
+  at: string
+  from: PaymentAttemptState | null
+  to: PaymentAttemptState
+  source: 'user' | 'system' | 'verifier'
+  reason?: string
+}
+
+export interface PaymentAttempt {
+  attemptId: string
+  intentId: string
+  organizationId: string
+  environment: 'mainnet' | 'testnet'
+  chainId: number
+  payer: string
+  beneficiary: string
+  gatewayWallet: string
+  token: string
+  usdcMinor: string
+  state: PaymentAttemptState
+  approvalTxHash?: string
+  depositTxHash?: string
+  submissionStartedAt?: string
+  submittedAt?: string
+  confirmedAt?: string
+  evidenceId?: string
+  blockNumber?: string
+  blockHash?: string
+  createdAt: string
+  updatedAt: string
+  history: PaymentAttemptEvent[]
+}
+
+export type PaymentReservationState = 'HELD' | 'RELEASED' | 'CONSUMED' | 'REQUIRES_REVIEW'
+
+export interface PaymentReservation {
+  reservationId: string
+  intentId: string
+  accountId: string
+  organizationId: string
+  environment: 'mainnet' | 'testnet'
+  currency: string
+  /** Valor reservado em unidades mínimas da moeda original (string BigInt). */
+  amountMinor: string
+  state: PaymentReservationState
+  createdAt: string
+  releasedAt?: string
+  releaseReason?: string
 }
 
 export interface Settings {
@@ -721,6 +788,10 @@ export interface AppData {
   receipts: GoodsReceipt[]
   /** Intenções de pagamento USDC nativas (checkout Circle Gateway). */
   paymentIntents: PaymentIntent[]
+  /** Tentativas de pagamento vinculadas a intenções. */
+  paymentAttempts: PaymentAttempt[]
+  /** Reservas financeiras vinculadas a intenções. */
+  paymentReservations: PaymentReservation[]
   /** Razão contábil (motor de partida dobrada). Ver docs/accounting-engine.md. */
   ledger: LedgerState
   settings: Settings

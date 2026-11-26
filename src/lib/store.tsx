@@ -15,6 +15,8 @@ import {
   type PaymentRequest,
   type PaymentIntent,
   type PaymentIntentState,
+  type PaymentAttempt,
+  type PaymentReservation,
   type Product,
   type Sale,
   type SaleItem,
@@ -49,7 +51,17 @@ import { addContactTransition, addEmployeeTransition, updateContactTransition, u
 import { gatewayChainEnv, getNetwork, type NetworkId } from './network'
 import { categoryById, isUnsupportedCategory } from './financial-categories'
 import { gatewayConfigFor, treasuryRecipientFor, validateBeneficiary } from './gateway-config'
-import { canTransitionIntent } from './payment-intent'
+import {
+  authorizeIntentTransition,
+  parseMinorUnits,
+  validateUsdcAmount,
+  scopedIdempotencyKey,
+  intentFingerprint,
+  normalizeTxHash,
+  matchesIntentScope,
+  availableForReservation,
+  type IntentTransitionContext,
+} from './payment-intent'
 import type { AccountingStatus, TreasuryOpStatus } from './accounting/settlement'
 import type { LedgerState, PostErrorCode } from './accounting/types'
 import { syncAdded, syncRemoved, syncUpdated, type SyncCtx } from './accounting/cashbook-sync'
@@ -103,6 +115,8 @@ export function emptyData(): AppData {
   purchases: [],
   receipts: [],
   paymentIntents: [],
+  paymentAttempts: [],
+  paymentReservations: [],
     ledger: emptyLedger(),
     settings: emptySettings(),
   }
@@ -579,6 +593,12 @@ export interface Store {
   createPaymentIntent: (input: PaymentIntentInput) => IntentResult
   /** Transiciona o estado de uma intenção (campos financeiros imutáveis). */
   transitionPaymentIntent: (intentId: string, state: PaymentIntentState, note?: string) => boolean
+  /** Cria uma tentativa de pagamento para uma intenção. */
+  createPaymentAttempt: (intentId: string) => { ok: true; attemptId: string } | { ok: false }
+  /** Registra a submissão do depósito (hash) em uma tentativa. */
+  registerDepositSubmission: (attemptId: string, txHash: string) => boolean
+  /** Marca uma tentativa como ambígua (submissão sem resultado comprovado). */
+  markAttemptAmbiguous: (attemptId: string, reason?: string) => boolean
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -1452,44 +1472,71 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addTreasuryOp: (op) => set((d) => ({ ...d, treasuryOps: [{ ...op, id: uid(), date: new Date().toISOString(), status: op.status ?? 'pending' }, ...d.treasuryOps] })),
       createPaymentIntent: (input) => {
         const env = getNetwork()
+        const orgId = dataRef.current.ledger.orgId
         // Resolve a configuração AUTORITATIVA (não confia nos campos do chamador).
         const cfg = gatewayConfigFor(env)
         const beneficiary = treasuryRecipientFor(dataRef.current.settings, env)
         if (!validateBeneficiary(beneficiary, env).ok) return { ok: false, reason: 'not_configured' }
 
-        // Idempotência: a mesma chave retorna a intenção existente.
+        // Precisão monetária exata: usdcMinor inteiro positivo, sem overflow; correspondência exata para USDC.
+        let minor: bigint
+        try {
+          minor = parseMinorUnits(input.usdcMinor)
+        } catch {
+          return { ok: false, reason: 'invalid_amount' }
+        }
+        if (input.currency === 'USDC') {
+          const dec = input.amount.toFixed(6).replace(/\.?0+$/, '') || '0'
+          if (!validateUsdcAmount(dec, input.usdcMinor)) return { ok: false, reason: 'invalid_amount' }
+        }
+        // Fingerprint canônico dos parâmetros imutáveis (computado antes da busca idempotente).
+        const fingerprint = intentFingerprint({
+          organizationId: orgId,
+          environment: env,
+          accountId: input.accountId,
+          ...(input.saleId ? { saleId: input.saleId } : {}),
+          ...(input.customerId ? { customerId: input.customerId } : {}),
+          currency: input.currency,
+          amountMinor: String(minor),
+          usdcMinor: input.usdcMinor,
+          ...(input.rate !== undefined ? { rate: String(input.rate) } : {}),
+          beneficiary,
+          gatewayWallet: cfg.gatewayWallet,
+          token: cfg.usdcToken,
+          chainId: cfg.chainId,
+          expiresAt: input.expiresAt,
+        })
+
+        // Idempotência segregada: chave composta por organização + ambiente + chave.
+        let scopedKey: string | undefined
         if (input.idempotencyKey) {
-          const existing = dataRef.current.paymentIntents.find((i) => i.idempotencyKey === input.idempotencyKey)
-          if (existing) {
-            // Chave com parâmetros divergentes → conflito explícito.
-            const same = existing.accountId === input.accountId && existing.amount === input.amount && existing.usdcMinor === input.usdcMinor
-            return same ? { ok: true, intentId: existing.intentId } : { ok: false, reason: 'conflict' }
+          try {
+            scopedKey = scopedIdempotencyKey({ organizationId: orgId, environment: env }, input.idempotencyKey)
+          } catch {
+            return { ok: false, reason: 'invalid_amount' }
           }
+          const existing = dataRef.current.paymentIntents.find((i) => i.idempotencyKey === scopedKey)
+          // Mesma chave + mesmo fingerprint → retorna a intenção existente; parâmetros divergentes → conflito.
+          if (existing) return existing.fingerprint === fingerprint ? { ok: true, intentId: existing.intentId } : { ok: false, reason: 'conflict' }
         }
 
         const account = dataRef.current.accounts.find((a) => a.id === input.accountId)
         if (!account || account.kind !== 'receivable' || account.status !== 'open' || account.canceledAt) return { ok: false, reason: 'not_found' }
         if (account.environment !== env) return { ok: false, reason: 'not_found' }
+        // Moeda original da obrigação: nunca misturar moedas distintas na reserva.
+        if (account.currency !== input.currency) return { ok: false, reason: 'invalid_amount' }
 
         if (input.saleId) {
           const sale = dataRef.current.sales.find((s) => s.id === input.saleId)
           if (!sale || sale.canceledAt || sale.accountId !== input.accountId) return { ok: false, reason: 'not_found' }
         }
-        // Integridade monetária: valor finito/positivo, usdcMinor inteiro positivo, sem overflow uint256.
-        if (!Number.isFinite(input.amount) || input.amount <= 0) return { ok: false, reason: 'invalid_amount' }
-        if (!/^\d+$/.test(input.usdcMinor)) return { ok: false, reason: 'invalid_amount' }
-        const minor = BigInt(input.usdcMinor)
-        if (minor <= 0n || minor > (1n << 256n) - 1n) return { ok: false, reason: 'invalid_amount' }
-        // Correspondência monetária (Gate B): para USDC, usdcMinor deve corresponder a amount em 6 casas.
-        if (input.currency === 'USDC') {
-          const expected = BigInt(Math.round(input.amount * 1_000_000))
-          if (expected !== minor) return { ok: false, reason: 'invalid_amount' }
-        }
-        // Reserva: não pode exceder o saldo pendente menos o já reservado por intenções ativas.
-        const reserved = dataRef.current.paymentIntents
-          .filter((i) => i.accountId === input.accountId && !['EXPIRED', 'CANCELED', 'FAILED'].includes(i.state))
-          .reduce((s, i) => s + i.amount, 0)
-        if (input.amount > accountOutstanding(account) - reserved) return { ok: false, reason: 'invalid_amount' }
+        // Reserva em unidades mínimas da moeda original (aritmética exata, sem float).
+        const reservedMinor = dataRef.current.paymentReservations
+          .filter((r) => r.accountId === input.accountId && (r.state === 'HELD' || r.state === 'REQUIRES_REVIEW'))
+          .reduce((s, r) => s + BigInt(r.amountMinor), 0n)
+        const outstandingMinor = accountOutstandingMinor(account)
+        if (outstandingMinor === null) return { ok: false, reason: 'invalid_amount' }
+        if (minor > availableForReservation(outstandingMinor, reservedMinor)) return { ok: false, reason: 'invalid_amount' }
         // Expiração futura válida.
         const expires = Date.parse(input.expiresAt)
         if (!Number.isFinite(expires) || expires <= Date.now()) return { ok: false, reason: 'invalid_expiration' }
@@ -1498,7 +1545,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const now = new Date().toISOString()
         const intent: PaymentIntent = {
           intentId,
-          organizationId: dataRef.current.ledger.orgId,
+          organizationId: orgId,
           ...(input.saleId ? { saleId: input.saleId } : {}),
           accountId: input.accountId,
           ...(input.customerId ? { customerId: input.customerId } : {}),
@@ -1511,25 +1558,121 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           currency: input.currency,
           usdcMinor: input.usdcMinor,
           ...(input.rate !== undefined ? { rate: input.rate } : {}),
-          ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+          ...(scopedKey ? { idempotencyKey: scopedKey } : {}),
+          fingerprint,
           createdAt: now,
           expiresAt: input.expiresAt,
           state: 'CREATED',
           txHashes: [],
           history: [{ at: now, state: 'CREATED' }],
         }
-        set((d) => ({ ...d, paymentIntents: [intent, ...d.paymentIntents] }))
+        const reservation: PaymentReservation = {
+          reservationId: uid(),
+          intentId,
+          accountId: input.accountId,
+          organizationId: orgId,
+          environment: env,
+          currency: input.currency,
+          amountMinor: input.usdcMinor,
+          state: 'HELD',
+          createdAt: now,
+        }
+        set((d) => ({ ...d, paymentIntents: [intent, ...d.paymentIntents], paymentReservations: [reservation, ...d.paymentReservations] }))
         return { ok: true, intentId }
       },
       transitionPaymentIntent: (intentId, state, note) => {
         const cur = dataRef.current.paymentIntents.find((i) => i.intentId === intentId)
         if (!cur) return false
-        // Máquina de estados protegida: transições explícitas; repetição do mesmo estado é idempotente.
-        if (!canTransitionIntent(cur.state, state)) return false
+        // Contexto de evidência derivado de registros autoritativos (nunca recebido da interface).
+        const attempts = dataRef.current.paymentAttempts.filter((a) => a.intentId === intentId)
+        const ctx: IntentTransitionContext = {
+          source: 'system',
+          sameOrganization: cur.organizationId === dataRef.current.ledger.orgId,
+          sameEnvironment: cur.environment === getNetwork(),
+          expired: Date.parse(cur.expiresAt) <= Date.now(),
+          hasActiveAttempt: attempts.some((a) => !['CANCELED', 'REVERTED', 'REQUIRES_REVIEW'].includes(a.state)),
+          hasDepositHash: attempts.some((a) => !!a.depositTxHash),
+          submissionUnresolved: attempts.some((a) => a.state === 'AMBIGUOUS' || (a.state === 'SUBMITTED' && !a.confirmedAt)),
+          hasVerifiedReceipt: false, // verificador independente ainda não implementado
+          hasVerifiedRevert: false,
+          safeCancellation: state === 'CANCELED' && !attempts.some((a) => a.state === 'AMBIGUOUS'),
+        }
+        if (!authorizeIntentTransition(cur.state, state, ctx)) return false
+        // Idempotência: repetir o mesmo estado não duplica histórico.
+        if (cur.state === state) return true
         set((d) => ({
           ...d,
           paymentIntents: d.paymentIntents.map((i) =>
             i.intentId === intentId ? { ...i, state, history: [...i.history, { at: new Date().toISOString(), state, ...(note ? { note } : {}) }] } : i,
+          ),
+        }))
+        return true
+      },
+      createPaymentAttempt: (intentId) => {
+        const intent = dataRef.current.paymentIntents.find((i) => i.intentId === intentId)
+        if (!intent) return { ok: false }
+        const env = getNetwork()
+        // Isolamento operacional centralizado: organização + ambiente + chain id.
+        if (!matchesIntentScope(intent, { organizationId: dataRef.current.ledger.orgId, environment: env })) return { ok: false }
+        // Não permite tentativa simultânea não resolvida.
+        const active = dataRef.current.paymentAttempts.some((a) => a.intentId === intentId && !['CANCELED', 'REVERTED', 'CONFIRMED', 'REQUIRES_REVIEW'].includes(a.state))
+        if (active) return { ok: false }
+        const attemptId = uid()
+        const now = new Date().toISOString()
+        const attempt: PaymentAttempt = {
+          attemptId,
+          intentId,
+          organizationId: intent.organizationId,
+          environment: env,
+          chainId: intent.chainId,
+          payer: '',
+          beneficiary: intent.beneficiary,
+          gatewayWallet: intent.gatewayWallet,
+          token: intent.token,
+          usdcMinor: intent.usdcMinor,
+          state: 'CREATED',
+          createdAt: now,
+          updatedAt: now,
+          history: [{ eventId: uid(), at: now, from: null, to: 'CREATED', source: 'system' }],
+        }
+        set((d) => ({ ...d, paymentAttempts: [attempt, ...d.paymentAttempts] }))
+        return { ok: true, attemptId }
+      },
+      registerDepositSubmission: (attemptId, txHash) => {
+        const attempt = dataRef.current.paymentAttempts.find((a) => a.attemptId === attemptId)
+        if (!attempt) return false
+        let hash: string
+        try {
+          hash = normalizeTxHash(txHash)
+        } catch {
+          return false
+        }
+        // Isolamento operacional centralizado (organização + ambiente + chain id).
+        if (!matchesIntentScope(attempt, { organizationId: dataRef.current.ledger.orgId, environment: getNetwork() })) return false
+        // Hash não pode ser reutilizado entre tentativas.
+        const reused = dataRef.current.paymentAttempts.some((a) => a.attemptId !== attemptId && a.depositTxHash === hash)
+        if (reused) return false
+        set((d) => ({
+          ...d,
+          paymentAttempts: d.paymentAttempts.map((a) =>
+            a.attemptId === attemptId
+              ? { ...a, depositTxHash: hash, state: 'SUBMITTED', submittedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), history: [...a.history, { eventId: uid(), at: new Date().toISOString(), from: a.state, to: 'SUBMITTED', source: 'user' }] }
+              : a,
+          ),
+        }))
+        return true
+      },
+      markAttemptAmbiguous: (attemptId, reason) => {
+        const attempt = dataRef.current.paymentAttempts.find((a) => a.attemptId === attemptId)
+        if (!attempt) return false
+        if (!matchesIntentScope(attempt, { organizationId: dataRef.current.ledger.orgId, environment: getNetwork() })) return false
+        if (attempt.state === 'CONFIRMED' || attempt.state === 'REVERTED') return false
+        set((d) => ({
+          ...d,
+          paymentAttempts: d.paymentAttempts.map((a) =>
+            a.attemptId === attemptId
+              ? { ...a, state: 'AMBIGUOUS', updatedAt: new Date().toISOString(), history: [...a.history, { eventId: uid(), at: new Date().toISOString(), from: a.state, to: 'AMBIGUOUS', source: 'system', ...(reason ? { reason } : {}) }] }
+              : a,
           ),
         }))
         return true
@@ -1607,6 +1750,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               returns: keep(d.returns),
               receipts: keep(d.receipts),
               paymentIntents: keep(d.paymentIntents),
+              paymentAttempts: keep(d.paymentAttempts),
+              paymentReservations: keep(d.paymentReservations),
               accounts: keep(d.accounts),
               entries: keep(d.entries),
             }
