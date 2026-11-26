@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.1 — Functional Checkout Backend & Treasury Account Resolution
 
-**HEAD inicial:** `2af19fc` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `2af19fc` · **HEAD final:** `4dc759e`
 
 Resultado: **689 testes passando** (eram 670) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -56,4 +56,4 @@ Resultado: **689 testes passando** (eram 670) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 65f1700 && git revert 9a0b447`
