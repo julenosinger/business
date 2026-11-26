@@ -153,6 +153,27 @@ const MIGRATIONS: string[] = [
     UNIQUE (organization_id, environment, idempotency_key)
   );
   `,
+  // v5 — fencing do lease (worker_id + lease_version) e índices de recuperação (FIN-04.1B.2.2B.3.2A.1).
+  `
+  ALTER TABLE automation_jobs ADD COLUMN worker_id TEXT;
+  ALTER TABLE automation_jobs ADD COLUMN lease_version INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX IF NOT EXISTS idx_automation_retry ON automation_jobs (organization_id, environment, status, next_retry_at);
+  CREATE INDEX IF NOT EXISTS idx_automation_lease ON automation_jobs (status, lease_until);
+  `,
+  // v6 — idempotência dos efeitos financeiros (estoque/contábil/liquidação) — FIN-04.1B.2.2B.3.2A.1.
+  `
+  CREATE TABLE IF NOT EXISTS automation_effects (
+    effect_id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    effect_key TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    effect_kind TEXT NOT NULL,
+    result_reference TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (organization_id, environment, effect_key)
+  );
+  `,
 ]
 
 export interface SettlementRecord {
