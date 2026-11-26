@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.2 — Authoritative Checkout & End-to-End Execution
 
-**HEAD inicial:** `29d561b` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `29d561b` · **HEAD final:** `bb0ce2f`
 
 Resultado: **691 testes passando** (eram 689) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -44,4 +44,4 @@ Resultado: **691 testes passando** (eram 689) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert adab2d7 && git revert 0fa2182`
