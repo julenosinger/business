@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2A — Payment Intent Integrity & Security Hardening
 
-**HEAD inicial:** `03fb6cb` (FIN-04.1B.2.2) · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `03fb6cb` (FIN-04.1B.2.2) · **HEAD final:** `01ed75a`
 
 Resultado: **594 testes passando** (eram 591) · typecheck (app + servidor) limpo · lint limpo · build de produção OK.
 
