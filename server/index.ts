@@ -36,7 +36,11 @@ if (!dbPath && !allowMemory) {
 }
 
 const db = new LedgerDb(dbPath ?? ':memory:')
-const api = createApi(db, { token, orgId })
+const depositors = {
+  mainnet: process.env.GBOS_DEPOSITOR_MAINNET?.trim() || undefined,
+  testnet: process.env.GBOS_DEPOSITOR_TESTNET?.trim() || undefined,
+}
+const api = createApi(db, { token, orgId, depositors })
 const sessions = new SessionStore()
 const provider = resolveProvider({
   provider: process.env.GBOS_AI_PROVIDER,

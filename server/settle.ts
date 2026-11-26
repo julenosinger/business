@@ -55,7 +55,8 @@ function isActivePosted(ledger: LedgerState, e: { status: string; journalEntryId
   return e.status === 'posted' && (!e.journalEntryId || !isReversed(ledger, e.journalEntryId))
 }
 
-function obligationOutstandingMinor(ledger: LedgerState, accountId: string): bigint {
+/** Saldo em aberto (unidades menores) de uma obrigação, derivado do razão — nunca do cliente. */
+export function obligationOutstandingMinor(ledger: LedgerState, accountId: string): bigint {
   let created = 0n
   let settled = 0n
   for (const e of ledger.events) {
@@ -64,6 +65,12 @@ function obligationOutstandingMinor(ledger: LedgerState, accountId: string): big
     if (SETTLEMENT_TYPES.includes(e.type)) settled += BigInt(e.amountMinor)
   }
   return created - settled
+}
+
+/** Moeda da obrigação (do evento de origem ativo). `null` se a obrigação não existe no razão. */
+export function obligationCurrency(ledger: LedgerState, accountId: string): string | null {
+  const obligation = ledger.events.find((e) => OBLIGATION_TYPES.includes(e.type) && e.payload.accountId === accountId && isActivePosted(ledger, e) && !!e.journalEntryId)
+  return obligation ? obligation.currency : null
 }
 
 function settlementTypeOf(ledger: LedgerState, accountId: string): EventType | null {

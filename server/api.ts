@@ -11,11 +11,13 @@ import { verifyUsdcReceipt } from '../src/lib/accounting/verify'
 import type { EventDraft, LedgerState } from '../src/lib/accounting/types'
 import type { LedgerDb } from './db'
 import { settleOperation, type SettleInput, type SettleResult } from './settle'
-import { createGatewayCharge, type CreateGatewayChargeInput, type CreateGatewayChargeResult } from './payments'
+import { createGatewayCharge, type CreateCommercialChargeInput, type CreateGatewayChargeResult } from './payments'
 
 export interface ApiConfig {
   token: string
   orgId: string
+  /** Conta institucional CREDITADA pelo Gateway por ambiente (config do servidor, nunca do cliente). */
+  depositors?: Partial<Record<'mainnet' | 'testnet', string>>
 }
 
 export class UnauthorizedError extends Error {
@@ -32,8 +34,8 @@ export interface LedgerApi {
   postEvent(auth: string | undefined, draft: EventDraft): PostResult
   /** Liquidação atômica + idempotente por operação, com verificação on-chain server-side. */
   settle(auth: string | undefined, input: SettleInput): Promise<SettleResult>
-  /** Cria cobrança Gateway compartilhável (autenticada pela organização). */
-  createPaymentIntent(auth: string | undefined, environment: 'mainnet' | 'testnet', input: CreateGatewayChargeInput): CreateGatewayChargeResult
+  /** Cria cobrança Gateway compartilhável (autenticada pela organização; autoridade do servidor). */
+  createPaymentIntent(auth: string | undefined, environment: 'mainnet' | 'testnet', input: CreateCommercialChargeInput): CreateGatewayChargeResult
   cfg: ApiConfig
 }
 
@@ -73,7 +75,8 @@ export function createApi(db: LedgerDb, cfg: ApiConfig, verify: typeof verifyUsd
     },
     createPaymentIntent(auth, environment, input) {
       authorize(auth)
-      return createGatewayCharge(db, cfg.orgId, environment, input)
+      const depositor = cfg.depositors?.[environment]?.trim() || null
+      return createGatewayCharge(db, cfg.orgId, environment, input, depositor)
     },
   }
 }
