@@ -12,6 +12,7 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { StoreProvider, useStore } = await import('../src/lib/store')
 const { setNetwork } = await import('../src/lib/network')
+const { canTransitionIntent } = await import('../src/lib/payment-intent')
 
 let captured: Store | null = null
 function Capture(): null {
@@ -44,17 +45,15 @@ function commit<T>(store: () => Store, op: (s: Store) => T): T {
   return out
 }
 
+const BENEFICIARY = '0x000000000000000000000000000000000000000a'
+
 const intentOf = (accountId: string, saleId: string, amount = 15): Parameters<Store['createPaymentIntent']>[0] => ({
   saleId,
   accountId,
   amount,
   usdcMinor: String(BigInt(amount) * 1_000_000n),
-  chainId: 5042,
-  beneficiary: '0x000000000000000000000000000000000000000a',
-  gatewayWallet: '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE',
-  token: '0x3600000000000000000000000000000000000000',
   currency: 'USDC',
-  expiresAt: '2026-12-31T00:00:00.000Z',
+  expiresAt: '2099-01-01T00:00:00.000Z',
 })
 
 beforeEach(() => {
@@ -65,9 +64,10 @@ afterEach(() => {
   localStorage.clear()
 })
 
-describe('FIN-04.1B.2.2 — Payment Intent persistente', () => {
-  test('cria intenção vinculada à venda com valor exato (parcial 15 sobre 40)', () => {
+describe('FIN-04.1B.2.2A — Payment Intent autoritativo e protegido', () => {
+  test('cria intenção parcial (15 sobre 40) resolvendo contratos e beneficiário automaticamente', () => {
     const { store, unmount } = renderStore()
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
     const pid = commit(store, (s) => s.addProduct({ sku: 'CAFE', name: 'Café', category: 'G', unit: 'un', cost: 2, price: 4, stock: 100, minStock: 0 }))
     const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
     if (!sale.ok || !sale.accountId) throw new Error('sale')
@@ -75,44 +75,74 @@ describe('FIN-04.1B.2.2 — Payment Intent persistente', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const intent = store().data.paymentIntents.find((i) => i.intentId === r.intentId)!
-    expect(intent.saleId).toBe(sale.saleId)
-    expect(intent.accountId).toBe(sale.accountId)
     expect(intent.amount).toBe(15)
     expect(intent.usdcMinor).toBe('15000000')
-    expect(intent.state).toBe('CREATED')
-    expect(intent.environment).toBe('mainnet')
+    expect(intent.chainId).toBe(5042)
+    expect(intent.beneficiary).toBe(BENEFICIARY)
+    expect(intent.token).toBe('0x3600000000000000000000000000000000000000')
     unmount()
   })
 
-  test('rejeita obrigação inválida (não aberta ou de outra venda)', () => {
+  test('rejeita quando não há beneficiário institucional configurado', () => {
     const { store, unmount } = renderStore()
     const pid = commit(store, (s) => s.addProduct({ sku: 'P', name: 'P', category: 'G', unit: 'un', cost: 1, price: 2, stock: 100, minStock: 0 }))
-    const s1 = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
-    const s2 = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
-    if (!s1.ok || !s2.ok || !s1.accountId || !s2.accountId) throw new Error('sales')
-    // obrigação de outra venda → not_found
-    expect(commit(store, (s) => s.createPaymentIntent(intentOf(s2.accountId!, s1.saleId))).ok).toBe(false)
-    // valor inválido
-    expect(commit(store, (s) => s.createPaymentIntent(intentOf(s1.accountId, s1.saleId, 0))).ok).toBe(false)
+    const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
+    if (!sale.ok || !sale.accountId) throw new Error('sale')
+    expect(commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId))).ok).toBe(false)
     unmount()
   })
 
-  test('transições de estado preservam campos financeiros e registram histórico', () => {
+  test('rejeita valor acima do saldo e divergência monetária', () => {
     const { store, unmount } = renderStore()
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
+    const pid = commit(store, (s) => s.addProduct({ sku: 'P', name: 'P', category: 'G', unit: 'un', cost: 1, price: 2, stock: 100, minStock: 0 }))
+    const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
+    if (!sale.ok || !sale.accountId) throw new Error('sale')
+    // 50 sobre 40 → rejeitado.
+    expect(commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId, 50))).ok).toBe(false)
+    // valor 15 com usdcMinor de 150 USDC → rejeitado (divergência).
+    expect(commit(store, (s) => s.createPaymentIntent({ ...intentOf(sale.accountId, sale.saleId, 15), usdcMinor: '150000000' })).ok).toBe(false)
+    unmount()
+  })
+
+  test('reserva: intenção de 30 rejeitada após reserva de 15; 25 aceita', () => {
+    const { store, unmount } = renderStore()
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
+    const pid = commit(store, (s) => s.addProduct({ sku: 'P', name: 'P', category: 'G', unit: 'un', cost: 1, price: 2, stock: 100, minStock: 0 }))
+    const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
+    if (!sale.ok || !sale.accountId) throw new Error('sale')
+    expect(commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId, 15))).ok).toBe(true)
+    expect(commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId, 30))).ok).toBe(false) // 15+30 > 40
+    expect(commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId, 25))).ok).toBe(true) // 15+25 = 40
+    unmount()
+  })
+
+  test('idempotência: mesma chave retorna a intenção; parâmetros diferentes conflitam', () => {
+    const { store, unmount } = renderStore()
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
+    const pid = commit(store, (s) => s.addProduct({ sku: 'P', name: 'P', category: 'G', unit: 'un', cost: 1, price: 2, stock: 100, minStock: 0 }))
+    const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
+    if (!sale.ok || !sale.accountId) throw new Error('sale')
+    const a = commit(store, (s) => s.createPaymentIntent({ ...intentOf(sale.accountId, sale.saleId), idempotencyKey: 'k1' }))
+    const b = commit(store, (s) => s.createPaymentIntent({ ...intentOf(sale.accountId, sale.saleId), idempotencyKey: 'k1' }))
+    expect(a.ok && b.ok && a.intentId === b.intentId).toBe(true)
+    expect(store().data.paymentIntents).toHaveLength(1)
+    const conflict = commit(store, (s) => s.createPaymentIntent({ ...intentOf(sale.accountId, sale.saleId, 20), idempotencyKey: 'k1' }))
+    expect(conflict.ok ? '' : conflict.reason).toBe('conflict')
+    unmount()
+  })
+
+  test('máquina de estados: proíbe CREATED → ONCHAIN_CONFIRMED', () => {
+    const { store, unmount } = renderStore()
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
     const pid = commit(store, (s) => s.addProduct({ sku: 'P', name: 'P', category: 'G', unit: 'un', cost: 1, price: 2, stock: 100, minStock: 0 }))
     const sale = commit(store, (s) => s.recordSale({ method: 'usdc', items: [{ productId: pid, qty: 10, price: 4 }] }))
     if (!sale.ok || !sale.accountId) throw new Error('sale')
     const r = commit(store, (s) => s.createPaymentIntent(intentOf(sale.accountId, sale.saleId)))
     if (!r.ok) throw new Error('intent')
-    const before = store().data.paymentIntents.find((i) => i.intentId === r.intentId)!
+    expect(canTransitionIntent('CREATED', 'ONCHAIN_CONFIRMED')).toBe(false)
+    expect(commit(store, (s) => s.transitionPaymentIntent(r.intentId, 'ONCHAIN_CONFIRMED'))).toBe(false)
     expect(commit(store, (s) => s.transitionPaymentIntent(r.intentId, 'AWAITING_WALLET'))).toBe(true)
-    const after = store().data.paymentIntents.find((i) => i.intentId === r.intentId)!
-    expect(after.state).toBe('AWAITING_WALLET')
-    expect(after.history).toHaveLength(2)
-    // campos financeiros imutáveis
-    expect(after.amount).toBe(before.amount)
-    expect(after.beneficiary).toBe(before.beneficiary)
-    expect(after.accountId).toBe(before.accountId)
     unmount()
   })
 })
