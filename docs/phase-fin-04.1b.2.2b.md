@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B — Native Treasury Checkout & Payment Intent Integration
 
-**HEAD inicial:** `2493c96` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `2493c96` · **HEAD final:** `64787ff`
 
 Resultado: **670 testes passando** (eram 661) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -58,4 +58,4 @@ Integrar ChargeModal → Payment Intent → Reserva → link de checkout, preser
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 9badb17 && git revert 5fa8800`
