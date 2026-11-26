@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2A.2 — Treasury Checkout Unlock, Payment Lifecycle & Recovery Integrity
 
-**HEAD inicial:** `902f799` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `902f799` · **HEAD final:** `569d95e`
 
 Resultado: **661 testes passando** (eram 646) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -69,4 +69,4 @@ Corrigir o bloqueio do botão "Criar cobrança" no modal "Cobrar em USDC" e conc
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 315aa99 && git revert ae7efac`
