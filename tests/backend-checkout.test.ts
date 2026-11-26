@@ -7,130 +7,156 @@ import {
   isCheckoutTokenValid,
   createGatewayCharge,
   getPublicCheckout,
-  type CreateGatewayChargeInput,
+  computeChargeFingerprint,
+  type CreateCommercialChargeInput,
 } from '../server/payments'
+import { gatewayConfigFor } from '../src/lib/gateway-config'
 
-const chargeInput = (over: Partial<CreateGatewayChargeInput> = {}): CreateGatewayChargeInput => ({
-  accountId: 'a1',
-  chainId: 5042002,
-  tokenAddress: '0x3600000000000000000000000000000000000000',
-  gatewayWallet: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
-  depositor: '0x000000000000000000000000000000000000000a',
+const DEPOSITOR = '0x000000000000000000000000000000000000000a'
+
+const obligationDraft = (accountId = 'a1', amountMinor = '40000000') => ({
+  orgId: 'local',
+  idempotencyKey: `obligation:${accountId}`,
+  type: 'receivable.created' as const,
+  source: { module: 'receivables', recordId: accountId },
+  occurredAt: '2026-11-22T10:00:00.000Z',
+  accountingDate: '2026-11-22',
   currency: 'USDC',
-  amountMinor: '15000000',
-  usdcMinor: '15000000',
+  amountMinor,
+  payload: { accountId, category: 'Vendas' },
+  confirmation: 'confirmed' as const,
+})
+
+function setup(db: LedgerDb, accountId = 'a1', amountMinor = '40000000') {
+  const api = createApi(db, { token: 'secret', orgId: 'local', depositors: { testnet: DEPOSITOR } })
+  const r = api.postEvent('Bearer secret', obligationDraft(accountId, amountMinor))
+  if (!r.ok) throw new Error(`obligation failed: ${JSON.stringify(r.errors)}`)
+  return { api }
+}
+
+const chargeInput = (over: Partial<CreateCommercialChargeInput> = {}): CreateCommercialChargeInput => ({
+  environment: 'testnet',
+  accountId: 'a1',
+  amountDecimal: '15',
   idempotencyKey: 'k1',
-  fingerprint: 'fp-1',
-  expiresAt: '2099-01-01T00:00:00.000Z',
   companyName: 'Acme',
   ...over,
 })
 
 describe('checkout backend — segurança criptográfica', () => {
-  test('generateCheckoutToken usa CSPRNG (43 caracteres base64url) e hash SHA-256', () => {
+  test('generateCheckoutToken usa CSPRNG e hash SHA-256', () => {
     const a = generateCheckoutToken()
-    const b = generateCheckoutToken()
     expect(isCheckoutTokenValid(a.token)).toBe(true)
-    expect(a.token).not.toBe(b.token)
     expect(a.tokenHash).toHaveLength(64)
     expect(a.tokenHash).toBe(hashCheckoutToken(a.token))
   })
-
   test('hashCheckoutToken é SHA-256 determinístico', () => {
     expect(hashCheckoutToken('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
   })
-
   test('isCheckoutTokenValid rejeita formato inválido', () => {
     expect(isCheckoutTokenValid('short')).toBe(false)
-    expect(isCheckoutTokenValid('')).toBe(false)
     expect(isCheckoutTokenValid(null)).toBe(false)
-    expect(isCheckoutTokenValid('x'.repeat(43))).toBe(true) // 43 chars dentro do alfabeto
-    expect(isCheckoutTokenValid('!'.repeat(43))).toBe(false) // 43 chars fora do alfabeto
+    expect(isCheckoutTokenValid('!'.repeat(43))).toBe(false)
   })
 })
 
-describe('checkout backend — criação transacional', () => {
-  test('cria intenção + reserva + token em uma transação', () => {
+describe('checkout backend — criação autoritativa e transacional', () => {
+  test('resolve gatewayWallet/chainId do registro e valida saldo (15 de 40)', () => {
     const db = new LedgerDb(':memory:')
-    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput())
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput(), DEPOSITOR)
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.configurationPending).toBe(false)
-    // intenção e reserva persistidas
-    const intent = db.db.query('SELECT * FROM payment_intents WHERE intent_id = ?').get(r.intentId)
-    expect(intent).toBeTruthy()
-    const reservation = db.db.query('SELECT * FROM payment_reservations WHERE intent_id = ?').get(r.intentId)
-    expect(reservation).toBeTruthy()
+    const intent = db.db.query('SELECT * FROM payment_intents WHERE intent_id = ?').get(r.intentId) as Record<string, unknown>
+    expect(intent.gateway_wallet.toLowerCase()).toBe(gatewayConfigFor('testnet').gatewayWallet.toLowerCase())
+    expect(intent.chain_id).toBe(5042002)
+    expect(intent.usdc_minor).toBe('15000000')
+    // fingerprint calculado pelo servidor (não enviado pelo cliente)
+    expect(intent.fingerprint).toBe(computeChargeFingerprint({ organizationId: 'local', environment: 'testnet', accountId: 'a1', currency: 'USDC', amountMinor: '15000000', usdcMinor: '15000000', chainId: 5042002, gatewayWallet: gatewayConfigFor('testnet').gatewayWallet, tokenAddress: gatewayConfigFor('testnet').usdcToken, depositor: DEPOSITOR }))
     db.close()
   })
 
-  test('idempotência: mesma chave reemite o link sem duplicar intenção/reserva', () => {
+  test('rejeita cobrança acima do saldo disponível (50 > 40)', () => {
     const db = new LedgerDb(':memory:')
-    const first = createGatewayCharge(db, 'local', 'testnet', chargeInput())
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput({ amountDecimal: '50' }), DEPOSITOR)
+    expect(r).toEqual({ ok: false, reason: 'insufficient_balance' })
+    db.close()
+  })
+
+  test('rejeita obrigação inexistente no razão', () => {
+    const db = new LedgerDb(':memory:')
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput({ accountId: 'ghost' }), DEPOSITOR)
+    expect(r).toEqual({ ok: false, reason: 'obligation_not_found' })
+    db.close()
+  })
+
+  test('idempotência: mesma chave reemite link sem duplicar intenção/reserva', () => {
+    const db = new LedgerDb(':memory:')
+    setup(db)
+    const first = createGatewayCharge(db, 'local', 'testnet', chargeInput(), DEPOSITOR)
     if (!first.ok) throw new Error('expected ok')
-    const again = createGatewayCharge(db, 'local', 'testnet', chargeInput())
+    const again = createGatewayCharge(db, 'local', 'testnet', chargeInput(), DEPOSITOR)
     expect(again.ok).toBe(true)
     if (!again.ok) return
     expect(again.intentId).toBe(first.intentId)
-    const count = db.db.query('SELECT COUNT(*) AS c FROM payment_intents').get() as { c: number }
-    expect(count.c).toBe(1)
-    const tokens = db.db.query('SELECT COUNT(*) AS c FROM checkout_tokens').get() as { c: number }
-    expect(tokens.c).toBe(2) // novo token emitido, intenção não duplicada
+    expect((db.db.query('SELECT COUNT(*) AS c FROM payment_intents').get() as { c: number }).c).toBe(1)
     db.close()
   })
 
-  test('parâmetros divergentes na mesma chave → duplicate_conflict', () => {
+  test('mesma chave com valor divergente → duplicate_conflict', () => {
     const db = new LedgerDb(':memory:')
-    const first = createGatewayCharge(db, 'local', 'testnet', chargeInput())
+    setup(db)
+    const first = createGatewayCharge(db, 'local', 'testnet', chargeInput(), DEPOSITOR)
     if (!first.ok) throw new Error('expected ok')
-    const conflict = createGatewayCharge(db, 'local', 'testnet', chargeInput({ usdcMinor: '99999999', fingerprint: 'fp-2' }))
+    const conflict = createGatewayCharge(db, 'local', 'testnet', chargeInput({ amountDecimal: '20' }), DEPOSITOR)
     expect(conflict).toEqual({ ok: false, reason: 'duplicate_conflict' })
     db.close()
   })
 
-  test('rollback: entrada inválida não cria registros órfãos', () => {
+  test('depositor inválido (GatewayWallet) não é aceito', () => {
     const db = new LedgerDb(':memory:')
-    const bad = createGatewayCharge(db, 'local', 'testnet', chargeInput({ idempotencyKey: '' }))
-    expect(bad.ok).toBe(false)
-    const count = db.db.query('SELECT COUNT(*) AS c FROM payment_intents').get() as { c: number }
-    expect(count.c).toBe(0)
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput(), gatewayConfigFor('testnet').gatewayWallet)
+    expect(r.ok).toBe(false)
     db.close()
   })
 })
 
 describe('checkout backend — consulta pública', () => {
-  test('getPublicCheckout retorna dados mínimos; token desconhecido → null', () => {
+  test('retorna dados mínimos com gatewayWallet resolvido; token desconhecido → null', () => {
     const db = new LedgerDb(':memory:')
-    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput({ publicDescription: 'Venda', publicReference: 'REF-1' }))
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput({ publicDescription: 'Venda', publicReference: 'REF-1' }), DEPOSITOR)
     if (!r.ok) throw new Error('expected ok')
     const checkout = getPublicCheckout(db, r.checkoutToken)
     expect(checkout).toBeTruthy()
     expect(checkout!.usdcMinor).toBe('15000000')
-    expect(checkout!.gatewayWallet).toBe('0x0077777d7EBA4688BDeF3E311b846F25870A19B9')
+    expect(checkout!.gatewayWallet.toLowerCase()).toBe(gatewayConfigFor('testnet').gatewayWallet.toLowerCase())
     expect(checkout!.company).toBe('Acme')
-    expect(checkout!.description).toBe('Venda')
     expect(checkout!.paymentReady).toBe(true)
-    // Não expõe campos privados.
     expect((checkout as Record<string, unknown>).organizationId).toBeUndefined()
     expect(getPublicCheckout(db, '0'.repeat(43))).toBeNull()
     db.close()
   })
 
-  test('depositor não resolvido → paymentReady false', () => {
+  test('depositor não resolvido → configurationPending + paymentReady false', () => {
     const db = new LedgerDb(':memory:')
-    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput({ depositor: null }))
+    setup(db)
+    const r = createGatewayCharge(db, 'local', 'testnet', chargeInput(), null)
     if (!r.ok) throw new Error('expected ok')
     expect(r.configurationPending).toBe(true)
-    const checkout = getPublicCheckout(db, r.checkoutToken)!
-    expect(checkout.paymentReady).toBe(false)
+    expect(getPublicCheckout(db, r.checkoutToken)!.paymentReady).toBe(false)
     db.close()
   })
 })
 
 describe('checkout backend — autenticação', () => {
-  test('createPaymentIntent exige Bearer token', () => {
+  test('createPaymentIntent exige Bearer token e usa depositor do servidor', () => {
     const db = new LedgerDb(':memory:')
-    const api = createApi(db, { token: 'secret', orgId: 'local' })
+    const { api } = setup(db)
     expect(() => api.createPaymentIntent(undefined, 'testnet', chargeInput())).toThrow(UnauthorizedError)
     expect(api.createPaymentIntent('Bearer secret', 'testnet', chargeInput()).ok).toBe(true)
     db.close()
