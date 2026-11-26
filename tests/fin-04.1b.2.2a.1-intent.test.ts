@@ -48,6 +48,7 @@ function commit<T>(store: () => Store, op: (s: Store) => T): T {
 const BENEFICIARY = '0x000000000000000000000000000000000000000a'
 const BENEFICIARY_TEST = '0x000000000000000000000000000000000000000b'
 const HASH = '0x' + 'ab'.repeat(32)
+const PAYER = '0x' + 'cd'.repeat(20)
 
 const intentOf = (accountId: string, saleId: string, amount = 15): Parameters<Store['createPaymentIntent']>[0] => ({
   saleId,
@@ -102,6 +103,7 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     if (!r.ok) throw new Error('intent')
     const att = commit(store, (s) => s.createPaymentAttempt(r.intentId))
     if (!att.ok) throw new Error('attempt')
+    expect(commit(store, (s) => s.beginPaymentSubmission(att.attemptId, PAYER)).ok).toBe(true)
     expect(commit(store, (s) => s.registerDepositSubmission(att.attemptId, HASH))).toBe(true)
     for (const st of WALK) {
       expect(commit(store, (s) => s.transitionPaymentIntent(r.intentId, st))).toBe(true)
@@ -124,7 +126,9 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     const att2 = commit(store, (s) => s.createPaymentAttempt(r2.intentId))
     if (!att1.ok || !att2.ok) throw new Error('attempts')
     expect(commit(store, (s) => s.registerDepositSubmission(att1.attemptId, '0x1234'))).toBe(false) // inválido
+    expect(commit(store, (s) => s.beginPaymentSubmission(att1.attemptId, PAYER)).ok).toBe(true)
     expect(commit(store, (s) => s.registerDepositSubmission(att1.attemptId, HASH))).toBe(true)
+    expect(commit(store, (s) => s.beginPaymentSubmission(att2.attemptId, PAYER)).ok).toBe(true)
     expect(commit(store, (s) => s.registerDepositSubmission(att2.attemptId, HASH))).toBe(false) // reutilizado entre intenções
     unmount()
   })
@@ -137,6 +141,7 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     if (!r.ok) throw new Error('intent')
     const att = commit(store, (s) => s.createPaymentAttempt(r.intentId))
     if (!att.ok) throw new Error('attempt')
+    expect(commit(store, (s) => s.beginPaymentSubmission(att.attemptId, PAYER)).ok).toBe(true)
     expect(commit(store, (s) => s.registerDepositSubmission(att.attemptId, HASH))).toBe(true)
     expect(commit(store, (s) => s.markAttemptAmbiguous(att.attemptId, 'timeout'))).toBe(true)
     // Uma tentativa ambígua (não resolvida) impede nova tentativa executável para a mesma intenção.
@@ -192,6 +197,7 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     if (!r.ok) throw new Error('intent')
     const att = commit(first.store, (s) => s.createPaymentAttempt(r.intentId))
     if (!att.ok) throw new Error('attempt')
+    commit(first.store, (s) => s.beginPaymentSubmission(att.attemptId, PAYER))
     commit(first.store, (s) => s.registerDepositSubmission(att.attemptId, HASH))
     commit(first.store, (s) => s.markAttemptAmbiguous(att.attemptId, 'timeout'))
     React.act(() => {})
@@ -218,6 +224,7 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     if (!r.ok) throw new Error('intent')
     const att = commit(store, (s) => s.createPaymentAttempt(r.intentId))
     if (!att.ok) throw new Error('attempt')
+    commit(store, (s) => s.beginPaymentSubmission(att.attemptId, PAYER))
     commit(store, (s) => s.registerDepositSubmission(att.attemptId, HASH))
     const account = store().data.accounts.find((a) => a.id === accountId)!
     expect(account.status).toBe('open')
