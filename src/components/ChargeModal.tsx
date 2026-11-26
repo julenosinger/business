@@ -9,7 +9,8 @@ import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
 import { treasuryRecipientFor, validateBeneficiary, validateGatewayTreasury } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
-import { createCheckoutToken, checkoutUrlFor, getChargeAvailability } from '@/lib/gateway-charge'
+import { checkoutUrlFor, getChargeAvailability } from '@/lib/gateway-charge'
+import { createChargeApi, PaymentApiError } from '@/lib/payment-api'
 import { useStore } from '@/lib/store'
 import { money, parseNum, toUsdc, today, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -44,12 +45,23 @@ function newIdempotencyKey(): string {
   return `ck-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function defaultExpiryIso(): string {
-  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+function explainPaymentError(err: PaymentApiError): string {
+  switch (err.code) {
+    case 'insufficient_balance':
+      return t('Valor acima do saldo disponível para esta obrigação.', 'Amount exceeds the available balance for this obligation.')
+    case 'obligation_not_found':
+      return t('Obrigação não encontrada no razão. Verifique se a venda foi sincronizada.', 'Obligation not found in the ledger. Check that the sale was synced.')
+    case 'duplicate_conflict':
+      return t('Já existe uma cobrança com esta operação.', 'A charge already exists for this operation.')
+    case 'authentication_required':
+      return t('Sessão expirada. Faça login para continuar.', 'Session expired. Log in to continue.')
+    default:
+      return t('Não foi possível criar a cobrança.', 'Could not create the charge.')
+  }
 }
 
 export function ChargeModal({ open, accountId, onClose }: Props) {
-  const { data, addAccount, addRequest, createGatewayCharge } = useStore()
+  const { data, addAccount, addRequest } = useStore()
   const base = useShareBase()
   const network = useNetwork()
   const receivables = data.accounts.filter((a) => a.kind === 'receivable' && a.status === 'open' && !a.canceledAt && a.environment === network)
@@ -183,29 +195,18 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
       const description = selected === NEW ? desc.trim() : (account?.description ?? '')
 
       if (gatewayValid) {
-        // Fluxo Gateway (Payment Intent): criação atômica (obrigação avulsa + intenção + reserva), sem marca aleatória.
-        const token = createCheckoutToken()
-        const result = createGatewayCharge({
+        // Fluxo Gateway (autoritativo): criação via API; sem marca aleatória, sem intenção local duplicada.
+        const result = await createChargeApi({
+          environment: network,
           accountId: selected === NEW ? undefined : selected,
           description: selected === NEW ? description : undefined,
-          amount: Number(baseAmount.toString()),
           amountDecimal: baseAmount.toString(),
-          usdcMinor: baseAmount.raw.toString(),
-          currency: 'USDC',
           idempotencyKey: idempotencyKeyRef.current,
-          checkoutToken: token.token,
-          expiresAt: defaultExpiryIso(),
         })
-        if (!result.ok) {
-          if (result.reason === 'conflict') setError(t('Já existe uma cobrança com esta operação.', 'A charge already exists for this operation.'))
-          else if (result.reason === 'invalid_amount') setError(t('Valor acima do saldo disponível para esta obrigação.', 'Amount exceeds the available balance for this obligation.'))
-          else setError(t('Não foi possível criar a cobrança. Verifique o saldo disponível e a configuração.', 'Could not create the charge. Check the available balance and configuration.'))
-          return
-        }
         if (session !== sessionRef.current) return
-        setConfigPending(result.configPending)
+        setConfigPending(result.configurationPending)
         setGatewayIntentId(result.intentId)
-        setCheckoutUrl(base ? checkoutUrlFor(base, token.token) : null)
+        setCheckoutUrl(base ? checkoutUrlFor(base, result.checkoutToken) : null)
       } else {
         // Fluxo legado (transferência ERC20 simples para carteira convencional) — preservado.
         const accId =
@@ -252,7 +253,9 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
         setCreatedId(id)
       }
     } catch (err) {
-      if (session === sessionRef.current) setError(explainError(err))
+      if (session === sessionRef.current) {
+        setError(err instanceof PaymentApiError ? explainPaymentError(err) : explainError(err))
+      }
     } finally {
       if (session === sessionRef.current) {
         busyRef.current = false

@@ -5,6 +5,8 @@ import { StoreProvider } from '@/lib/store'
 import { I18nProvider, useLang } from '@/lib/i18n'
 import { readInvoiceFromLocation } from '@/lib/invoice'
 import { InvalidInvoice, PayPage } from '@/pages/PayPage'
+import { readCheckoutFromLocation } from '@/lib/payment-api'
+import { GatewayCheckoutPage } from '@/pages/GatewayCheckout'
 import { PaymentWatcher } from '@/components/PaymentWatcher'
 import { ReconciliationCoordinator } from '@/components/ReconciliationCoordinator'
 import { Dashboard } from '@/pages/Dashboard'
@@ -62,6 +64,10 @@ export default function App() {
   // Inscreve o app inteiro no idioma: ao trocar PT/EN, tudo é redesenhado sem remontar (formulários mantêm o que foi digitado).
   useLang()
   const [link] = useState(readInvoiceFromLocation)
+  const [checkoutToken] = useState(readCheckoutFromLocation)
+  if (checkoutToken) {
+    return <I18nProvider><GatewayCheckoutPage token={checkoutToken} /></I18nProvider>
+  }
   if (link.present) {
     return <I18nProvider>{link.invoice ? <PayPage invoice={link.invoice} /> : <InvalidInvoice />}</I18nProvider>
   }
