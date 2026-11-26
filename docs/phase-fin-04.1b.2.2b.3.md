@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.3 — Functional Checkout Integration & Execution Completion
 
-**HEAD inicial:** `e275f3d` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `e275f3d` · **HEAD final:** `e41c793`
 
 Resultado: **702 testes passando** (eram 691) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -51,4 +51,4 @@ Resultado: **702 testes passando** (eram 691) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert ddc5e91 && git revert 3488187 && git revert 4c559a9`
