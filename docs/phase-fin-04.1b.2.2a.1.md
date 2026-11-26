@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2A.1 — Evidence-Gated Payment Execution Integrity
 
-**HEAD inicial:** `b51f514` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `b51f514` · **HEAD final:** `cd870ff`
 
 Resultado: **646 testes passando** (eram 594) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
