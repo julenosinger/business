@@ -53,14 +53,20 @@ async function parseJson<T>(response: Response): Promise<T> {
 }
 
 export async function createChargeApi(input: CreateChargeRequest, signal?: AbortSignal): Promise<CreateChargeResponse> {
-  const response = await fetch('/api/payment-intents', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-    signal,
-    cache: 'no-store',
-  })
+  let response: Response
+  try {
+    response = await fetch('/api/payment-intents', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal,
+      cache: 'no-store',
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new PaymentApiError('backend_unavailable', 0)
+  }
   const payload = await parseJson<CreateChargeResponse & { error?: string; reason?: string }>(response)
   if (!response.ok || !('ok' in payload) || !payload.ok) {
     throw new PaymentApiError((payload as { reason?: string }).reason ?? (payload as { error?: string }).error ?? 'charge_creation_failed', response.status)

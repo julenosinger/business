@@ -133,6 +133,26 @@ const MIGRATIONS: string[] = [
   ALTER TABLE payment_attempts ADD COLUMN submission_started_at TEXT;
   ALTER TABLE payment_attempts ADD COLUMN submitted_at TEXT;
   `,
+  // v4 — núcleo de automação financeira (jobs duráveis e idempotentes, FIN-04.1B.2.2B.3.2A).
+  `
+  CREATE TABLE IF NOT EXISTS automation_jobs (
+    job_id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL CHECK (environment IN ('mainnet', 'testnet')),
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'retryable', 'requires_review')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT,
+    lease_until TEXT,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (organization_id, environment, idempotency_key)
+  );
+  `,
 ]
 
 export interface SettlementRecord {

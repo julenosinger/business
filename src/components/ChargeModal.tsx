@@ -50,13 +50,22 @@ function explainPaymentError(err: PaymentApiError): string {
     case 'insufficient_balance':
       return t('Valor acima do saldo disponível para esta obrigação.', 'Amount exceeds the available balance for this obligation.')
     case 'obligation_not_found':
-      return t('Obrigação não encontrada no razão. Verifique se a venda foi sincronizada.', 'Obligation not found in the ledger. Check that the sale was synced.')
+      return t('Obrigação não encontrada no razão. Verifique se a venda foi sincronizada com o backend.', 'Obligation not found in the ledger. Check that the sale was synced to the backend.')
     case 'duplicate_conflict':
       return t('Já existe uma cobrança com esta operação.', 'A charge already exists for this operation.')
+    case 'unresolved_depositor':
+      return t('Conta depositante institucional não definida. Configure a identidade Treasury para receber pagamentos Gateway.', 'Institutional depositor account not set. Configure the Treasury identity to receive Gateway payments.')
+    case 'invalid_amount':
+    case 'invalid_currency':
+      return t('Valor ou moeda inválidos para esta cobrança.', 'Invalid amount or currency for this charge.')
+    case 'unauthorized':
     case 'authentication_required':
       return t('Sessão expirada. Faça login para continuar.', 'Session expired. Log in to continue.')
+    case 'backend_unavailable':
+    case 'charge_creation_failed':
+      return t('Backend de pagamentos indisponível. Verifique a conexão e tente novamente.', 'Payment backend unavailable. Check the connection and try again.')
     default:
-      return t('Não foi possível criar a cobrança.', 'Could not create the charge.')
+      return t('Não foi possível criar a cobrança. Verifique o saldo disponível, a sincronização da venda e a configuração da Treasury.', 'Could not create the charge. Check the available balance, the sale sync and the Treasury configuration.')
   }
 }
 
