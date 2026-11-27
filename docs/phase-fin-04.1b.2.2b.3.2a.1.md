@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.3.2A.1 — Automation Core Integrity & Recovery Hardening
 
-**HEAD inicial:** `8d6e39f` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `8d6e39f` · **HEAD final:** `aab7b71`
 
 Resultado: **718 testes passando** (eram 710) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -45,4 +45,4 @@ Resultado: **718 testes passando** (eram 710) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>` (migrations v5/v6 são aditivas e não destrutivas; dados preservados)
+`git revert da6b5ec && git revert 01a13b7` (migrations v5/v6 são aditivas e não destrutivas; dados preservados)
