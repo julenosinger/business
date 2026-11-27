@@ -11,6 +11,8 @@ export interface CreateChargeRequest {
   amountDecimal: string
   currency?: string
   idempotencyKey: string
+  companyName?: string
+  publicDescription?: string
 }
 
 export interface CreateChargeResponse {
@@ -52,6 +54,15 @@ async function parseJson<T>(response: Response): Promise<T> {
   }
 }
 
+/** Extrai o código de erro real da resposta, distinguindo endpoint não encontrado e resposta não-JSON. */
+function errorCodeFor(response: Response, payload: { error?: string; reason?: string }): string {
+  if (payload.reason) return payload.reason
+  if (payload.error) return payload.error
+  if (response.status === 404) return 'endpoint_not_found'
+  if (!(response.headers.get('content-type') ?? '').includes('application/json')) return 'invalid_response'
+  return 'unknown_error'
+}
+
 export async function createChargeApi(input: CreateChargeRequest, signal?: AbortSignal): Promise<CreateChargeResponse> {
   let response: Response
   try {
@@ -69,7 +80,7 @@ export async function createChargeApi(input: CreateChargeRequest, signal?: Abort
   }
   const payload = await parseJson<CreateChargeResponse & { error?: string; reason?: string }>(response)
   if (!response.ok || !('ok' in payload) || !payload.ok) {
-    throw new PaymentApiError((payload as { reason?: string }).reason ?? (payload as { error?: string }).error ?? 'charge_creation_failed', response.status)
+    throw new PaymentApiError(errorCodeFor(response, payload), response.status)
   }
   return payload
 }
@@ -111,7 +122,7 @@ export async function syncObligationApi(input: SyncObligationRequest, signal?: A
   if (!response.ok || !payload.ok) {
     // version_conflict indica que o backend já tem versão mais nova — não é erro fatal para o checkout.
     if (payload.reason === 'version_conflict') return true
-    throw new PaymentApiError(payload.reason ?? payload.error ?? 'sync_failed', response.status)
+    throw new PaymentApiError(errorCodeFor(response, payload), response.status)
   }
   return true
 }

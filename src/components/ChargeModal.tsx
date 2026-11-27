@@ -51,20 +51,31 @@ function explainPaymentError(err: PaymentApiError): string {
     case 'insufficient_balance':
       return t('Valor acima do saldo disponível para esta obrigação.', 'Amount exceeds the available balance for this obligation.')
     case 'obligation_not_found':
-      return t('Obrigação não encontrada no razão. Verifique se a venda foi sincronizada com o backend.', 'Obligation not found in the ledger. Check that the sale was synced to the backend.')
+      return t('Obrigação não encontrada no backend. A venda ainda não foi sincronizada.', 'Obligation not found in the backend. The sale has not been synced yet.')
     case 'duplicate_conflict':
       return t('Já existe uma cobrança com esta operação.', 'A charge already exists for this operation.')
     case 'unresolved_depositor':
       return t('Conta depositante institucional não definida. Configure a identidade Treasury para receber pagamentos Gateway.', 'Institutional depositor account not set. Configure the Treasury identity to receive Gateway payments.')
     case 'invalid_amount':
     case 'invalid_currency':
-      return t('Valor ou moeda inválidos para esta cobrança.', 'Invalid amount or currency for this charge.')
+    case 'invalid_obligation':
+      return t('Valor, moeda ou obrigação inválidos para esta cobrança.', 'Invalid amount, currency or obligation for this charge.')
+    case 'invalid_input':
+      return t('Dados da cobrança incompletos ou inválidos.', 'Incomplete or invalid charge data.')
     case 'unauthorized':
     case 'authentication_required':
       return t('Sessão expirada. Faça login para continuar.', 'Session expired. Log in to continue.')
+    case 'permission_denied':
+      return t('Sem permissão para criar cobranças.', 'No permission to create charges.')
     case 'backend_unavailable':
-    case 'charge_creation_failed':
       return t('Backend de pagamentos indisponível. Verifique a conexão e tente novamente.', 'Payment backend unavailable. Check the connection and try again.')
+    case 'endpoint_not_found':
+    case 'invalid_response':
+      return t('Backend de pagamentos não está acessível neste domínio. Verifique a configuração de proxy/deploy.', 'Payment backend is not reachable on this domain. Check the proxy/deploy configuration.')
+    case 'invalid_environment':
+      return t('Ambiente inválido para esta cobrança.', 'Invalid environment for this charge.')
+    case 'sync_failed':
+      return t('Falha ao sincronizar a venda com o backend.', 'Failed to sync the sale with the backend.')
     default:
       return t('Não foi possível criar a cobrança. Verifique o saldo disponível, a sincronização da venda e a configuração da Treasury.', 'Could not create the charge. Check the available balance, the sale sync and the Treasury configuration.')
   }
@@ -229,6 +240,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
           description: selected === NEW ? description : undefined,
           amountDecimal: baseAmount.toString(),
           idempotencyKey: idempotencyKeyRef.current,
+          companyName: data.settings.company,
+          publicDescription: selected === NEW ? description : (account?.description ?? undefined),
         })
         if (session !== sessionRef.current) return
         setConfigPending(result.configurationPending)

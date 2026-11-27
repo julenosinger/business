@@ -49,7 +49,8 @@ export interface CreateCommercialChargeInput {
   /** Moeda contábil da cobrança avulsa (validada). Para obrigação existente, a moeda vem do razão. */
   currency?: string
   idempotencyKey: string
-  companyName: string
+  /** Nome comercial exibido no checkout (metadado de exibição; opcional). */
+  companyName?: string
   publicDescription?: string
   publicReference?: string
 }
@@ -206,7 +207,7 @@ export function createGatewayCharge(db: LedgerDb, orgId: string, environment: Ga
         `INSERT INTO payment_intents (intent_id, organization_id, environment, account_id, chain_id, token_address, gateway_wallet, depositor, currency, amount_minor, usdc_minor, idempotency_key, fingerprint, state, company, description, reference, created_at, expires_at, version)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED', ?, ?, ?, ?, ?, 0)`,
       )
-      .run(intentId, orgId, environment, accountId, cfg.chainId, cfg.usdcToken, cfg.gatewayWallet, resolvedDepositor, currency, String(amountMinor), String(usdcMinor), input.idempotencyKey, fingerprint, input.companyName, input.publicDescription ?? null, input.publicReference ?? null, now, expiresAt)
+      .run(intentId, orgId, environment, accountId, cfg.chainId, cfg.usdcToken, cfg.gatewayWallet, resolvedDepositor, currency, String(amountMinor), String(usdcMinor), input.idempotencyKey, fingerprint, input.companyName ?? null, input.publicDescription ?? null, input.publicReference ?? null, now, expiresAt)
 
     db.db
       .query('INSERT INTO payment_reservations (reservation_id, intent_id, organization_id, environment, account_id, currency, amount_minor, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')

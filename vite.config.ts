@@ -37,5 +37,9 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     cors: true,
+    // Desenvolvimento: encaminha /api/* ao backend Bun (porta 8787), mantendo a sessão same-origin.
+    proxy: {
+      '/api': 'http://localhost:8787',
+    },
   },
 })
