@@ -56,6 +56,21 @@ describe('FIN-04.1B.2.2B.3.2A.1 — chaves e idempotência', () => {
     expect(fx.has(scope, 'purchase', 'p1', 'inventory-posted')).toBe(true)
     expect(fx.has(scope, 'purchase', 'p1', 'accounting-posted')).toBe(false)
   })
+
+  test('automationEffects distingue repetição legítima de conflito (resultReference)', () => {
+    const db = new LedgerDb(':memory:')
+    const fx = new AutomationEffects(db)
+    const a = fx.record(scope, 'purchase', 'p1', 'inventory-posted', 'move-1')
+    expect(a.ok).toBe(true)
+    // mesmo resultReference → repetição legítima
+    const again = fx.record(scope, 'purchase', 'p1', 'inventory-posted', 'move-1')
+    expect(again.ok).toBe(true)
+    if (!again.ok) return
+    expect(again.duplicate).toBe(true)
+    expect(again.effectId).toBe((a as { effectId: string }).effectId)
+    // resultReference diferente → conflito (não é o mesmo efeito)
+    expect(fx.record(scope, 'purchase', 'p1', 'inventory-posted', 'move-2')).toEqual({ ok: false, reason: 'effect_conflict' })
+  })
 })
 
 describe('FIN-04.1B.2.2B.3.2A.1 — fencing do lease', () => {
@@ -75,7 +90,7 @@ describe('FIN-04.1B.2.2B.3.2A.1 — fencing do lease', () => {
     if (!c) throw new Error('claim failed')
     expect(jobs.complete(scope, leaseOf(id, W2, c.leaseVersion))).toBe(false) // worker errado
     expect(jobs.complete(scope, leaseOf(id, W, c.leaseVersion))).toBe(true) // worker certo
-    expect(jobs.get(id)?.status).toBe('completed')
+    expect(jobs.get(scope, id)?.status).toBe('completed')
     expect(jobs.claim(scope, id, W)).toBeNull() // completed não retorna a processing
   })
 
@@ -106,8 +121,8 @@ describe('FIN-04.1B.2.2B.3.2A.1 — fencing do lease', () => {
     const c = jobs.claim(scope, id, W)
     if (!c) throw new Error('claim failed')
     jobs.fail(scope, leaseOf(id, W, c.leaseVersion), { kind: 'retryable', code: 'persistence_failed' }, 8)
-    expect(jobs.get(id)?.status).toBe('retryable')
-    expect(jobs.get(id)?.nextRetryAt).toBeTruthy()
+    expect(jobs.get(scope, id)?.status).toBe('retryable')
+    expect(jobs.get(scope, id)?.nextRetryAt).toBeTruthy()
   })
 })
 
@@ -139,14 +154,18 @@ describe('FIN-04.1B.2.2B.3.2A.1 — recuperação', () => {
     expect(ids).toContain(p3)
   })
 
-  test('sweepExhausted migra jobs no limite para requires_review', () => {
-    const { jobs } = makeJobs()
+  test('sweepExhausted não interrompe worker com lease ativo; migra após expiração', () => {
+    const { jobs, db } = makeJobs()
     const id = enqueueOne(jobs)
-    const c = jobs.claim(scope, id, W, 60_000, 1) // maxAttempts=1 → attempts=1
+    const c = jobs.claim(scope, id, W, 60_000, 1) // maxAttempts=1 → attempts=1, lease ativo
     if (!c) throw new Error('claim failed')
+    // Correção P0.1: worker com lease ativo NÃO pode ser interrompido.
+    expect(jobs.sweepExhausted(scope, 1)).toBe(0)
+    expect(jobs.get(scope, id)?.status).toBe('processing')
+    expire(db, id, 'lease_until')
     expect(jobs.sweepExhausted(scope, 1)).toBe(1)
-    expect(jobs.get(id)?.status).toBe('requires_review')
-    expect(jobs.get(id)?.lastErrorCode).toBe('attempt_limit_reached')
+    expect(jobs.get(scope, id)?.status).toBe('requires_review')
+    expect(jobs.get(scope, id)?.lastErrorCode).toBe('attempt_limit_reached')
   })
 
   test('calculateBackoff é exponencial e limitado', () => {
@@ -175,7 +194,7 @@ describe('FIN-04.1B.2.2B.3.2A.1 — recuperação', () => {
     // Reabre: migrations já aplicadas são ignoradas; o job e o lease_version são preservados.
     const db = new LedgerDb(path)
     const jobs = new AutomationJobs(db)
-    const job = jobs.get(id)
+    const job = jobs.get(scope, id)
     expect(job).toBeTruthy()
     expect(job?.status).toBe('pending')
     expect(job?.leaseVersion).toBe(0)
