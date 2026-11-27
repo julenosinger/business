@@ -582,6 +582,8 @@ export interface Store {
   addRequest: (r: Omit<PaymentRequest, 'id' | 'status' | 'createdAt'>) => string
   updateRequest: (id: string, patch: Partial<PaymentRequest>) => void
   receiveRequest: (id: string, txHash: string, payer: string, explorerUrl: string) => void
+  /** Baixa uma cobrança de depósito direto Circle Gateway (`gateway_direct`) ao encontrar a Transfer on-chain. */
+  receiveGatewayDirect: (id: string, txHash: string, payer: string, explorerUrl: string) => void
   addTreasuryOp: (op: Omit<TreasuryOp, 'id' | 'date'>) => void
   /** Verifica a liquidação de uma operação de tesouraria e, se confirmada, baixa a conta uma única vez. */
   verifyAndSettle: (opId: string) => Promise<VerifyOutcome>
@@ -1465,6 +1467,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           // Sem obrigação aberta: o recebimento fica preservado na cobrança (paga) e vai para a conciliação
           // — nenhuma entrada de caixa genérica é fabricada.
+          return next
+        }),
+      receiveGatewayDirect: (id, txHash, payer, explorerUrl) =>
+        set((d) => {
+          const r = d.requests.find((x) => x.id === id)
+          if (!r || r.status !== 'open' || r.paymentRail !== 'gateway_direct') return d
+          let next: AppData = {
+            ...d,
+            requests: d.requests.map((x) => (x.id === id ? { ...x, status: 'paid', txHash, payer, explorerUrl, paidAt: new Date().toISOString() } : x)),
+          }
+          // A evidência on-chain (Transfer → GatewayWallet com a marca única) já é a verificação
+          // independente; baixa exatamente o valor da obrigação, nunca o saldo em aberto inteiro.
+          const acc = d.accounts.find((a) => a.id === r.accountId && a.status === 'open')
+          if (acc) {
+            next = settle(next, r.accountId, r.fiatAmount, explorerUrl)
+          }
           return next
         }),
       // Logística: as regras ficam em lib/logistics.ts. Aqui só se valida no estado atual e aplica no próximo.

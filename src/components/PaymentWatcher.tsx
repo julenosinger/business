@@ -18,7 +18,7 @@ const MAX_CHUNKS_PER_TICK = 5
  * em que ela foi criada, e baixa a conta quando encontra o valor exato. Roda enquanto o app está aberto.
  */
 export function PaymentWatcher() {
-  const { data, updateRequest, receiveRequest } = useStore()
+  const { data, updateRequest, receiveRequest, receiveGatewayDirect } = useStore()
   const latest = useRef(data)
   const running = useRef(false)
 
@@ -70,7 +70,11 @@ export function PaymentWatcher() {
       const taken = new Set(latest.current.requests.filter((x) => x.txHash).map((x) => x.txHash))
       const hit = logs.find((l) => l.args.value === raw && l.transactionHash && !taken.has(l.transactionHash))
       if (hit?.transactionHash) {
-        receiveRequest(r.id, hit.transactionHash, hit.args.from ?? '', buildTxExplorerUrl(r.chainId, hit.transactionHash))
+        if (r.paymentRail === 'gateway_direct') {
+          receiveGatewayDirect(r.id, hit.transactionHash, hit.args.from ?? '', buildTxExplorerUrl(r.chainId, hit.transactionHash))
+        } else {
+          receiveRequest(r.id, hit.transactionHash, hit.args.from ?? '', buildTxExplorerUrl(r.chainId, hit.transactionHash))
+        }
         toast.success(t(`Pagamento recebido: ${r.description}`, `Payment received: ${r.description}`))
       } else {
         updateRequest(r.id, { scannedTo: scannedTo.toString() })
@@ -100,7 +104,7 @@ export function PaymentWatcher() {
       ctl.abort()
       clearInterval(timer)
     }
-  }, [openKey, updateRequest, receiveRequest])
+  }, [openKey, updateRequest, receiveRequest, receiveGatewayDirect])
 
   return null
 }

@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useAccount, useReadContract, useSwitchChain, useWaitForTransactionReceipt, useWriteContract } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
-import { erc20Abi } from 'viem'
+import { erc20Abi, type EIP1193Provider } from 'viem'
+import { createViemAdapterFromProvider } from '@circle-fin/adapter-viem-v2'
 import { CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card } from '@/components/ui'
 import { ChainIcon } from '@/components/ChainIcon'
 import { Toggles } from '@/components/Layout'
-import { chainByKey, explainError } from '@/lib/gateway'
+import { appKit, chainByKey, explainError } from '@/lib/gateway'
 import type { Invoice } from '@/lib/invoice'
 import { t } from '@/lib/i18n'
 import { usdcFmt } from '@/lib/format'
@@ -42,13 +43,15 @@ export function InvalidInvoice() {
 export function PayPage({ invoice }: { invoice: Invoice }) {
   const chain = chainByKey(invoice.ch)
   const usdc = chain ? getUsdc(chain.chainId) : undefined
-  const { address, chainId, isConnected } = useAccount()
+  const { address, chainId, isConnected, connector } = useAccount()
   const { switchChainAsync } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const [hash, setHash] = useState<`0x${string}` | undefined>()
+  const [directDone, setDirectDone] = useState<{ txHash: string; explorerUrl?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const receipt = useWaitForTransactionReceipt({ hash, chainId: chain?.chainId })
+  const isDirect = invoice.rail === 'gateway_direct' && Boolean(invoice.dp)
 
   const raw = Amount.parse(invoice.amt, USDC_DECIMALS).raw
   const balance = useReadContract({
@@ -68,14 +71,22 @@ export function PayPage({ invoice }: { invoice: Invoice }) {
     setBusy(true)
     try {
       if (chainId !== chain.chainId) await switchChainAsync({ chainId: chain.chainId })
-      const tx = await writeContractAsync({
-        address: usdc.address as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [invoice.to as `0x${string}`, raw],
-        chainId: chain.chainId,
-      })
-      setHash(tx)
+      if (isDirect) {
+        if (!connector) throw new Error(t('Carteira não conectada', 'Wallet not connected'))
+        const provider = (await connector.getProvider()) as EIP1193Provider
+        const adapter = await createViemAdapterFromProvider({ provider })
+        const res = await appKit.unifiedBalance.depositFor({ from: { adapter, chain: invoice.ch }, amount: invoice.amt, depositAccount: invoice.dp! })
+        setDirectDone({ txHash: res.txHash, explorerUrl: res.explorerUrl })
+      } else {
+        const tx = await writeContractAsync({
+          address: usdc.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'transfer',
+          args: [invoice.to as `0x${string}`, raw],
+          chainId: chain.chainId,
+        })
+        setHash(tx)
+      }
     } catch (err) {
       setError(explainError(err))
     } finally {
@@ -83,8 +94,10 @@ export function PayPage({ invoice }: { invoice: Invoice }) {
     }
   }
 
-  const done = receipt.isSuccess
+  const done = directDone !== null || receipt.isSuccess
   const confirming = Boolean(hash) && !done && !receipt.isError
+  const successUrl = directDone ? (directDone.explorerUrl ?? buildTxExplorerUrl(chain.chainId, directDone.txHash)) : hash ? buildTxExplorerUrl(chain.chainId, hash) : null
+  const displayRecipient = isDirect ? (invoice.dp ?? invoice.to) : invoice.to
 
   return (
     <Shell>
@@ -106,34 +119,38 @@ export function PayPage({ invoice }: { invoice: Invoice }) {
         </div>
 
         <div>
-          <div className="label mb-1">{t('Carteira de destino', 'Destination wallet')}</div>
+          <div className="label mb-1">{isDirect ? t('Conta creditada (depósito Gateway)', 'Credited account (Gateway deposit)') : t('Carteira de destino', 'Destination wallet')}</div>
           <button
             onClick={() => {
-              void navigator.clipboard.writeText(invoice.to)
+              void navigator.clipboard.writeText(displayRecipient)
               toast.success(t('Endereço copiado.', 'Address copied.'))
             }}
             className="mono flex w-full items-start gap-2 rounded-xl border border-line px-3 py-2 text-left text-xs break-all hover:bg-surface-strong"
           >
-            <Copy size={14} className="mt-0.5 shrink-0" /> {invoice.to}
+            <Copy size={14} className="mt-0.5 shrink-0" /> {displayRecipient}
           </button>
           <p className="mt-2 flex items-start gap-2 text-xs text-subtle text-pretty">
             <ShieldCheck size={14} className="mt-0.5 shrink-0" />
-            {t('Confira se o endereço e o valor são os que você espera antes de assinar.', 'Check that the address and amount are what you expect before signing.')}
+            {isDirect
+              ? t('O depósito é feito pelo contrato oficial Circle Gateway, creditando esta conta.', 'The deposit goes through the official Circle Gateway contract, crediting this account.')
+              : t('Confira se o endereço e o valor são os que você espera antes de assinar.', 'Check that the address and amount are what you expect before signing.')}
           </p>
         </div>
 
-        {done && hash ? (
+        {done ? (
           <div className="space-y-3 text-center">
             <CheckCircle2 size={44} className="mx-auto text-ok" />
             <p className="display text-lg font-semibold">{t('Pagamento confirmado', 'Payment confirmed')}</p>
-            <a
-              href={buildTxExplorerUrl(chain.chainId, hash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline"
-            >
-              {t('Ver comprovante no explorer', 'View receipt on explorer')} <ExternalLink size={14} />
-            </a>
+            {successUrl ? (
+              <a
+                href={successUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline"
+              >
+                {t('Ver comprovante no explorer', 'View receipt on explorer')} <ExternalLink size={14} />
+              </a>
+            ) : null}
           </div>
         ) : !isConnected ? (
           <div className="flex justify-center">

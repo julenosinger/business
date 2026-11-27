@@ -20,6 +20,10 @@ export interface Invoice {
   desc: string
   /** Nome de quem cobra. */
   who: string
+  /** Via de pagamento. `gateway_direct` = depósito Circle Gateway sem backend. */
+  rail?: 'gateway_direct'
+  /** Conta institucional creditada no depósito direto (`gateway_direct`). */
+  dp?: string
 }
 
 export const INVOICE_PARAM = 'invoice'
@@ -65,6 +69,8 @@ export function decodeInvoice(value: string): Invoice | null {
       ref: String(raw.ref ?? '').slice(0, 32),
       desc: String(raw.desc ?? '').slice(0, 120),
       who: String(raw.who ?? '').slice(0, 60),
+      ...(raw.rail === 'gateway_direct' ? { rail: 'gateway_direct' as const } : {}),
+      ...(typeof raw.dp === 'string' && isAddress(raw.dp) ? { dp: raw.dp } : {}),
     }
   } catch {
     return null
@@ -78,7 +84,17 @@ export function readInvoiceFromLocation(): { present: boolean; invoice: Invoice 
 }
 
 export function requestToInvoice(r: PaymentRequest, merchant: string): Invoice {
-  return { v: 1, to: r.recipient, ch: r.chainKey as GatewayChain['key'], amt: r.amount, ref: r.id, desc: r.description, who: merchant }
+  return {
+    v: 1,
+    to: r.recipient,
+    ch: r.chainKey as GatewayChain['key'],
+    amt: r.amount,
+    ref: r.id,
+    desc: r.description,
+    who: merchant,
+    ...(r.paymentRail === 'gateway_direct' ? { rail: 'gateway_direct' as const } : {}),
+    ...(r.depositor ? { dp: r.depositor } : {}),
+  }
 }
 
 /** Monta o link completo. A base vem de getShareBase(), nunca de window.location. */

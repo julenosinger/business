@@ -10,6 +10,7 @@ import { treasuryRecipientFor, validateGatewayTreasury, resolveGatewayTreasury }
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
 import { checkoutUrlFor, getChargeAvailability, obligationOutstandingMinor } from '@/lib/gateway-charge'
+import { gatewayDirectReceiving } from '@/lib/gateway-direct'
 import { createChargeApi, syncObligationApi, PaymentApiError } from '@/lib/payment-api'
 import { fromNumber } from '@/lib/accounting/money'
 import { useStore } from '@/lib/store'
@@ -105,6 +106,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   const [gatewayIntentId, setGatewayIntentId] = useState<string | null>(null)
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null)
   const [configPending, setConfigPending] = useState(false)
+  // Recebimento "Gateway direto" (sem backend): depósito via depositFor + detecção on-chain.
+  const [direct, setDirect] = useState(false)
   const [seed, setSeed] = useState<string | null>(null)
 
   // Lock imediato (anti duplo clique) e identidade de sessão (invalida respostas assíncronas obsoletas).
@@ -136,6 +139,7 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
     setGatewayIntentId(null)
     setCheckoutUrl(null)
     setConfigPending(false)
+    setDirect(false)
     setError(null)
     setDesc('')
     setFiat('')
@@ -173,6 +177,8 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
   // Destino Gateway oficial (resolvido pelo registry); beneficiário convencional é opcional (legado).
   const gatewayValid = chain ? validateGatewayTreasury(gatewayTreasury.recipient, network, chain.chainId) : false
   const destinationValid = gatewayValid
+  // Contexto do recebimento direto (depositFor) — só disponível quando o depositor está configurado.
+  const directReceiving = gatewayDirectReceiving(data.settings, network)
 
   const handleCreateCharge = async () => {
     if (busyRef.current) return
@@ -212,7 +218,58 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
 
       const description = selected === NEW ? desc.trim() : (account?.description ?? '')
 
-      if (gatewayValid) {
+      if (direct && gatewayValid) {
+        // Fluxo "Gateway direto" (sem backend): o cliente deposita USDC via depositFor no GatewayWallet
+        // creditando a conta institucional do comerciante. A detecção é on-chain (Transfer com marca única).
+        const receiving = gatewayDirectReceiving(data.settings, network)
+        if (!receiving) {
+          setError(t('Conta depositante institucional não configurada para receber via Circle Gateway.', 'Institutional depositor account not configured to receive via Circle Gateway.'))
+          return
+        }
+        const accId =
+          selected === NEW
+            ? addAccount({
+                kind: 'receivable',
+                description,
+                contactName: t('Cobrança avulsa', 'One-off charge'),
+                amount: fiatValue,
+                dueDate: today(),
+                category: 'Serviços prestados',
+              })
+            : selected
+        const client = getPublicClient(config, { chainId: receiving.chainId })
+        let fromBlock = '0'
+        try {
+          if (client) fromBlock = (await client.getBlockNumber()).toString()
+        } catch {
+          fromBlock = '0'
+        }
+        if (session !== sessionRef.current) return
+        const taken = new Set(
+          data.requests
+            .filter((r) => r.status === 'open' && r.paymentRail === 'gateway_direct' && r.recipient.toLowerCase() === receiving.gatewayWallet.toLowerCase())
+            .map((r) => Amount.parse(r.amount, USDC_DECIMALS).raw),
+        )
+        const exact = withTag(baseAmount, taken)
+        if (!exact) {
+          setError(t('Não há valor marcado disponível para esta cobrança. Tente novamente.', 'No tagged amount available for this charge. Please try again.'))
+          return
+        }
+        const id = addRequest({
+          accountId: accId,
+          description,
+          fiatAmount: fiatValue,
+          amount: exact.toString(),
+          chainKey: arcGatewayKeyOf(network),
+          chainId: receiving.chainId,
+          recipient: receiving.gatewayWallet,
+          depositor: receiving.depositor,
+          fromBlock,
+          paymentRail: 'gateway_direct',
+        })
+        if (session !== sessionRef.current) return
+        setCreatedId(id)
+      } else if (gatewayValid) {
         // Fluxo Gateway (autoritativo): sincroniza a obrigação e cria a cobrança via API.
         if (selected !== NEW && account) {
           const outstanding = obligationOutstandingMinor(account)
@@ -419,23 +476,38 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
             <input className={inputCls} inputMode="decimal" value={usdcText} onChange={(e) => setUsdcText(e.target.value)} placeholder="0,00" />
           </Field>
 
-          <Field label={t('Rede para receber', 'Network to receive on')}>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
-                <ChainIcon chainKey={chainKey} size={20} />
+          {gatewayValid ? (
+            <label className="flex items-start gap-2 rounded-xl border border-line bg-fill/5 p-3 text-sm">
+              <input type="checkbox" className="mt-1" checked={direct} onChange={(e) => setDirect(e.target.checked)} />
+              <span className="text-pretty">
+                {t('Receber via Circle Gateway direto (sem backend)', 'Receive via Circle Gateway directly (no backend)')}
+                {!directReceiving ? <span className="mt-1 block text-xs text-warn">{t('Defina a conta depositante institucional em Configurações.', 'Set the institutional depositor account in Settings.')}</span> : null}
               </span>
-              <select className={`${inputCls} pl-10`} value={chainKey} onChange={(e) => setChainKey(e.target.value)}>
-                {gatewayChainsFor(network).map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </Field>
+            </label>
+          ) : null}
+
+          {!direct ? (
+            <Field label={t('Rede para receber', 'Network to receive on')}>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+                  <ChainIcon chainKey={chainKey} size={20} />
+                </span>
+                <select className={`${inputCls} pl-10`} value={chainKey} onChange={(e) => setChainKey(e.target.value)}>
+                  {gatewayChainsFor(network).map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </Field>
+          ) : null}
 
           <p className="text-xs text-subtle text-pretty">
-            {t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')} <span className="mono">{gatewayTreasury.recipient}</span>
+            {direct
+              ? t('Depósito Circle Gateway creditando:', 'Circle Gateway deposit crediting:')
+              : t('Recebe na Treasury institucional:', 'Receives at the institutional Treasury:')}{' '}
+            <span className="mono">{direct ? directReceiving?.depositor ?? '—' : gatewayTreasury.recipient}</span>
           </p>
           {error ? <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{error}</p> : null}
           <Button className="w-full" disabled={busy} aria-busy={busy} onClick={() => void handleCreateCharge()}>

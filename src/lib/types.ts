@@ -307,8 +307,10 @@ export interface PaymentRequest {
   fromBlock: string
   scannedTo?: string
   status: 'open' | 'paid' | 'canceled'
-  /** Via de pagamento: transferência legada ou depósito Circle Gateway (verificação independente). */
-  paymentRail?: 'legacy_transfer' | 'circle_gateway'
+  /** Via de pagamento: transferência legada, depósito Circle Gateway (verificação independente) ou depósito direto (sem backend). */
+  paymentRail?: 'legacy_transfer' | 'circle_gateway' | 'gateway_direct'
+  /** Conta institucional creditada pelo depósito direto Circle Gateway (apenas `gateway_direct`). */
+  depositor?: string
   txHash?: string
   payer?: string
   explorerUrl?: string
