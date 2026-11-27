@@ -9,7 +9,7 @@ const DEPOSITOR = '0x000000000000000000000000000000000000000a'
 
 function makeHandler() {
   const db = new LedgerDb(':memory:')
-  const api = createApi(db, { token: 'admin-secret', orgId: 'local', depositors: { testnet: DEPOSITOR } })
+  const api = createApi(db, { token: 'admin-secret', orgId: 'local', depositors: { mainnet: DEPOSITOR } })
   const sessions = new SessionStore()
   const chat = createChatApi({ sessions })
   const handler = createHandler({ api, chat, sessions, db, loginSecret: 'login-secret', cookieSecure: false, sessionMaxAge: 3600 })
@@ -37,7 +37,7 @@ describe('FIN-04.1B.2.2B.3.2B.0 — fluxo HTTP completo (login → sync → cobr
       new Request('http://localhost/api/obligations/sync', {
         method: 'POST',
         headers: withCookie(cookie),
-        body: JSON.stringify({ environment: 'testnet', obligationId: 'a1', sourceKind: 'sale', sourceId: 's1', currency: 'USDC', originalAmountMinor: '3000000', outstandingMinor: '3000000', version: 0 }),
+        body: JSON.stringify({ environment: 'mainnet', obligationId: 'a1', sourceKind: 'sale', sourceId: 's1', currency: 'USDC', originalAmountMinor: '3000000', outstandingMinor: '3000000', version: 0 }),
       }),
     )) as Response
     expect(sync.status).toBe(200)
@@ -48,7 +48,7 @@ describe('FIN-04.1B.2.2B.3.2B.0 — fluxo HTTP completo (login → sync → cobr
       new Request('http://localhost/api/payment-intents', {
         method: 'POST',
         headers: withCookie(cookie),
-        body: JSON.stringify({ environment: 'testnet', accountId: 'a1', amountDecimal: '3', idempotencyKey: 'k1', companyName: 'Acme' }),
+        body: JSON.stringify({ environment: 'mainnet', accountId: 'a1', amountDecimal: '3', idempotencyKey: 'k1', companyName: 'Acme' }),
       }),
     )) as Response
     expect(charge.status).toBe(200)
@@ -70,7 +70,7 @@ describe('FIN-04.1B.2.2B.3.2B.0 — fluxo HTTP completo (login → sync → cobr
       new Request('http://localhost/api/payment-intents', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ environment: 'testnet', accountId: 'a1', amountDecimal: '3', idempotencyKey: 'k1' }),
+        body: JSON.stringify({ environment: 'mainnet', accountId: 'a1', amountDecimal: '3', idempotencyKey: 'k1' }),
       }),
     )) as Response
     expect(res.status).toBe(401)
@@ -84,10 +84,24 @@ describe('FIN-04.1B.2.2B.3.2B.0 — fluxo HTTP completo (login → sync → cobr
       new Request('http://localhost/api/payment-intents', {
         method: 'POST',
         headers: withCookie(cookie),
-        body: JSON.stringify({ environment: 'testnet', accountId: 'ghost', amountDecimal: '3', idempotencyKey: 'k1', companyName: 'Acme' }),
+        body: JSON.stringify({ environment: 'mainnet', accountId: 'ghost', amountDecimal: '3', idempotencyKey: 'k1', companyName: 'Acme' }),
       }),
     )) as Response
     expect(res.status).toBe(409)
     expect((await res.json()).reason).toBe('obligation_not_found')
+  })
+
+  test('Testnet é rejeitada explicitamente (testnet_discontinued)', async () => {
+    const { handler } = makeHandler()
+    const cookie = await login(handler)
+    const res = (await handler(
+      new Request('http://localhost/api/payment-intents', {
+        method: 'POST',
+        headers: withCookie(cookie),
+        body: JSON.stringify({ environment: 'testnet', accountId: 'a1', amountDecimal: '3', idempotencyKey: 'k1', companyName: 'Acme' }),
+      }),
+    )) as Response
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('testnet_discontinued')
   })
 })
