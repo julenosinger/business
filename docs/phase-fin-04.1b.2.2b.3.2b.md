@@ -1,6 +1,6 @@
 # FIN-04.1B.2.2B.3.2B — Authoritative Obligation Sync & Functional Gateway Checkout
 
-**HEAD inicial:** `ffcffb7` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `ffcffb7` · **HEAD final:** `580869d`
 
 Resultado: **724 testes passando** (eram 718) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -45,4 +45,4 @@ Resultado: **724 testes passando** (eram 718) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>` (migration v7 é aditiva e não destrutiva)
+`git revert 460a234 && git revert 716d95f` (migration v7 é aditiva e não destrutiva)
