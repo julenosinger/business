@@ -7,7 +7,7 @@
 import { UnauthorizedError, type LedgerApi } from './api'
 import type { ChatApi, ChatRequest } from './chat'
 import { CSRF_HEADER, SessionStore, SESSION_COOKIE, clearSessionCookieHeader, parseCookies, sessionCookieHeader } from './session'
-import { getPublicCheckout, createCheckoutAttempt, beginDepositSubmission, registerDepositSubmission, getCheckoutStatus, type GatewayEnvironment } from './payments'
+import { getPublicCheckout, createCheckoutAttempt, beginDepositSubmission, registerDepositSubmission, getCheckoutStatus } from './payments'
 import type { LedgerDb } from './db'
 
 export interface HandlerConfig {
@@ -77,28 +77,35 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
         throw new UnauthorizedError()
       }
 
+      // Mainnet-only: rejeita Testnet explicitamente (sem conversão silenciosa para Mainnet).
+      const resolveEnvironment = (value: unknown): { env: 'mainnet' } | { error: string } => {
+        if (value === 'mainnet') return { env: 'mainnet' }
+        if (value === 'testnet') return { error: 'testnet_discontinued' }
+        return { error: 'invalid_environment' }
+      }
+
       // Sincronização autoritativa da obrigação comercial (projeção do checkout).
       if (method === 'POST' && url.pathname === '/api/obligations/sync') {
         const body = (await req.json()) as { environment?: unknown } & Record<string, unknown>
-        const environment: GatewayEnvironment | null = body.environment === 'mainnet' || body.environment === 'testnet' ? body.environment : null
-        if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
-        const result = cfg.api.syncObligationForOrg(resolvePaymentOrg(req), environment, body as never)
+        const resolved = resolveEnvironment(body.environment)
+        if ('error' in resolved) return json({ error: resolved.error }, 400, cors())
+        const result = cfg.api.syncObligationForOrg(resolvePaymentOrg(req), resolved.env, body as never)
         return json(result, result.ok ? 200 : 409, cors())
       }
 
       // Cobrança Gateway compartilhável (autenticada pela organização).
       if (method === 'POST' && url.pathname === '/api/payment-intents') {
         const body = (await req.json()) as { environment?: unknown } & Record<string, unknown>
-        const environment: GatewayEnvironment | null = body.environment === 'mainnet' || body.environment === 'testnet' ? body.environment : null
-        if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
-        const result = cfg.api.createPaymentIntentForOrg(resolvePaymentOrg(req), environment, body as never)
+        const resolved = resolveEnvironment(body.environment)
+        if ('error' in resolved) return json({ error: resolved.error }, 400, cors())
+        const result = cfg.api.createPaymentIntentForOrg(resolvePaymentOrg(req), resolved.env, body as never)
         return json(result, result.ok ? 200 : 409, cors())
       }
       if (method === 'GET' && url.pathname === '/api/payment-intents') {
         const env = url.searchParams.get('environment')
-        const environment: GatewayEnvironment | null = env === 'mainnet' || env === 'testnet' ? env : null
-        if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
-        return json(cfg.api.listPaymentIntentsForOrg(resolvePaymentOrg(req), environment), 200, cors())
+        const resolved = resolveEnvironment(env)
+        if ('error' in resolved) return json({ error: resolved.error }, 400, cors())
+        return json(cfg.api.listPaymentIntentsForOrg(resolvePaymentOrg(req), resolved.env), 200, cors())
       }
       const intentMatch = url.pathname.match(/^\/api\/payment-intents\/([^/]+)$/)
       if (intentMatch) {

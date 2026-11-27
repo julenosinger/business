@@ -1,11 +1,9 @@
 /**
- * Rede ativa do app (Arc Mainnet / Arc Testnet).
+ * Rede ativa do app — Arc Mainnet (exclusiva).
  *
- * - Default: **Mainnet** (chain id 5042) para novos usuários.
- * - A preferência é persistida (`gbos:network`) e validada na leitura: qualquer valor desconhecido
- *   volta para Mainnet (nunca confia em valor corrompido).
- * - A troca é sempre uma ação explícita do usuário; o app NUNCA troca de rede silenciosamente.
- * - Mainnet e Testnet são ambientes distintos: saldos e transações nunca se misturam.
+ * O ERP opera exclusivamente em Mainnet. `NetworkId` mantém o valor `'testnet'` apenas para
+ * CLASSIFICAÇÃO de dados históricos e testes de rejeição/migração — nunca como ambiente ativo.
+ * A preferência persistida de Testnet é ignorada; o app inicia e permanece em Mainnet.
  */
 import { useSyncExternalStore } from 'react'
 
@@ -22,7 +20,7 @@ export interface NetworkInfo {
   id: NetworkId
   chainId: number
   label: string
-  /** Distinção visual/segurança: `live` = rede real, `test` = ambiente de teste. */
+  /** Distinção visual/segurança: `live` = rede real, `test` = ambiente de teste (descontinuado). */
   env: 'live' | 'test'
   short: string
 }
@@ -34,13 +32,9 @@ export const NETWORKS: Record<NetworkId, NetworkInfo> = {
 
 export const isValidNetwork = (v: unknown): v is NetworkId => v === 'mainnet' || v === 'testnet'
 
+// Mainnet-only: o app SEMPRE inicia em Arc Mainnet, ignorando qualquer preferência antiga de Testnet.
 function read(): NetworkId {
-  try {
-    const v = localStorage.getItem(KEY)
-    return v === 'testnet' ? 'testnet' : 'mainnet'
-  } catch {
-    return 'mainnet'
-  }
+  return 'mainnet'
 }
 
 let current: NetworkId = read()
@@ -49,7 +43,7 @@ export const getNetwork = (): NetworkId => current
 export const networkInfo = (id: NetworkId = current): NetworkInfo => NETWORKS[id]
 export const arcChainIdOf = (id: NetworkId = current): number => NETWORKS[id].chainId
 
-/** Chave da rede Arc no Circle Gateway (`Arc` = Mainnet, `Arc_Testnet` = Testnet). */
+/** Chave da rede Arc no Circle Gateway (`Arc` = Mainnet, `Arc_Testnet` = Testnet descontinuada). */
 export const ARC_GATEWAY_KEYS: Record<NetworkId, 'Arc' | 'Arc_Testnet'> = { mainnet: 'Arc', testnet: 'Arc_Testnet' }
 export const arcGatewayKeyOf = (id: NetworkId = current): 'Arc' | 'Arc_Testnet' => ARC_GATEWAY_KEYS[id]
 
@@ -105,7 +99,11 @@ const GATEWAY_KEY_ENVS: Record<string, 'live' | 'test'> = {
 
 export const gatewayChainEnv = (key: string): 'live' | 'test' | undefined => GATEWAY_KEY_ENVS[key]
 
-/** Troca a rede (ação explícita). Persiste e notifica assinantes. */
+/**
+ * Troca a rede (API interna). Operacionalmente o ERP é Mainnet-only (a interface não oferece
+ * Testnet e o backend a rejeita); esta função permanece para CLASSIFICAÇÃO de dados históricos e
+ * testes de isolamento/migração. Persiste e notifica assinantes.
+ */
 export function setNetwork(id: NetworkId): void {
   if (!isValidNetwork(id) || id === current) return
   current = id
