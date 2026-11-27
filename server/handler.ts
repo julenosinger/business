@@ -8,6 +8,7 @@ import { UnauthorizedError, type LedgerApi } from './api'
 import type { ChatApi, ChatRequest } from './chat'
 import { CSRF_HEADER, SessionStore, SESSION_COOKIE, clearSessionCookieHeader, parseCookies, sessionCookieHeader } from './session'
 import { getPublicCheckout, createCheckoutAttempt, beginDepositSubmission, registerDepositSubmission, getCheckoutStatus } from './payments'
+import { serveStatic } from './static'
 import type { LedgerDb } from './db'
 
 export interface HandlerConfig {
@@ -19,6 +20,8 @@ export interface HandlerConfig {
   allowedOrigin?: string
   cookieSecure: boolean
   sessionMaxAge: number
+  /** Diretório do frontend compilado (ex.: `dist`) para servir o SPA na mesma origem. */
+  staticDir?: string
 }
 
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}): Response =>
@@ -148,6 +151,12 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
         }
         const result = registerDepositSubmission(cfg.db, token!, attemptId!, String(body.txHash ?? ''))
         return json(result, result.ok ? 200 : 409, cors())
+      }
+
+      // SPA (same-origin): serve o frontend compilado quando staticDir estiver configurado.
+      if (cfg.staticDir) {
+        const staticResponse = await serveStatic(req, cfg.staticDir)
+        if (staticResponse) return staticResponse
       }
 
       return json({ error: 'not_found' }, 404)

@@ -16,6 +16,8 @@ import { resolveProvider } from './ai'
 import { LedgerDb } from './db'
 import { SessionStore } from './session'
 import { createHandler } from './handler'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const token = process.env.GBOS_API_TOKEN
 const orgId = process.env.GBOS_ORG_ID ?? 'local'
@@ -25,6 +27,8 @@ const port = Number(process.env.PORT ?? 8787)
 const loginSecret = process.env.GBOS_LOGIN_SECRET
 const allowedOrigin = process.env.GBOS_ALLOWED_ORIGIN?.trim()
 const cookieSecure = process.env.GBOS_COOKIE_SECURE === '1'
+// Diretório do frontend compilado (same-origin). Default: `dist/` na raiz do projeto.
+const staticDir = process.env.GBOS_STATIC_DIR?.trim() || resolve(process.cwd(), 'dist')
 
 if (!token) {
   console.error('GBOS_API_TOKEN is required (single-owner auth secret). Refusing to start without authentication.')
@@ -52,10 +56,12 @@ const chat = createChatApi({ sessions, provider })
 
 if (!provider) console.log('AI chat is unavailable: set GBOS_AI_PROVIDER and GBOS_AI_API_KEY to enable real responses.')
 if (!loginSecret) console.log('Browser login disabled: set GBOS_LOGIN_SECRET to allow authenticated chat from the browser.')
+if (existsSync(resolve(staticDir, 'index.html'))) console.log(`Serving frontend from ${staticDir} (same-origin).`)
+else console.log(`Frontend not found at ${staticDir} — only /api/* will be served.`)
 
 Bun.serve({
   port,
-  fetch: createHandler({ api, chat, sessions, db, loginSecret, allowedOrigin, cookieSecure, sessionMaxAge: 8 * 60 * 60 }),
+  fetch: createHandler({ api, chat, sessions, db, loginSecret, allowedOrigin, cookieSecure, sessionMaxAge: 8 * 60 * 60, staticDir }),
 })
 
 console.log(`Global Business OS backend listening on :${port} (org ${orgId}, db ${dbPath ?? ':memory:'})`)
