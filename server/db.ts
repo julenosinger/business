@@ -174,6 +174,23 @@ const MIGRATIONS: string[] = [
     UNIQUE (organization_id, environment, effect_key)
   );
   `,
+  // v7 — projeção autoritativa das obrigações comerciais (sincronização mínima do checkout) — FIN-04.1B.2.2B.3.2B.
+  `
+  CREATE TABLE IF NOT EXISTS payment_obligations (
+    organization_id TEXT NOT NULL,
+    environment TEXT NOT NULL CHECK (environment IN ('mainnet', 'testnet')),
+    obligation_id TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    original_amount_minor TEXT NOT NULL,
+    outstanding_minor TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (organization_id, environment, obligation_id)
+  );
+  `,
 ]
 
 export interface SettlementRecord {

@@ -137,8 +137,8 @@ export class AutomationJobs {
     return { ok: true, jobId: existing.job_id, duplicate: true }
   }
 
-  get(jobId: string): AutomationJob | null {
-    return mapRow(this.db.db.query('SELECT * FROM automation_jobs WHERE job_id = ?').get(jobId) as Row | undefined)
+  get(scope: FinancialScope, jobId: string): AutomationJob | null {
+    return mapRow(this.db.db.query('SELECT * FROM automation_jobs WHERE job_id = ? AND organization_id = ? AND environment = ?').get(jobId, scope.organizationId, scope.environment) as Row | undefined)
   }
 
   /**
@@ -203,7 +203,7 @@ export class AutomationJobs {
   /** Registra falha somente se o worker possuir o lease válido (fencing); limite de tentativas → requires_review. */
   fail(scope: FinancialScope, lease: JobLease, failure: AutomationFailure, maxAttempts = 8): boolean {
     const now = new Date().toISOString()
-    const job = this.get(lease.jobId)
+    const job = this.get(scope, lease.jobId)
     const attempts = job?.attempts ?? 1
     const exhausted = attempts >= maxAttempts
     const status = failure.kind === 'requires_review' || exhausted ? 'requires_review' : 'retryable'
@@ -219,15 +219,19 @@ export class AutomationJobs {
     return result.changes === 1
   }
 
-  /** Migra jobs cujo limite de tentativas foi atingido (inclusive 'processing' órfãos) para requires_review. */
+  /** Migra jobs cujo limite de tentativas foi atingido para requires_review; NUNCA interrompe worker com lease ativo. */
   sweepExhausted(scope: FinancialScope, maxAttempts = 8): number {
     const now = new Date().toISOString()
     const result = this.db.db
       .query(
         `UPDATE automation_jobs SET status = 'requires_review', last_error_code = 'attempt_limit_reached', lease_until = NULL, worker_id = NULL, updated_at = ?
-         WHERE organization_id = ? AND environment = ? AND attempts >= ? AND status IN ('retryable', 'processing')`,
+         WHERE organization_id = ? AND environment = ? AND attempts >= ?
+           AND (
+             status = 'retryable'
+             OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until <= ?)
+           )`,
       )
-      .run(now, scope.organizationId, scope.environment, maxAttempts)
+      .run(now, scope.organizationId, scope.environment, maxAttempts, now)
     return result.changes
   }
 
@@ -250,7 +254,7 @@ export class AutomationJobs {
   }
 }
 
-export type EffectResult = { ok: true; effectId: string; duplicate: boolean } | { ok: false; reason: 'invalid_effect' }
+export type EffectResult = { ok: true; effectId: string; duplicate: boolean } | { ok: false; reason: 'invalid_effect' | 'effect_conflict' }
 
 /** Idempotência dos EFEITOS financeiros: cada efeito é gravado uma única vez por (org, env, chave). */
 export class AutomationEffects {
@@ -269,7 +273,9 @@ export class AutomationEffects {
       )
       .run(effectId, scope.organizationId, scope.environment, key, sourceId, effectKind, resultReference, now)
     if (result.changes === 1) return { ok: true, effectId, duplicate: false }
-    const existing = this.db.db.query('SELECT effect_id FROM automation_effects WHERE organization_id = ? AND environment = ? AND effect_key = ?').get(scope.organizationId, scope.environment, key) as { effect_id: string }
+    // Chave já existe: repetição legítima somente se o resultReference for idêntico; senão, conflito.
+    const existing = this.db.db.query('SELECT effect_id, result_reference FROM automation_effects WHERE organization_id = ? AND environment = ? AND effect_key = ?').get(scope.organizationId, scope.environment, key) as { effect_id: string; result_reference: string }
+    if (existing.result_reference !== resultReference) return { ok: false, reason: 'effect_conflict' }
     return { ok: true, effectId: existing.effect_id, duplicate: true }
   }
 

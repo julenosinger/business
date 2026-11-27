@@ -11,6 +11,20 @@ import { gatewayConfigFor } from './gateway-config'
 import type { NetworkId } from './network'
 import type { Account, PaymentRequest, PaymentReservation } from './types'
 
+/** Saldo em aberto (unidades menores da moeda original) de uma obrigação, derivado de liquidações persistidas. */
+export function obligationOutstandingMinor(account: Account): bigint | null {
+  const currency = account.currency
+  if (!currency) return null
+  const amountMinor = fromNumber(account.amount, currency)
+  if (amountMinor === null) return null
+  let paidMinor = 0n
+  for (const s of account.settlements ?? []) {
+    const m = fromNumber(s.amount, currency)
+    if (m !== null) paidMinor += m
+  }
+  return amountMinor - paidMinor
+}
+
 /**
  * Saldo disponível para nova cobrança de uma obrigação, em unidades menores da moeda original
  * (saldo em aberto − reservado). Nunca mistura moedas; reservas HELD/REQUIRES_REVIEW bloqueiam saldo.
@@ -21,16 +35,9 @@ export function getChargeAvailability(
   scope: { organizationId: string; environment: NetworkId },
 ): bigint {
   if (account.kind !== 'receivable' || account.status !== 'open' || account.canceledAt || account.environment !== scope.environment) return 0n
-  const currency = account.currency
-  if (!currency) return 0n
-  const amountMinor = fromNumber(account.amount, currency)
-  if (amountMinor === null) return 0n
-  let paidMinor = 0n
-  for (const s of account.settlements ?? []) {
-    const m = fromNumber(s.amount, currency)
-    if (m !== null) paidMinor += m
-  }
-  const outstanding = amountMinor - paidMinor
+  const outstanding = obligationOutstandingMinor(account)
+  if (outstanding === null) return 0n
+  const currency = account.currency!
   const reserved = reservations
     .filter(
       (r) =>

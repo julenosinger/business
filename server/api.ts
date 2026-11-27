@@ -12,6 +12,7 @@ import type { EventDraft, LedgerState } from '../src/lib/accounting/types'
 import type { LedgerDb } from './db'
 import { settleOperation, type SettleInput, type SettleResult } from './settle'
 import { createGatewayCharge, listPaymentIntents, getPaymentIntent, sharePaymentIntent, type CreateCommercialChargeInput, type CreateGatewayChargeResult, type PaymentIntentSummary, type ShareResult } from './payments'
+import { syncObligation, type SyncObligationInput, type ObligationSyncResult } from './obligations'
 
 export interface ApiConfig {
   token: string
@@ -43,6 +44,8 @@ export interface LedgerApi {
   createPaymentIntentForOrg(orgId: string, environment: 'mainnet' | 'testnet', input: CreateCommercialChargeInput): CreateGatewayChargeResult
   listPaymentIntentsForOrg(orgId: string, environment: 'mainnet' | 'testnet'): PaymentIntentSummary[]
   sharePaymentIntentForOrg(orgId: string, intentId: string): ShareResult
+  /** Sincronização autoritativa da obrigação comercial (projeção do checkout). */
+  syncObligationForOrg(orgId: string, environment: 'mainnet' | 'testnet', input: SyncObligationInput): ObligationSyncResult
   cfg: ApiConfig
 }
 
@@ -106,6 +109,9 @@ export function createApi(db: LedgerDb, cfg: ApiConfig, verify: typeof verifyUsd
     },
     sharePaymentIntentForOrg(orgId, intentId) {
       return sharePaymentIntent(db, orgId, intentId)
+    },
+    syncObligationForOrg(orgId, environment, input) {
+      return syncObligation(db, orgId, environment, input)
     },
   }
 }

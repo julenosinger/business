@@ -9,8 +9,9 @@ import { chainByKey, explainError, gatewayChainsFor } from '@/lib/gateway'
 import { treasuryRecipientFor, validateGatewayTreasury, resolveGatewayTreasury } from '@/lib/gateway-config'
 import { arcGatewayKeyOf, useNetwork } from '@/lib/network'
 import { invoiceLink, requestToInvoice, useShareBase } from '@/lib/invoice'
-import { checkoutUrlFor, getChargeAvailability } from '@/lib/gateway-charge'
-import { createChargeApi, PaymentApiError } from '@/lib/payment-api'
+import { checkoutUrlFor, getChargeAvailability, obligationOutstandingMinor } from '@/lib/gateway-charge'
+import { createChargeApi, syncObligationApi, PaymentApiError } from '@/lib/payment-api'
+import { fromNumber } from '@/lib/accounting/money'
 import { useStore } from '@/lib/store'
 import { money, parseNum, toUsdc, today, usdcFmt, usdcRateOf } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -201,7 +202,27 @@ export function ChargeModal({ open, accountId, onClose }: Props) {
       const description = selected === NEW ? desc.trim() : (account?.description ?? '')
 
       if (gatewayValid) {
-        // Fluxo Gateway (autoritativo): criação via API; sem marca aleatória, sem intenção local duplicada.
+        // Fluxo Gateway (autoritativo): sincroniza a obrigação e cria a cobrança via API.
+        if (selected !== NEW && account) {
+          const outstanding = obligationOutstandingMinor(account)
+          const currency = account.currency
+          if (outstanding === null || !currency) {
+            setError(t('Moeda da obrigação não suportada.', 'Unsupported obligation currency.'))
+            return
+          }
+          const originalMinor = fromNumber(account.amount, currency) ?? 0n
+          await syncObligationApi({
+            environment: network,
+            obligationId: account.id,
+            sourceKind: account.source === 'sale' ? 'sale' : 'receivable',
+            sourceId: account.sourceId ?? account.id,
+            currency,
+            originalAmountMinor: originalMinor.toString(),
+            outstandingMinor: outstanding.toString(),
+            version: (account.settlements ?? []).length,
+          })
+          if (session !== sessionRef.current) return
+        }
         const result = await createChargeApi({
           environment: network,
           accountId: selected === NEW ? undefined : selected,

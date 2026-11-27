@@ -77,6 +77,15 @@ export function createHandler(cfg: HandlerConfig): (req: Request) => Promise<Res
         throw new UnauthorizedError()
       }
 
+      // Sincronização autoritativa da obrigação comercial (projeção do checkout).
+      if (method === 'POST' && url.pathname === '/api/obligations/sync') {
+        const body = (await req.json()) as { environment?: unknown } & Record<string, unknown>
+        const environment: GatewayEnvironment | null = body.environment === 'mainnet' || body.environment === 'testnet' ? body.environment : null
+        if (!environment) return json({ error: 'invalid_environment' }, 400, cors())
+        const result = cfg.api.syncObligationForOrg(resolvePaymentOrg(req), environment, body as never)
+        return json(result, result.ok ? 200 : 409, cors())
+      }
+
       // Cobrança Gateway compartilhável (autenticada pela organização).
       if (method === 'POST' && url.pathname === '/api/payment-intents') {
         const body = (await req.json()) as { environment?: unknown } & Record<string, unknown>

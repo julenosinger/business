@@ -10,6 +10,7 @@ import { parseMinorUnits, parseExactDecimal, convertToUsdcMinor } from '../src/l
 import { EXPONENT, parseRate } from '../src/lib/accounting/money'
 import { emptyLedger, postEvent } from '../src/lib/accounting/engine'
 import { obligationOutstandingMinor, obligationCurrency } from './settle'
+import { getObligation } from './obligations'
 import type { CurrencyCode } from '../src/lib/types'
 
 export type GatewayEnvironment = 'mainnet' | 'testnet'
@@ -115,13 +116,20 @@ export function createGatewayCharge(db: LedgerDb, orgId: string, environment: Ga
   const run = db.db.transaction((): CreateGatewayChargeResult => {
     const ledger = db.loadLedger(orgId) ?? emptyLedger(orgId)
 
-    // 1. Resolver obrigação (moeda e conta) — do RAZÃO, nunca do cliente.
+    // 1. Resolver obrigação (moeda e conta) — da projeção autoritativa sincronizada, com fallback para o razão.
     let accountId = input.accountId
     let currency: string
+    let syncedOutstanding: bigint | null = null
     if (accountId) {
-      const c = obligationCurrency(ledger, accountId)
-      if (!c) return { ok: false, reason: 'obligation_not_found' }
-      currency = c
+      const synced = getObligation(db, orgId, environment, accountId)
+      if (synced) {
+        currency = synced.currency
+        syncedOutstanding = BigInt(synced.outstandingMinor)
+      } else {
+        const c = obligationCurrency(ledger, accountId)
+        if (!c) return { ok: false, reason: 'obligation_not_found' }
+        currency = c
+      }
     } else {
       if (!input.description || !input.currency || !(input.currency in EXPONENT)) return { ok: false, reason: 'invalid_currency' }
       currency = input.currency
@@ -170,7 +178,7 @@ export function createGatewayCharge(db: LedgerDb, orgId: string, environment: Ga
     }
 
     // 3. Validação de saldo disponível (obrigação − reservas ativas) dentro da transação.
-    const outstanding = obligationOutstandingMinor(ledger, accountId)
+    const outstanding = syncedOutstanding ?? obligationOutstandingMinor(ledger, accountId)
     const reservations = db.db
       .query('SELECT amount_minor, state FROM payment_reservations WHERE organization_id = ? AND environment = ? AND account_id = ?')
       .all(orgId, environment, accountId) as { amount_minor: string; state: string }[]

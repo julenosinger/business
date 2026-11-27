@@ -80,6 +80,42 @@ export async function loadTreasuryChargesApi(environment: NetworkId, signal?: Ab
   return parseJson<TreasuryChargeRow[]>(response)
 }
 
+export interface SyncObligationRequest {
+  environment: NetworkId
+  obligationId: string
+  sourceKind: string
+  sourceId: string
+  currency: string
+  originalAmountMinor: string
+  outstandingMinor: string
+  version: number
+}
+
+/** Sincroniza a obrigação comercial com o backend autoritativo (idempotente; versionada). */
+export async function syncObligationApi(input: SyncObligationRequest, signal?: AbortSignal): Promise<boolean> {
+  let response: Response
+  try {
+    response = await fetch('/api/obligations/sync', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal,
+      cache: 'no-store',
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new PaymentApiError('backend_unavailable', 0)
+  }
+  const payload = await parseJson<{ ok?: boolean; reason?: string; error?: string }>(response)
+  if (!response.ok || !payload.ok) {
+    // version_conflict indica que o backend já tem versão mais nova — não é erro fatal para o checkout.
+    if (payload.reason === 'version_conflict') return true
+    throw new PaymentApiError(payload.reason ?? payload.error ?? 'sync_failed', response.status)
+  }
+  return true
+}
+
 export interface PublicCheckout {
   reference: string
   company: string
