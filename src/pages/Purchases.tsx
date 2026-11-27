@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { AlertTriangle, CalendarClock, Plus, ShoppingBag, Store, Trash2, Truck, X } from 'lucide-react'
+import { AlertTriangle, CalendarClock, FileText, Plus, ShoppingBag, Store, Trash2, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, inputCls } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -15,7 +15,8 @@ import { useNetwork } from '@/lib/network'
 import { accountsForEnvironment, contactsForEnvironment, entriesForEnvironment, inPeriod, monthPeriod, productsForEnvironment } from '@/lib/selectors'
 import { addDays, daysUntil, fmtDate, money, parseNum, today } from '@/lib/format'
 import { t } from '@/lib/i18n'
-import { CAT_PURCHASE } from '@/lib/types'
+import { CAT_PURCHASE, type Account } from '@/lib/types'
+import { accountNote, openNote, purchaseNote } from '@/lib/note'
 
 interface Line {
   key: number
@@ -194,6 +195,40 @@ export function Purchases() {
 
   const statusBadge = (paid: boolean) => (paid ? <Badge tone="ok">{t('Paga', 'Paid')}</Badge> : <Badge tone="warn">{t('A pagar', 'Payable')}</Badge>)
 
+  // Gera a nota/comprovante de uma compra recente: prefere a compra registrada (com itens) e cai
+  // para o comprovante da conta a pagar quando não há compra vinculada.
+  const printNote = (h: { id: string; date: string; desc: string; amount: number; paid: boolean }) => {
+    const account = data.accounts.find((a) => a.id === h.id)
+    const purchase = account?.sourceId ? data.purchases.find((p) => p.id === account.sourceId) : undefined
+    if (purchase) {
+      openNote(purchaseNote(purchase, data.settings))
+      return
+    }
+    if (account) {
+      openNote(accountNote(account, data.settings))
+      return
+    }
+    const entry = data.entries.find((e) => e.id === h.id)
+    const linked = entry?.sourceId ? data.purchases.find((p) => p.id === entry.sourceId) : undefined
+    if (linked) {
+      openNote(purchaseNote(linked, data.settings))
+      return
+    }
+    // Legado sem compra vinculada: comprovante simples da conta.
+    const fallback: Account = {
+      id: h.id,
+      kind: 'payable',
+      description: h.desc,
+      contactName: data.settings.company,
+      amount: h.amount,
+      dueDate: h.date,
+      category: CAT_PURCHASE,
+      status: h.paid ? 'paid' : 'open',
+      source: 'purchase',
+    }
+    openNote(accountNote(fallback, data.settings))
+  }
+
   // Após cadastrar um produto pelo formulário, seleciona-o na linha de origem e preenche o custo.
   const handleQuickCreated = (id: string, cost: number) => {
     if (quickAddLine != null) patch(quickAddLine, { productId: id, cost: String(cost) })
@@ -361,7 +396,16 @@ export function Purchases() {
                     </div>
                     <div className="shrink-0 space-y-1 text-right">
                       <div className="num whitespace-nowrap text-sm font-semibold">{money(h.amount)}</div>
-                      {statusBadge(h.paid)}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {statusBadge(h.paid)}
+                        <button
+                          aria-label={t('Nota / PDF', 'Note / PDF')}
+                          onClick={() => printNote(h)}
+                          className="flex size-8 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+                        >
+                          <FileText size={14} />
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}

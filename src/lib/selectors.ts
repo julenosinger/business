@@ -110,6 +110,15 @@ export function accountOutstanding(a: Account): number {
   return round2(a.amount - accountPaidAmount(a))
 }
 
+/**
+ * Valor exibido na coluna "VALOR" das listas de contas. Em contas liquidadas (`paid`), mostra o
+ * valor ORIGINAL da obrigação — nunca o saldo em aberto, que é zero após a liquidação total.
+ * Em contas abertas, mantém o saldo em aberto (parcial ou integral).
+ */
+export function accountDisplayAmount(a: Account): number {
+  return a.status === 'paid' ? a.amount : accountOutstanding(a)
+}
+
 /** Conta parcialmente liquidada (tem liquidações, mas ainda não está paga). */
 export function accountIsPartial(a: Account): boolean {
   return a.status === 'open' && (a.settlements?.length ?? 0) > 0

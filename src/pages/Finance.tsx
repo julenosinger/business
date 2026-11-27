@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, HandCoins, Pencil, Plus, Receipt, Repeat, Search, Tag, Trash2, UserRound, X } from 'lucide-react'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Check, ClipboardList, Clock, Coins, FileText, HandCoins, Pencil, Plus, Receipt, Repeat, Search, Tag, Trash2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, Modal, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -12,12 +12,13 @@ import { PillTabs } from '@/components/ds/PillTabs'
 import { useStore } from '@/lib/store'
 import { useNav, type ProfileIntent } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
-import { accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment, contactsForEnvironment } from '@/lib/selectors'
+import { accountDisplayAmount, accountIsPartial, accountOutstanding, accountPaidAmount, accountTotalsForEnvironment, contactsForEnvironment } from '@/lib/selectors'
 import { useDraft } from '@/lib/draft'
 import { AccountEnvironmentReview } from '@/components/AccountEnvironmentReview'
 import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
+import { accountNote, openNote } from '@/lib/note'
 
 function AccountModal({ target, preset, onClose }: { target: Account | 'new' | null; preset?: { kind: Account['kind']; contactId: string } | null; onClose: () => void }) {
   const { data, addAccount, updateAccount } = useStore()
@@ -421,6 +422,13 @@ export function Finance() {
           {t('Parcial', 'Partial')}
         </Button>
       ) : null}
+      <button
+        aria-label={t('Nota / PDF', 'Note / PDF')}
+        onClick={() => openNote(accountNote(a, data.settings))}
+        className="flex size-9 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+      >
+        <FileText size={15} />
+      </button>
       {a.status === 'open' ? (
         <button
           aria-label={t('Editar conta', 'Edit bill')}
@@ -545,7 +553,7 @@ export function Finance() {
                       </td>
                       <td className={td}>{statusBadge(a)}</td>
                       <td className={`${td} num text-right font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>
-                        {money(accountOutstanding(a))}
+                        {money(accountDisplayAmount(a))}
                         {accountIsPartial(a) ? <div className="text-[11px] font-normal text-subtle">{t('de', 'of')} {money(a.amount)}</div> : null}
                       </td>
                       <td className={`${td} text-right`}>{rowActions(a)}</td>
@@ -566,7 +574,7 @@ export function Finance() {
                       </p>
                     </div>
                     <div className={`num shrink-0 whitespace-nowrap text-sm font-semibold ${a.kind === 'payable' ? 'text-bad' : 'text-ok'}`}>
-                      {money(accountOutstanding(a))}
+                      {money(accountDisplayAmount(a))}
                       {accountIsPartial(a) ? <div className="text-[11px] font-normal text-subtle">{t('de', 'of')} {money(a.amount)}</div> : null}
                     </div>
                   </div>

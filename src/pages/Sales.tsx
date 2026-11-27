@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
-import { BarChart3, CalendarDays, Check, Coins, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
+import { BarChart3, CalendarDays, Check, Coins, FileText, Minus, Plus, Receipt, Search, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Empty, Field, TableWrap, inputCls, td, th } from '@/components/ui'
 import { DateField } from '@/components/DateField'
@@ -16,7 +16,8 @@ import { contactsForEnvironment, inPeriod, monthPeriod, productsForEnvironment, 
 import { addDays, fmtDate, money, num, today } from '@/lib/format'
 import { quantityError, type QuantityError } from '@/lib/quantity'
 import { t } from '@/lib/i18n'
-import type { PayMethod } from '@/lib/types'
+import type { PayMethod, Sale } from '@/lib/types'
+import { openNote, saleNote } from '@/lib/note'
 
 const methods = (): { id: PayMethod; label: string }[] => [
   { id: 'pix', label: 'Pix' },
@@ -181,6 +182,15 @@ export function Sales() {
     <Button small variant="ghost" onClick={() => cancel(id)}>
       <Undo2 size={14} /> {t('Cancelar', 'Cancel')}
     </Button>
+  )
+  const noteButton = (s: Sale) => (
+    <button
+      aria-label={t('Nota / PDF', 'Note / PDF')}
+      onClick={() => openNote(saleNote(s, data.settings))}
+      className="flex size-9 items-center justify-center rounded-lg text-subtle hover:bg-fill/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+    >
+      <FileText size={15} />
+    </button>
   )
   const methodLabel = (m: PayMethod) => methods().find((x) => x.id === m)?.label
 
@@ -371,7 +381,12 @@ export function Sales() {
                       </td>
                       <td className={`${td} num text-right font-semibold`}>{money(s.total)}</td>
                       <td className={`${td} num text-right text-ok`}>{s.canceledAt ? '-' : money(s.total - s.cogs)}</td>
-                      <td className={`${td} text-right`}>{s.canceledAt ? <Badge tone="bad">{t('Cancelada', 'Canceled')}</Badge> : cancelButton(s.id)}</td>
+                      <td className={`${td} text-right`}>
+                        <div className="flex items-center justify-end gap-1">
+                          {noteButton(s)}
+                          {s.canceledAt ? <Badge tone="bad">{t('Cancelada', 'Canceled')}</Badge> : cancelButton(s.id)}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -394,7 +409,10 @@ export function Sales() {
                       <Badge tone={s.method === 'prazo' ? 'warn' : 'neutral'}>{methodLabel(s.method)}</Badge>
                       {s.canceledAt ? null : <span className="num text-xs text-ok">{money(s.total - s.cogs)}</span>}
                     </span>
-                    {s.canceledAt ? <Badge tone="bad">{t('Cancelada', 'Canceled')}</Badge> : cancelButton(s.id)}
+                    <span className="flex items-center gap-1">
+                      {noteButton(s)}
+                      {s.canceledAt ? <Badge tone="bad">{t('Cancelada', 'Canceled')}</Badge> : cancelButton(s.id)}
+                    </span>
                   </div>
                 </li>
               ))}
