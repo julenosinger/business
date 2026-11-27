@@ -1,0 +1,6 @@
+# Cloudflare Pages — exemplo de proxy de /api/* para o backend Bun (origem distinta).
+# Copie este arquivo para public/_redirects (ou configure no painel Cloudflare).
+# Substitua https://seu-backend.up.railway.app pela URL real do backend.
+
+/api/*  https://seu-backend.up.railway.app/api/:splat  200
+/*      /index.html                                   200

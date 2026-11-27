@@ -1,0 +1,25 @@
+# Render Blueprint — deploy do backend Bun (serve SPA + /api/* na mesma origem).
+# https://render.com → New Blueprint → apontar para este repositório.
+services:
+  - type: web
+    name: gbos
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/chat/status
+    envVars:
+      - key: GBOS_API_TOKEN
+        sync: false # defina um segredo forte no painel Render (nunca no repositório)
+      - key: GBOS_DB_PATH
+        value: /data/gbos.sqlite
+      - key: GBOS_LOGIN_SECRET
+        sync: false # segredo de login via cookie (recomendado)
+      - key: GBOS_COOKIE_SECURE
+        value: "1"
+      - key: GBOS_ORG_ID
+        value: local
+      - key: GBOS_DEPOSITOR_MAINNET
+        sync: false # opcional: endereço depositante institucional Arc Mainnet
+    disk:
+      name: gbos-data
+      mountPath: /data
+      sizeGB: 1
