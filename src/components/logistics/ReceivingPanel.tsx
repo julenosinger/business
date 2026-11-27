@@ -41,6 +41,9 @@ export function ReceivingPanel({ s }: { s: Shipment }) {
   const purchase = s.orderRef?.kind === 'purchase' && s.orderRef.id ? data.purchases.find((p) => p.id === s.orderRef?.id) : undefined
   const row = (id: string, qty: number): Row => rows[id] ?? { received: String(qty), damaged: '0' }
   const num0 = (v: string): number => (v.trim() === '' ? NaN : parseNum(v))
+  // Remessa ligada a compra pode ser recebida direto de `ready` (compra "aguardar recebimento").
+  const linkedPurchase = s.orderRef?.kind === 'purchase' && !!s.orderRef.id
+  const canReceive = s.status === 'delivered' || (s.status === 'ready' && linkedPurchase)
 
   if (receipt) {
     return (
@@ -76,7 +79,7 @@ export function ReceivingPanel({ s }: { s: Shipment }) {
     )
   }
 
-  if (s.status !== 'delivered') {
+  if (!canReceive) {
     return s.items.length ? (
       <p className="rounded-xl border border-line bg-fill/5 p-3 text-xs text-subtle">
         {t('O estoque só é somado depois que a remessa chegar (status Entregue) e o recebimento for conferido aqui. Mudar o status não altera o estoque.', 'Stock is only added after the shipment arrives (Delivered) and the receipt is checked here. Changing the status never changes stock.')}

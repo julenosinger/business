@@ -7,10 +7,10 @@
 // - Compra ligada já lançada (stockPosted = true, fluxo padrão da aba Compras): o estoque já foi somado, então nada é somado de novo.
 // - Sem compra ligada: o usuário precisa escolher explicitamente entre somar ou registrar que o estoque já foi lançado.
 // - Itens danificados não entram no estoque. A decisão sobre eles (devolver, descartar, reestocar) fica para a fase de devoluções.
-import type { AppData, GoodsReceipt, PurchaseRef, ReceiptLine, ReceiptStockMode, StockMove } from './types'
+import type { AppData, GoodsReceipt, PurchaseRef, ReceiptLine, ReceiptStockMode, Shipment, StockMove } from './types'
 import type { NetworkId } from './network'
 import { weightedAverageFromValue } from './costing'
-import { DEFAULT_ORG, clean, event, fail, replace, round2, uid, type Outcome } from './logistics'
+import { DEFAULT_ORG, clean, event, fail, nextShipmentId, replace, round2, uid, type Outcome } from './logistics'
 
 export interface ReceiptLineInput {
   itemId: string
@@ -39,6 +39,47 @@ export function nextReceiptId(receipts: readonly GoodsReceipt[]): string {
     return n ? Math.max(m, Number(n[1])) : m
   }, 0)
   return `GR-${String(max + 1).padStart(4, '0')}`
+}
+
+/**
+ * Monta a remessa de ENTRADA automática para uma compra que aguarda recebimento. A remessa nasce
+ * em `ready` (aguardando recebimento) e ligada à compra via `orderRef`. O estoque só muda quando o
+ * recebimento é confirmado (`receiveGoods`), nunca na criação da remessa.
+ */
+export function awaitingReceiptShipment(
+  d: AppData,
+  purchase: { id: string; supplierName: string; items: { productId: string; name: string; sku: string; qty: number }[]; total: number },
+  now: string,
+  env: NetworkId,
+): Shipment {
+  const id = nextShipmentId(d.shipments)
+  const supplier = clean(purchase.supplierName, 80)
+  const company = clean(d.settings.company, 80)
+  const actor = clean(d.settings.owner || 'user', 60)
+  return {
+    id,
+    orgId: DEFAULT_ORG,
+    direction: 'inbound',
+    status: 'ready',
+    orderRef: { kind: 'purchase', id: purchase.id, label: supplier },
+    origin: { name: supplier, city: '', country: '' },
+    destination: { name: company, city: '', country: '' },
+    senderName: supplier,
+    recipientName: company,
+    carrier: '',
+    trackingNumber: '',
+    method: '',
+    packages: [],
+    items: purchase.items.map((i) => ({ id: uid(), productId: i.productId, name: clean(i.name, 80), sku: clean(i.sku, 40), qty: i.qty })),
+    declaredValue: round2(purchase.total),
+    currency: d.settings.currency,
+    freightCost: 0,
+    documents: [],
+    events: [event({ kind: 'created', at: now, toStatus: 'ready', description: '', actor })],
+    environment: env,
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 const isQty = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
@@ -109,7 +150,10 @@ export function receiveGoods(d: AppData, shipmentId: string, input: ReceiptInput
   if (cur.direction !== 'inbound') return fail('not_inbound')
   // Remessas de devolução só voltam ao estoque pela inspeção da devolução (itens não inspecionados nunca entram).
   if (cur.returnId) return fail('return_shipment')
-  if (cur.status !== 'delivered') return fail('not_delivered')
+  // Remessa ligada a uma compra registrada pode ser recebida direto de `ready` (a compra "aguardar
+  // recebimento" já cria a remessa pronta para receber). As demais exigem `delivered`.
+  const linkedPurchase = cur.orderRef?.kind === 'purchase' && !!cur.orderRef.id
+  if (cur.status !== 'delivered' && !(cur.status === 'ready' && linkedPurchase)) return fail('not_delivered')
   if (cur.receiptId) return fail('already_received')
 
   // Cada item da remessa precisa ser conferido exatamente uma vez.

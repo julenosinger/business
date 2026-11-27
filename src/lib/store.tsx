@@ -1328,6 +1328,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
           }
           const date = today()
+          const now = new Date().toISOString()
           const total = round2(input.items.reduce((s, i) => s + i.qty * i.cost, 0))
           const name = supplier?.name ?? t('Fornecedor avulso', 'One-off supplier')
           const awaiting = !!input.awaitReceipt
@@ -1339,6 +1340,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cur.qty += it.qty
             cur.value += it.qty * it.cost
             consolidated.set(it.productId, cur)
+          }
+          const purchaseItems = input.items.map((i) => {
+            const p = d.products.find((x) => x.id === i.productId)
+            return { productId: i.productId, name: p?.name ?? '', sku: p?.sku ?? '', qty: i.qty, cost: i.cost }
+          })
+          const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
+          // "Pago agora" NÃO é liquidado automaticamente: vira uma conta a pagar (aberta) que só é baixada
+          // quando houver liquidação real (tesouraria ou registro de pagamento). Vencimento = hoje.
+          const payable: Account = {
+            id: uid(),
+            kind: 'payable',
+            description,
+            contactId: supplier?.id,
+            contactName: name,
+            amount: total,
+            dueDate: input.paidNow ? date : input.dueDate,
+            category: CAT_PURCHASE,
+            status: 'open',
+            source: 'purchase',
+            sourceId: purchaseId,
+            currency: d.settings.currency,
+            environment: env,
           }
           const next: AppData = {
             ...d,
@@ -1362,41 +1385,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 date,
                 supplierId: supplier?.id,
                 supplierName: name,
-                items: input.items.map((i) => {
-                  const p = d.products.find((x) => x.id === i.productId)
-                  return { productId: i.productId, name: p?.name ?? '', sku: p?.sku ?? '', qty: i.qty, cost: i.cost }
-                }),
+                items: purchaseItems,
                 total,
                 stockPosted: !awaiting,
-                createdAt: new Date().toISOString(),
+                createdAt: now,
                 environment: env,
                 ...(input.intentId ? { intentId: input.intentId } : {}),
               },
               ...d.purchases,
             ],
-          }
-          const description = t(`Compra de mercadorias - ${name}`, `Merchandise purchase - ${name}`)
-          if (input.paidNow) {
-            next.entries = [{ id: uid(), date, type: 'out', category: CAT_PURCHASE, description, amount: total, environment: env, sourceKind: 'purchase', sourceId: purchaseId }, ...d.entries]
-          } else {
-            next.accounts = [
-              {
-                id: uid(),
-                kind: 'payable',
-                description,
-                contactId: supplier?.id,
-                contactName: name,
-                amount: total,
-                dueDate: input.dueDate,
-                category: CAT_PURCHASE,
-                status: 'open',
-                source: 'purchase',
-                sourceId: purchaseId,
-                currency: d.settings.currency,
-                environment: env,
-              },
-              ...d.accounts,
-            ]
+            accounts: [payable, ...d.accounts],
+            // "Aguardar recebimento": cria automaticamente uma remessa de entrada na Logística Global.
+            shipments: awaiting
+              ? [receiving.awaitingReceiptShipment(d, { id: purchaseId, supplierName: name, items: purchaseItems, total }, now, env), ...d.shipments]
+              : d.shipments,
           }
           recorded = true
           return next

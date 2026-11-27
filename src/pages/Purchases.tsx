@@ -162,7 +162,11 @@ export function Purchases() {
         items: parsed.map((l) => ({ productId: l.productId, qty: l.q, cost: l.c })),
       })
       if (!ok) return
-      toast.success(paidNow ? t('Compra registrada e paga.', 'Purchase recorded and paid.') : t('Compra registrada como conta a pagar.', 'Purchase recorded as a payable.'))
+      toast.success(
+        awaitReceipt
+          ? t('Compra registrada. Aguardando recebimento na Logística Global.', 'Purchase recorded. Awaiting receipt in Global Logistics.')
+          : t('Compra registrada. Liquide a obrigação na tesouraria quando pagar.', 'Purchase recorded. Settle the obligation in Treasury when you pay.'),
+      )
       setLines([{ key: seq++, productId: '', qty: '', cost: '' }])
       setSupplierId('')
       setAwaitReceipt(false)
@@ -199,7 +203,7 @@ export function Purchases() {
     <div className="space-y-4 sm:space-y-5">
       <PageTop
         title={t('Compras', 'Purchases')}
-        subtitle={t('Registre a entrada de mercadorias. O estoque e o custo são atualizados, e o pagamento vira caixa ou conta a pagar.', 'Record incoming goods. Stock and cost are updated, and payment becomes cash out or a payable.')}
+        subtitle={t('Registre a entrada de mercadorias. O estoque e o custo são atualizados, e a obrigação vira conta a pagar até ser liquidada na tesouraria.', 'Record incoming goods. Stock and cost are updated, and the obligation becomes a payable until settled in Treasury.')}
       />
 
       <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
@@ -308,12 +312,14 @@ export function Purchases() {
 
                 <p className="rounded-xl bg-fill/5 px-3 py-2 text-xs text-muted text-pretty">
                   {awaitReceipt
-                    ? paidNow
-                      ? t('Ao registrar: a saída entra no caixa. Estoque e custo dos produtos mudam só no recebimento.', 'On save: the outflow is recorded in cash. Stock and product cost change only on receipt.')
-                      : t('Ao registrar: uma conta a pagar é criada. Estoque e custo dos produtos mudam só no recebimento.', 'On save: a payable is created. Stock and product cost change only on receipt.')
-                    : paidNow
-                      ? t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e a saída entra no caixa.', 'On save: stock goes up, product cost is updated and the outflow is recorded in cash.')
-                      : t('Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e uma conta a pagar é criada.', 'On save: stock goes up, product cost is updated and a payable is created.')}
+                    ? t(
+                        'Ao registrar: uma remessa de entrada é criada na Logística Global e uma conta a pagar é aberta. Estoque, custo e lançamento contábil só acontecem quando você marcar como recebido.',
+                        'On save: an inbound shipment is created in Global Logistics and a payable is opened. Stock, cost and the accounting entry only happen when you mark it as received.',
+                      )
+                    : t(
+                        'Ao registrar: o estoque aumenta, o custo dos produtos é atualizado e uma conta a pagar é aberta para você liquidar na tesouraria.',
+                        'On save: stock goes up, product cost is updated and a payable is opened for you to settle in Treasury.',
+                      )}
                 </p>
 
                 <div className="flex items-center justify-between border-t border-line pt-4">
