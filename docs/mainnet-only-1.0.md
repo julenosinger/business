@@ -1,6 +1,6 @@
 # MAINNET-ONLY 1.0 — Complete Testnet Removal & Production Architecture Consolidation
 
-**HEAD inicial:** `33d25ee` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `33d25ee` · **HEAD final:** `5d3952e`
 
 Resultado: **728 testes passando** (eram 727) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -37,4 +37,4 @@ Resultado: **728 testes passando** (eram 727) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 47cc114 && git revert 11349c3`
