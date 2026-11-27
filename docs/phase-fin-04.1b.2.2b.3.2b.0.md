@@ -1,6 +1,6 @@
 # HOTFIX FIN-04.1B.2.2B.3.2B.0 — Runtime Charge Creation Failure
 
-**HEAD inicial:** `fbb88ad` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `fbb88ad` · **HEAD final:** `d85dd3e`
 
 Resultado: **727 testes passando** (eram 724) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -44,4 +44,4 @@ O fluxo funciona ao nível de código (comprovado por teste HTTP end-to-end). A 
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 767c1ae && git revert 9a1e3a8`
