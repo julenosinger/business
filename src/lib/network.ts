@@ -9,7 +9,6 @@ import { useSyncExternalStore } from 'react'
 
 export type NetworkId = 'mainnet' | 'testnet'
 
-const KEY = 'gbos:network'
 const listeners = new Set<() => void>()
 
 /** Chain IDs vêm do registro `onchain-facts` (fonte autoritativa); aqui apenas como referência explícita. */
@@ -100,19 +99,13 @@ const GATEWAY_KEY_ENVS: Record<string, 'live' | 'test'> = {
 export const gatewayChainEnv = (key: string): 'live' | 'test' | undefined => GATEWAY_KEY_ENVS[key]
 
 /**
- * Troca a rede (API interna). Operacionalmente o ERP é Mainnet-only (a interface não oferece
- * Testnet e o backend a rejeita); esta função permanece para CLASSIFICAÇÃO de dados históricos e
- * testes de isolamento/migração. Persiste e notifica assinantes.
+ * Mainnet-only: a rede ativa é IMUTÁVEL (Arc Mainnet). Nenhuma função, preferência persistida,
+ * localStorage, cookie, parâmetro de URL, chamada à API, estado React ou conexão de carteira pode
+ * alterar o ambiente operacional. `NetworkId` mantém `'testnet'` apenas como valor de CLASSIFICAÇÃO
+ * de registros históricos (campo `environment`), nunca como ambiente ativo.
  */
-export function setNetwork(id: NetworkId): void {
-  if (!isValidNetwork(id) || id === current) return
-  current = id
-  try {
-    localStorage.setItem(KEY, id)
-  } catch {
-    // ignore
-  }
-  listeners.forEach((l) => l())
+export function setNetwork(_id: NetworkId): void {
+  // Sem efeito: o ambiente operacional é exclusivamente Arc Mainnet.
 }
 
 export function useNetwork(): NetworkId {

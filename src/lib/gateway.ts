@@ -6,19 +6,12 @@ import { t } from './i18n'
 import { USDC_DECIMALS } from '@/onchain-facts'
 import {
   arc,
-  arcTestnet,
   arbitrum,
-  arbitrumSepolia,
   avalanche,
-  avalancheFuji,
   base,
-  baseSepolia,
   mainnet,
   optimism,
-  optimismSepolia,
   polygon,
-  polygonAmoy,
-  sepolia,
 } from 'viem/chains'
 import { useNetwork, type NetworkId } from './network'
 
@@ -32,13 +25,6 @@ export type GatewayChainId =
   | typeof optimism.id
   | typeof avalanche.id
   | typeof polygon.id
-  | typeof arcTestnet.id
-  | typeof baseSepolia.id
-  | typeof sepolia.id
-  | typeof arbitrumSepolia.id
-  | typeof optimismSepolia.id
-  | typeof avalancheFuji.id
-  | typeof polygonAmoy.id
 
 export interface GatewayChain {
   /** Identificador usado pelo SDK da Circle. */
@@ -50,22 +36,16 @@ export interface GatewayChain {
     | 'Optimism'
     | 'Avalanche'
     | 'Polygon'
-    | 'Arc_Testnet'
-    | 'Base_Sepolia'
-    | 'Ethereum_Sepolia'
-    | 'Arbitrum_Sepolia'
-    | 'Optimism_Sepolia'
-    | 'Avalanche_Fuji'
-    | 'Polygon_Amoy_Testnet'
   chainId: GatewayChainId
   label: string
-  /** `live` = rede real (Mainnet), `test` = ambiente de teste. */
-  env: 'live' | 'test'
+  /** `live` = rede real (Mainnet). */
+  env: 'live'
 }
 
 /**
  * Redes oficialmente suportadas pelo Circle Gateway (enum `UnifiedBalanceChain` do SDK instalado).
- * Arc é a rede principal e aparece primeiro. Endereços/tokens vêm de `onchain-facts`/viem — nada é inventado.
+ * Exclusivamente Mainnet. Arc é a rede principal e aparece primeiro. Endereços/tokens vêm de
+ * `onchain-facts`/viem — nada é inventado. Redes Testnet foram removidas da configuração operacional.
  */
 export const GATEWAY_CHAINS: GatewayChain[] = [
   // Mainnet (env 'live')
@@ -76,20 +56,12 @@ export const GATEWAY_CHAINS: GatewayChain[] = [
   { key: 'Optimism', chainId: optimism.id, label: 'OP Mainnet', env: 'live' },
   { key: 'Avalanche', chainId: avalanche.id, label: 'Avalanche', env: 'live' },
   { key: 'Polygon', chainId: polygon.id, label: 'Polygon PoS', env: 'live' },
-  // Testnet (env 'test')
-  { key: 'Arc_Testnet', chainId: arcTestnet.id, label: 'Arc Testnet', env: 'test' },
-  { key: 'Ethereum_Sepolia', chainId: sepolia.id, label: 'Ethereum Sepolia', env: 'test' },
-  { key: 'Base_Sepolia', chainId: baseSepolia.id, label: 'Base Sepolia', env: 'test' },
-  { key: 'Arbitrum_Sepolia', chainId: arbitrumSepolia.id, label: 'Arbitrum Sepolia', env: 'test' },
-  { key: 'Optimism_Sepolia', chainId: optimismSepolia.id, label: 'OP Sepolia', env: 'test' },
-  { key: 'Avalanche_Fuji', chainId: avalancheFuji.id, label: 'Avalanche Fuji', env: 'test' },
-  { key: 'Polygon_Amoy_Testnet', chainId: polygonAmoy.id, label: 'Polygon Amoy', env: 'test' },
 ]
 
 export const chainByKey = (key: string): GatewayChain | undefined => GATEWAY_CHAINS.find((c) => c.key === key)
 
 /** Redes válidas para o ambiente ativo: Mainnet só 'live', Testnet só 'test' (isolamento estrito). */
-export const gatewayChainsFor = (network: NetworkId): GatewayChain[] => GATEWAY_CHAINS.filter((c) => c.env === (network === 'mainnet' ? 'live' : 'test'))
+export const gatewayChainsFor = (_network: NetworkId): GatewayChain[] => GATEWAY_CHAINS
 
 export interface GatewayBalances {
   /** Saldo confirmado (disponível para novas operações). */
