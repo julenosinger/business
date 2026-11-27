@@ -111,19 +111,17 @@ describe('integridade do cadastro de produto (INV-1.0)', () => {
 
   test('updateProduct rejeita edição de produto de outro ambiente', () => {
     const { store, unmount } = renderStore()
-    const id = commit(store, (s) => s.addProduct(prod({ name: 'Mainnet' })))
-    setNetwork('testnet')
-    expect(commit(store, (s) => s.updateProduct(id, { name: 'X' }))).toBe(false)
-    expect(store().data.products.find((x) => x.id === id)?.name).toBe('Mainnet')
+    // Produto Testnet histórico (campo environment) — não editável a partir da Mainnet.
+    commit(store, (s) => s.importData({ ...s.data, products: [{ id: 'p-t', sku: 'SKU', name: 'Testnet', category: 'Geral', unit: 'un', cost: 5, price: 8, stock: 0, minStock: 0, environment: 'testnet' }] }))
+    expect(commit(store, (s) => s.updateProduct('p-t', { name: 'X' }))).toBe(false)
+    expect(store().data.products.find((x) => x.id === 'p-t')?.name).toBe('Testnet')
     unmount()
   })
 
-  test('SKU duplicado é rejeitado na Mainnet, permitido na Testnet', () => {
+  test('SKU duplicado é rejeitado (ambiente único Mainnet)', () => {
     const { store, unmount } = renderStore()
     commit(store, (s) => s.addProduct(prod({ sku: 'DUP' })))
     expect(commit(store, (s) => s.addProduct(prod({ sku: 'DUP' })))).toBe('')
-    setNetwork('testnet')
-    expect(commit(store, (s) => s.addProduct(prod({ sku: 'DUP' })))).toBeTruthy()
     unmount()
   })
 })

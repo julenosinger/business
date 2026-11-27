@@ -154,9 +154,8 @@ describe('FIN-04.1B.2.2B — Charge availability, checkout token', () => {
 describe('FIN-04.1B.2.2B — Store: gateway destination and PaymentRail', () => {
   test('createPaymentIntent aceita o GatewayWallet como destino (depositor pendente)', () => {
     const { store, unmount } = renderStore()
-    setNetwork('testnet')
-    const gw = gatewayConfigFor('testnet').gatewayWallet
-    commit(store, (s) => s.updateSettings({ treasuryRecipients: { testnet: gw } }))
+    const gw = gatewayConfigFor('mainnet').gatewayWallet
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: gw } }))
     const { accountId } = saleAccount(store)
     const r = commit(store, (s) => s.createPaymentIntent({ accountId, amount: 25, amountDecimal: '25', usdcMinor: '25000000', currency: 'USDC', checkoutToken: 'tok-123', expiresAt: '2099-01-01T00:00:00.000Z' }))
     expect(r.ok).toBe(true)

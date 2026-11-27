@@ -164,19 +164,15 @@ describe('Perfis empresariais (render real no StoreProvider)', () => {
   })
 
   test('isolamento Mainnet/Testnet: perfil não encontra cadastro de outro ambiente', () => {
-    let id = ''
-    {
-      const { store, unmount } = render(React.createElement('div'))
-      React.act(() => {
-        const res = store().addContact(customerInput())
-        id = res.ok ? res.id : ''
-      })
-      unmount()
-    }
-    setNetwork('testnet')
-    const { container, unmount } = render(React.createElement(ContactProfile, { contactId: id, kind: 'customer', onBack: () => {}, onEdit: () => {} }))
-    expect(container.textContent).toContain('Cadastro não encontrado')
+    const { store, unmount } = render(React.createElement('div'))
+    React.act(() => {
+      // Cadastro Testnet histórico (campo environment) — não encontrado a partir da Mainnet.
+      store().importData({ ...store().data, contacts: [{ id: 'c-t', kind: 'customer', name: 'Testnet', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] })
+    })
     unmount()
+    const { container, unmount: u2 } = render(React.createElement(ContactProfile, { contactId: 'c-t', kind: 'customer', onBack: () => {}, onEdit: () => {} }))
+    expect(container.textContent).toContain('Cadastro não encontrado')
+    u2()
   })
 })
 

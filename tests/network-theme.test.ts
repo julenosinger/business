@@ -25,11 +25,11 @@ describe('rede ativa (Mainnet default, seleção explícita e persistência)', (
     expect(arcChainIdOf('testnet')).toBe(5042002)
   })
 
-  test('seleção explícita de Testnet é persistida', () => {
+  test('setNetwork é inoperante: a rede ativa é imutável (Mainnet)', () => {
     setNetwork('testnet')
-    expect(getNetwork()).toBe('testnet')
-    expect(store.get('gbos:network')).toBe('testnet')
-    setNetwork('mainnet') // volta para não vazar estado entre testes
+    expect(getNetwork()).toBe('mainnet') // Testnet não pode mais ser ativada
+    expect(store.get('gbos:network')).toBeUndefined() // nada é persistido
+    setNetwork('mainnet')
     expect(getNetwork()).toBe('mainnet')
   })
 

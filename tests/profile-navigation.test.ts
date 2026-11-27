@@ -310,20 +310,15 @@ describe('Navegação perfil → módulo (integração real)', () => {
   })
 
   test('Financeiro rejeita contato de outro ambiente', () => {
-    let testnetId = ''
-    {
-      const { store, unmount } = renderPage(React.createElement('div'))
-      React.act(() => {
-        setNetwork('testnet')
-        const r = store().addContact(customerInput())
-        testnetId = r.ok ? r.id : ''
-        setNetwork('mainnet')
-      })
-      unmount()
-    }
-    const { container, unmount } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: testnetId, contactName: 'Fulano Silva' })
-    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    const { store, unmount } = renderPage(React.createElement('div'))
+    React.act(() => {
+      // Contato Testnet histórico (campo environment) — não encontrado a partir da Mainnet.
+      store().importData({ ...store().data, contacts: [{ id: 'c-t', kind: 'customer', name: 'Testnet', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] })
+    })
     unmount()
+    const { container, unmount: u2 } = renderPage(React.createElement(Finance), { kind: 'account', accountKind: 'receivable', contactId: 'c-t', contactName: 'Fulano Silva' })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    u2()
   })
 
   test('abrir conta via perfil não grava automaticamente', () => {

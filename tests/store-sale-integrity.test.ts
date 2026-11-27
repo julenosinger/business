@@ -141,11 +141,11 @@ describe('proteção de mutações financeiras (FIN-03.2.1)', () => {
 
   test('updateAccount rejeita edição de conta de outro ambiente', () => {
     const { store, unmount } = renderStore()
-    const id = commit(store, (s) => s.addAccount({ kind: 'payable', description: 'x', contactName: 'c', amount: 100, dueDate: '2026-12-01', category: 'Aluguel' }))
-    setNetwork('testnet')
-    const ok = commit(store, (s) => s.updateAccount(id, { amount: 200 }))
+    // Conta a pagar Testnet histórica (campo environment) — não editável a partir da Mainnet.
+    commit(store, (s) => s.importData({ ...s.data, accounts: [{ id: 'a-t', kind: 'payable', description: 'x', contactName: 'c', amount: 100, dueDate: '2026-12-01', category: 'Aluguel', status: 'open', source: 'manual', environment: 'testnet' }] }))
+    const ok = commit(store, (s) => s.updateAccount('a-t', { amount: 200 }))
     expect(ok).toBe(false)
-    expect(store().data.accounts.find((a) => a.id === id)?.amount).toBe(100)
+    expect(store().data.accounts.find((a) => a.id === 'a-t')?.amount).toBe(100)
     unmount()
   })
 

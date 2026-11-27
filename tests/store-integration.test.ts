@@ -127,10 +127,9 @@ describe('StoreProvider (integração real React)', () => {
 
   test('edição em ambiente incorreto retorna wrong_environment', () => {
     const { store, unmount } = renderStore()
-    const add = commit(store, (s) => s.addContact(contactInput({ name: 'Mainnet' })))
-    const id = add.ok ? add.id : ''
-    setNetwork('testnet')
-    const res = commit(store, (s) => s.updateContact(id, { name: 'X' }))
+    // Injeta um cadastro Testnet histórico (o app é Mainnet-only; a rede ativa não muda).
+    commit(store, (s) => s.importData({ ...s.data, contacts: [{ id: 'c-t', kind: 'customer', name: 'Testnet', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] }))
+    const res = commit(store, (s) => s.updateContact('c-t', { name: 'X' }))
     expect(res.ok).toBe(false)
     expect(res.ok ? '' : res.code).toBe('wrong_environment')
     unmount()
@@ -171,8 +170,8 @@ describe('StoreProvider (integração real React)', () => {
   test('isolamento Mainnet/Testnet: cadastro de um ambiente não aparece no outro', () => {
     const { store, unmount } = renderStore()
     commit(store, (s) => s.addContact(contactInput({ name: 'MainnetOnly' })))
-    setNetwork('testnet')
-    commit(store, (s) => s.addContact(contactInput({ name: 'TestnetOne' })))
+    // Injeta cadastro Testnet histórico (isolamento por campo environment, não pela rede ativa).
+    commit(store, (s) => s.importData({ ...s.data, contacts: [...s.data.contacts, { id: 'c-t', kind: 'customer', name: 'TestnetOne', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] }))
     const main = store().data.contacts.filter((c) => c.environment === 'mainnet')
     const test = store().data.contacts.filter((c) => c.environment === 'testnet')
     expect(main.map((c) => c.name)).toContain('MainnetOnly')

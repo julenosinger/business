@@ -250,33 +250,18 @@ describe('FIN-04.1B.2.2A.2 — Store precision, attempts, reservations and recov
     unmount()
   })
 
-  test('clearSandboxData preserva operações Testnet reais (transmitidas) e remove rascunhos', () => {
+  test('clearSandboxData é inerte (Mainnet-only): preserva intenções, tentativas e reservas', () => {
     const { store, unmount } = renderStore()
-    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY, testnet: BENEFICIARY_TEST } }))
-    setNetwork('testnet')
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
     const { accountId: tA } = saleAccount(store)
     const rReal = commit(store, (s) => s.createPaymentIntent(intentOf(tA, 15)))
     if (!rReal.ok) throw new Error('real intent')
     const attReal = commit(store, (s) => s.createPaymentAttempt(rReal.intentId))
     if (!attReal.ok) throw new Error('real attempt')
-    commit(store, (s) => s.beginPaymentSubmission(attReal.attemptId, PAYER))
-    commit(store, (s) => s.registerDepositSubmission(attReal.attemptId, HASH))
-    // Rascunho Testnet (nunca transmitido) — será removido.
-    const rDraft = commit(store, (s) => s.createPaymentIntent(intentOf(tA, 10)))
-    if (!rDraft.ok) throw new Error('draft intent')
-    commit(store, (s) => s.createPaymentAttempt(rDraft.intentId))
-
-    commit(store, (s) => s.clearSandboxData())
-
-    const intents = store().data.paymentIntents.map((i) => i.intentId)
-    const attempts = store().data.paymentAttempts.map((a) => a.attemptId)
-    const reservations = store().data.paymentReservations.map((x) => x.intentId)
-    expect(intents).toContain(rReal.intentId)
-    expect(intents).not.toContain(rDraft.intentId)
-    expect(attempts).toContain(attReal.attemptId)
-    expect(reservations).toContain(rReal.intentId)
-    // Integridade referencial: a obrigação Testnet real permanece.
-    expect(store().data.accounts.some((a) => a.id === tA)).toBe(true)
+    commit(store, (s) => s.clearSandboxData()) // sem rede Testnet ativa → no-op
+    expect(store().data.paymentIntents.map((i) => i.intentId)).toContain(rReal.intentId)
+    expect(store().data.paymentAttempts.map((a) => a.attemptId)).toContain(attReal.attemptId)
+    expect(store().data.paymentReservations.map((x) => x.intentId)).toContain(rReal.intentId)
     unmount()
   })
 })

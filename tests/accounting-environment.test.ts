@@ -68,73 +68,51 @@ beforeEach(() => {
 })
 
 describe('Contabilidade (componente real): isolamento financeiro por ambiente', () => {
-  test('Receita bruta/fluxo refletem apenas o ambiente ativo (Mainnet e Testnet)', () => {
-    // Cria um lançamento em cada ambiente, com valores distintos.
+  test('Receita bruta/fluxo refletem apenas a Mainnet (dados Testnet históricos não aparecem)', () => {
+    // Injeta um lançamento Mainnet e um Testnet histórico (campo environment), sem rede ativa mutável.
     {
       const { store, unmount } = render(React.createElement('div'))
       React.act(() => {
-        setNetwork('mainnet')
-        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Receita Mainnet', amount: 1234, date: '2026-11-20' })
-      })
-      React.act(() => {
-        setNetwork('testnet')
-        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Receita Testnet', amount: 9876, date: '2026-11-20' })
+        store().importData({
+          ...emptyData(),
+          entries: [
+            { id: 'e-m', date: '2026-11-20', type: 'in', category: 'Serviços prestados', description: 'Receita Mainnet', amount: 1234, environment: 'mainnet' },
+            { id: 'e-t', date: '2026-11-20', type: 'in', category: 'Serviços prestados', description: 'Receita Testnet', amount: 9876, environment: 'testnet' },
+          ],
+        })
       })
       unmount()
     }
 
-    setNetwork('mainnet')
     const { container, unmount } = render(React.createElement(Accounting))
     expect(container.textContent).toContain('1.234')
     expect(container.textContent).not.toContain('9.876')
     unmount()
-
-    setNetwork('testnet')
-    const test = render(React.createElement(Accounting))
-    expect(test.container.textContent).toContain('9.876')
-    expect(test.container.textContent).not.toContain('1.234')
-    test.unmount()
   })
 })
 
 describe('proteção de lançamentos entre ambientes e classificação', () => {
   test('editar lançamento de outro ambiente é bloqueado (sem alteração)', () => {
-    let testnetEntryId = ''
-    {
-      const { store, unmount } = render(React.createElement('div'))
-      React.act(() => {
-        setNetwork('testnet')
-        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, date: '2026-11-20' })
-      })
-      testnetEntryId = store().data.entries.find((e) => e.description === 'Testnet')!.id
-      unmount()
-    }
-    setNetwork('mainnet')
     const { store, unmount } = render(React.createElement('div'))
     React.act(() => {
-      store().updateEntry(testnetEntryId, { description: 'Alterado' })
+      store().importData({ ...emptyData(), entries: [{ id: 'e-t', date: '2026-11-20', type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, environment: 'testnet' }] })
     })
-    expect(store().data.entries.find((e) => e.id === testnetEntryId)!.description).toBe('Testnet')
+    React.act(() => {
+      store().updateEntry('e-t', { description: 'Alterado' })
+    })
+    expect(store().data.entries.find((e) => e.id === 'e-t')!.description).toBe('Testnet')
     unmount()
   })
 
   test('excluir lançamento de outro ambiente é bloqueado (registro preservado)', () => {
-    let testnetEntryId = ''
-    {
-      const { store, unmount } = render(React.createElement('div'))
-      React.act(() => {
-        setNetwork('testnet')
-        store().addEntry({ type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, date: '2026-11-20' })
-      })
-      testnetEntryId = store().data.entries.find((e) => e.description === 'Testnet')!.id
-      unmount()
-    }
-    setNetwork('mainnet')
     const { store, unmount } = render(React.createElement('div'))
     React.act(() => {
-      store().removeEntry(testnetEntryId)
+      store().importData({ ...emptyData(), entries: [{ id: 'e-t', date: '2026-11-20', type: 'in', category: 'Serviços prestados', description: 'Testnet', amount: 50, environment: 'testnet' }] })
     })
-    expect(store().data.entries.some((e) => e.id === testnetEntryId)).toBe(true)
+    React.act(() => {
+      store().removeEntry('e-t')
+    })
+    expect(store().data.entries.some((e) => e.id === 'e-t')).toBe(true)
     unmount()
   })
 
@@ -171,7 +149,7 @@ describe('proteção de lançamentos entre ambientes e classificação', () => {
     unmount()
   })
 
-  test('clearSandboxData limpa apenas a Testnet, preservando Mainnet e unassigned', () => {
+  test('clearSandboxData é inerte: o app é Mainnet-only (nada é removido)', () => {
     const { store, unmount } = render(React.createElement('div'))
     React.act(() => {
       store().importData({
@@ -183,67 +161,27 @@ describe('proteção de lançamentos entre ambientes e classificação', () => {
         entries: [
           { id: 'e-m', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'M', amount: 10, environment: 'mainnet' },
           { id: 'e-t', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'T', amount: 20, environment: 'testnet' },
-          { id: 'e-u', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'U', amount: 30, environment: 'unassigned' },
         ],
       })
     })
     React.act(() => {
-      setNetwork('testnet')
-      store().clearSandboxData()
+      store().clearSandboxData() // sem rede Testnet ativa → no-op
     })
     const d = store().data
     expect(d.contacts.some((c) => c.id === 'c-m')).toBe(true)
-    expect(d.contacts.some((c) => c.id === 'c-t')).toBe(false)
-    expect(d.entries.some((e) => e.id === 'e-m')).toBe(true)
-    expect(d.entries.some((e) => e.id === 'e-t')).toBe(false)
-    expect(d.entries.some((e) => e.id === 'e-u')).toBe(true)
+    expect(d.contacts.some((c) => c.id === 'c-t')).toBe(true) // preservado (sem exclusão)
+    expect(d.entries.some((e) => e.id === 'e-t')).toBe(true)
     unmount()
   })
 
-  test('loadSandboxDemo adiciona dados apenas à Testnet, preservando Mainnet e configurações', () => {
+  test('loadSandboxDemo é inerte: retorna wrong_environment (sem rede Testnet)', () => {
     const { store, unmount } = render(React.createElement('div'))
-    React.act(() => {
-      store().importData({
-        ...emptyData(),
-        contacts: [{ id: 'c-m', kind: 'customer', name: 'Mainnet', doc: '', email: '', phone: '', wallet: '', environment: 'mainnet' }],
-        entries: [{ id: 'e-m', date: '2026-11-20', type: 'in', category: 'Vendas', description: 'M', amount: 10, environment: 'mainnet' }],
-        settings: { ...emptyData().settings, company: 'Empresa Real' },
-      })
-    })
-    React.act(() => {
-      setNetwork('testnet')
-      expect(store().loadSandboxDemo()).toEqual({ ok: true })
-    })
-    const d = store().data
-    expect(d.contacts.some((c) => c.id === 'c-m')).toBe(true) // Mainnet preservado
-    expect(d.entries.some((e) => e.id === 'e-m')).toBe(true)
-    expect(d.settings.company).toBe('Empresa Real') // configuração preservada
-    expect(d.products.some((p) => p.environment === 'testnet')).toBe(true) // demo adicionada à Testnet
-    expect(d.contacts.some((c) => c.environment === 'testnet')).toBe(true)
-    expect(d.products.some((p) => p.environment === 'mainnet')).toBe(false)
-    unmount()
-  })
-
-  test('loadSandboxDemo é bloqueado na Mainnet', () => {
-    const { store, unmount } = render(React.createElement('div'))
-    setNetwork('mainnet')
     let res: unknown
     React.act(() => {
       res = store().loadSandboxDemo()
     })
     expect(res).toEqual({ ok: false, reason: 'wrong_environment' })
-    unmount()
-  })
-
-  test('loadSandboxDemo gera IDs únicos entre chamadas consecutivas', () => {
-    const { store, unmount } = render(React.createElement('div'))
-    React.act(() => {
-      setNetwork('testnet')
-      store().loadSandboxDemo()
-      const before = store().data.products.length
-      store().loadSandboxDemo()
-      expect(store().data.products.length).toBe(before * 2) // sem colisão de IDs
-    })
+    expect(store().data.products).toHaveLength(0)
     unmount()
   })
 

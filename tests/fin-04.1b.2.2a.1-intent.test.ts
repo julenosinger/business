@@ -13,6 +13,7 @@ const { createRoot } = await import('react-dom/client')
 const { StoreProvider, useStore } = await import('../src/lib/store')
 const { setNetwork } = await import('../src/lib/network')
 const { parseBackup } = await import('../src/lib/backup')
+const { scopedIdempotencyKey } = await import('../src/lib/payment-intent')
 
 let captured: Store | null = null
 function Capture(): null {
@@ -46,7 +47,6 @@ function commit<T>(store: () => Store, op: (s: Store) => T): T {
 }
 
 const BENEFICIARY = '0x000000000000000000000000000000000000000a'
-const BENEFICIARY_TEST = '0x000000000000000000000000000000000000000b'
 const HASH = '0x' + 'ab'.repeat(32)
 const PAYER = '0x' + 'cd'.repeat(20)
 
@@ -171,22 +171,12 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     unmount()
   })
 
-  test('a mesma chave em ambientes diferentes não se contamina', () => {
-    const { store, unmount } = renderStore()
-    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY, testnet: BENEFICIARY_TEST } }))
-    const { accountId, saleId } = saleAccount(store)
-    const a = commit(store, (s) => s.createPaymentIntent({ ...intentOf(accountId, saleId), idempotencyKey: 'k1' }))
-    expect(a.ok).toBe(true)
-    // Troca para Testnet: mesmo chave deve gerar uma intenção independente.
-    setNetwork('testnet')
-    const { accountId: tAccountId, saleId: tSaleId } = saleAccount(store)
-    const b = commit(store, (s) => s.createPaymentIntent({ ...intentOf(tAccountId, tSaleId), idempotencyKey: 'k1' }))
-    expect(b.ok).toBe(true)
-    if (!a.ok || !b.ok) throw new Error('intents')
-    expect(a.intentId).not.toBe(b.intentId)
-    expect(store().data.paymentIntents).toHaveLength(2)
-    expect(store().data.paymentIntents.map((i) => i.environment).sort()).toEqual(['mainnet', 'testnet'])
-    unmount()
+  test('chave de idempotência é escopada por organização e ambiente (Mainnet-only)', () => {
+    // Com o ERP Mainnet-only, a idempotência é escopada por organização/ambiente via scopedIdempotencyKey.
+    const a = scopedIdempotencyKey({ organizationId: 'o1', environment: 'mainnet' }, 'k1')
+    const b = scopedIdempotencyKey({ organizationId: 'o1', environment: 'mainnet' }, 'k1')
+    expect(a).toBe(b)
+    expect(scopedIdempotencyKey({ organizationId: 'o1', environment: 'testnet' }, 'k1')).not.toBe(a)
   })
 
   test('recupera intenções, tentativas, reservas e histórico após remontagem do StoreProvider', () => {
@@ -259,23 +249,17 @@ describe('FIN-04.1B.2.2A.1 — Execution integrity (StoreProvider)', () => {
     unmount()
   })
 
-  test('clearSandboxData preserva tentativas/reservas da Mainnet e remove as da Testnet', () => {
+  test('clearSandboxData é inerte (Mainnet-only): preserva todos os registros', () => {
     const { store, unmount } = renderStore()
-    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY, testnet: BENEFICIARY_TEST } }))
+    commit(store, (s) => s.updateSettings({ treasuryRecipients: { mainnet: BENEFICIARY } }))
     const { accountId, saleId } = saleAccount(store)
     const rMain = commit(store, (s) => s.createPaymentIntent(intentOf(accountId, saleId)))
     if (!rMain.ok) throw new Error('main intent')
     commit(store, (s) => s.createPaymentAttempt(rMain.intentId))
-    setNetwork('testnet')
-    const { accountId: tA, saleId: tS } = saleAccount(store)
-    const rTest = commit(store, (s) => s.createPaymentIntent(intentOf(tA, tS)))
-    if (!rTest.ok) throw new Error('test intent')
-    commit(store, (s) => s.createPaymentAttempt(rTest.intentId))
-    expect(store().data.paymentAttempts).toHaveLength(2)
-    commit(store, (s) => s.clearSandboxData())
-    expect(store().data.paymentIntents.map((i) => i.environment)).toEqual(['mainnet'])
-    expect(store().data.paymentAttempts.map((a) => a.environment)).toEqual(['mainnet'])
-    expect(store().data.paymentReservations.map((x) => x.environment)).toEqual(['mainnet'])
+    commit(store, (s) => s.clearSandboxData()) // sem rede Testnet ativa → no-op
+    expect(store().data.paymentIntents).toHaveLength(1)
+    expect(store().data.paymentAttempts).toHaveLength(1)
+    expect(store().data.paymentReservations).toHaveLength(1)
     unmount()
   })
 })

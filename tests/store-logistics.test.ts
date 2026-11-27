@@ -134,9 +134,9 @@ describe('Logística (integridade de resultado no store real)', () => {
 
   test('isolamento Mainnet/Testnet em remessas', () => {
     const { store, unmount } = renderStore()
-    commit(store, (s) => s.createShipment(shipmentInput()))
-    setNetwork('testnet')
-    commit(store, (s) => s.createShipment(shipmentInput()))
+    const sid = commit(store, (s) => s.createShipment(shipmentInput()))
+    // Injeta uma remessa Testnet histórica (campo environment).
+    commit(store, (s) => s.importData({ ...s.data, shipments: [...s.data.shipments, { ...s.data.shipments.find((x) => x.id === sid)!, id: 's-t', environment: 'testnet' }] }))
     const main = store().data.shipments.filter((s) => s.environment === 'mainnet')
     const test = store().data.shipments.filter((s) => s.environment === 'testnet')
     expect(main).toHaveLength(1)

@@ -47,7 +47,6 @@ function commit<T>(store: () => Store, op: (s: Store) => T): T {
 const prod = (over: Partial<Parameters<Store['addProduct']>[0]> = {}): Parameters<Store['addProduct']>[0] => ({
   sku: 'SKU', name: 'Produto', category: 'Geral', unit: 'un', cost: 5, price: 8, stock: 0, minStock: 0, ...over,
 })
-const supplier = (): Parameters<Store['addContact']>[0] => ({ kind: 'supplier', name: 'Fornecedor', doc: '', email: '', phone: '', wallet: '' })
 
 beforeEach(() => {
   localStorage.clear()
@@ -72,28 +71,26 @@ describe('FIN-04.0 — integridade de recordPurchase e vínculos (pendências IN
 
   test('recordPurchase retorna false para produto de outro ambiente', () => {
     const { store, unmount } = renderStore()
-    const pid = commit(store, (s) => s.addProduct(prod({ sku: 'P1' })))
-    setNetwork('testnet')
-    expect(commit(store, (s) => s.recordPurchase({ paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 5, cost: 5 }] }))).toBe(false)
+    // Produto Testnet histórico (campo environment) — não referenciável a partir da Mainnet.
+    commit(store, (s) => s.importData({ ...s.data, products: [{ id: 'p-t', sku: 'P1', name: 'Produto', category: 'Geral', unit: 'un', cost: 5, price: 8, stock: 0, minStock: 0, environment: 'testnet' }] }))
+    expect(commit(store, (s) => s.recordPurchase({ paidNow: false, dueDate: '2026-12-31', items: [{ productId: 'p-t', qty: 5, cost: 5 }] }))).toBe(false)
     expect(store().data.purchases).toHaveLength(0)
     unmount()
   })
 
   test('recordPurchase retorna false para fornecedor de outro ambiente', () => {
     const { store, unmount } = renderStore()
-    const sid = commit(store, (s) => { const r = s.addContact(supplier()); return r.ok ? r.id : '' })
-    setNetwork('testnet')
+    commit(store, (s) => s.importData({ ...s.data, contacts: [{ id: 's-t', kind: 'supplier', name: 'Fornecedor', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] }))
     const pid = commit(store, (s) => s.addProduct(prod({ sku: 'P1' })))
-    expect(commit(store, (s) => s.recordPurchase({ supplierId: sid, paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 5, cost: 5 }] }))).toBe(false)
+    expect(commit(store, (s) => s.recordPurchase({ supplierId: 's-t', paidNow: false, dueDate: '2026-12-31', items: [{ productId: pid, qty: 5, cost: 5 }] }))).toBe(false)
     expect(store().data.purchases).toHaveLength(0)
     unmount()
   })
 
   test('addProduct rejeita fornecedor vinculado de outro ambiente', () => {
     const { store, unmount } = renderStore()
-    const sid = commit(store, (s) => { const r = s.addContact(supplier()); return r.ok ? r.id : '' })
-    setNetwork('testnet')
-    expect(commit(store, (s) => s.addProduct(prod({ sku: 'P1', primarySupplierId: sid })))).toBe('')
+    commit(store, (s) => s.importData({ ...s.data, contacts: [{ id: 's-t', kind: 'supplier', name: 'Fornecedor', doc: '', email: '', phone: '', wallet: '', environment: 'testnet' }] }))
+    expect(commit(store, (s) => s.addProduct(prod({ sku: 'P1', primarySupplierId: 's-t' })))).toBe('')
     expect(store().data.products).toHaveLength(0)
     unmount()
   })
