@@ -15,6 +15,7 @@ import { PeriodsTab } from '@/components/accounting/PeriodsTab'
 import { useStore } from '@/lib/store'
 import { useNav } from '@/lib/nav'
 import { useNetwork } from '@/lib/network'
+import { useUrlParam } from '@/lib/router'
 import { entriesForEnvironment, expensesByCategoryForEnvironment, inPeriod, kpisForEnvironment, monthPeriod, salesForEnvironment, type Period } from '@/lib/selectors'
 import { fmtDate, downloadCsv, iso, money, parseNum, today } from '@/lib/format'
 import { cat, t } from '@/lib/i18n'
@@ -130,7 +131,7 @@ export function Accounting() {
   const { ledgerFocus, clearLedgerFocus } = useNav()
   const network = useNetwork()
   const [range, setRange] = useState<Range>('month')
-  const [tab, setTab] = useState<AccountingTab>('overview')
+  const [tab, setTab] = useUrlParam<AccountingTab>('tab', 'overview')
   const [target, setTarget] = useState<Entry | 'new' | null>(null)
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all')
   const [limit, setLimit] = useState(30)

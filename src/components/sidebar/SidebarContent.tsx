@@ -152,17 +152,17 @@ export function SidebarContent({ collapsed, headerAction, onNavigate }: Props) {
       </nav>
 
       <div className="mt-auto pt-6">
-        <RailTip label={t('Tesouraria em testnet com USDC', 'Treasury on testnet with USDC')} enabled={collapsed}>
+        <RailTip label={t('Tesouraria em Arc Mainnet com USDC', 'Treasury on Arc Mainnet with USDC')} enabled={collapsed}>
           <div
             className={clsx('flex items-center rounded-xl border border-line bg-fill/5 text-xs text-muted', collapsed ? 'mx-auto size-11 justify-center' : 'gap-2.5 p-3')}
             role="status"
-            aria-label={t('Tesouraria em testnet com USDC', 'Treasury on testnet with USDC')}
+            aria-label={t('Tesouraria em Arc Mainnet com USDC', 'Treasury on Arc Mainnet with USDC')}
             tabIndex={collapsed ? 0 : undefined}
           >
             <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-ok" />
             {collapsed ? null : (
               <span className="leading-snug">
-                <span className="block font-semibold text-ink">Testnet</span>
+                <span className="block font-semibold text-ink">Arc Mainnet</span>
                 {t('Tesouraria com USDC', 'Treasury with USDC')}
               </span>
             )}

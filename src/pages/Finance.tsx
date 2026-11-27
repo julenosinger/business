@@ -19,6 +19,7 @@ import { addDays, fmtDate, daysUntil, money, parseNum, today } from '@/lib/forma
 import { cat, t } from '@/lib/i18n'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type Account } from '@/lib/types'
 import { accountNote, openNote } from '@/lib/note'
+import { useUrlParam } from '@/lib/router'
 
 function AccountModal({ target, preset, onClose }: { target: Account | 'new' | null; preset?: { kind: Account['kind']; contactId: string } | null; onClose: () => void }) {
   const { data, addAccount, updateAccount } = useStore()
@@ -305,7 +306,7 @@ export function Finance() {
   const { data, settleAccount, cancelAccount } = useStore()
   const { requestPay, requestIntent, profileIntent, clearProfileIntent } = useNav()
   const network = useNetwork()
-  const [tab, setTab] = useState<Tab>('open')
+  const [tab, setTab] = useUrlParam<Tab>('tab', 'open')
   const [target, setTarget] = useState<Account | 'new' | null>(null)
   const [partial, setPartial] = useState<Account | null>(null)
   const [limit, setLimit] = useState(30)

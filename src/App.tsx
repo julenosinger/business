@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from '@/components/Layout'
 import { NavContext, type Intent, type Nav, type PageId, type ProfileIntent } from '@/lib/nav'
+import { DEFAULT_PAGE, pageFromPath, routeFor } from '@/lib/router'
 import { StoreProvider } from '@/lib/store'
 import { I18nProvider, useLang } from '@/lib/i18n'
 import { readInvoiceFromLocation } from '@/lib/invoice'
@@ -75,11 +76,31 @@ export default function App() {
 }
 
 function Workspace() {
-  const [page, setPage] = useState<PageId>('dashboard')
+  const [page, setPage] = useState<PageId>(() => pageFromPath(window.location.pathname) ?? DEFAULT_PAGE)
   const [payAccountId, setPayAccountId] = useState<string | null>(null)
   const [intent, setIntent] = useState<Intent | null>(null)
   const [ledgerFocus, setLedgerFocus] = useState<string | null>(null)
   const [profileIntent, setProfileIntent] = useState<ProfileIntent | null>(null)
+
+  // A URL é a fonte autoritativa: normaliza rota inválida na inicialização (sem sobrescrever uma
+  // rota válida) e responde ao Voltar/Avançar do navegador.
+  useEffect(() => {
+    if (!pageFromPath(window.location.pathname)) {
+      window.history.replaceState(null, '', routeFor(DEFAULT_PAGE))
+    }
+    const onPop = () => {
+      const p = pageFromPath(window.location.pathname)
+      if (p) setPage(p)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  const navigate = useCallback((p: PageId) => {
+    setPage(p)
+    window.history.pushState(null, '', routeFor(p))
+    window.scrollTo({ top: 0 })
+  }, [])
 
   const pageFor = (i: ProfileIntent): PageId => {
     if (i.kind === 'sale' || i.kind === 'sales') return 'sales'
@@ -91,43 +112,34 @@ function Workspace() {
     () => ({
       page,
       go: (p) => {
-        setPage(p)
+        navigate(p)
         // Descarta intenção de perfil ainda pendente ao navegar por outra via (sidebar/dashboard).
         setProfileIntent(null)
-        window.scrollTo({ top: 0 })
       },
       payAccountId,
       intent,
       requestIntent: (i) => {
         setIntent(i)
-        if (i) {
-          setPage('treasury')
-          window.scrollTo({ top: 0 })
-        }
+        if (i) navigate('treasury')
       },
       requestPay: (id) => {
         setPayAccountId(id)
-        if (id) {
-          setPage('treasury')
-          window.scrollTo({ top: 0 })
-        }
+        if (id) navigate('treasury')
       },
       ledgerFocus,
       focusLedger: (query) => {
         setLedgerFocus(query)
-        setPage('accounting')
-        window.scrollTo({ top: 0 })
+        navigate('accounting')
       },
       clearLedgerFocus: () => setLedgerFocus(null),
       profileIntent,
       openProfileIntent: (i) => {
         setProfileIntent(i)
-        setPage(pageFor(i))
-        window.scrollTo({ top: 0 })
+        navigate(pageFor(i))
       },
       clearProfileIntent: () => setProfileIntent(null),
     }),
-    [page, payAccountId, intent, ledgerFocus, profileIntent],
+    [page, payAccountId, intent, ledgerFocus, profileIntent, navigate],
   )
 
   return (

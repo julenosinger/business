@@ -3,9 +3,11 @@ import { ConnectKitButton } from 'connectkit'
 import { clsx } from 'clsx'
 import { Menu, Moon, Sun, Wallet } from 'lucide-react'
 import { MobileDrawer, Sidebar, useSidebarWidth } from '@/components/sidebar/Sidebar'
+import { BottomNav } from '@/components/BottomNav'
 import { NetworkSelector } from '@/components/NetworkSelector'
 import { sidebar, useSidebar } from '@/lib/sidebar'
 import { useNav } from '@/lib/nav'
+import { pageLabel } from '@/components/sidebar/nav-config'
 import { useStore } from '@/lib/store'
 import { shortAddr } from '@/lib/format'
 import { t, useLang } from '@/lib/i18n'
@@ -51,6 +53,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className={bleed ? 'h-dvh overflow-hidden' : 'min-h-dvh'}>
       <Sidebar />
       <MobileDrawer />
+      <BottomNav />
 
       <div className={clsx('min-w-0 transition-[padding-left] duration-200 ease-out motion-reduce:transition-none', bleed && 'flex h-dvh flex-col')} style={{ paddingLeft: width }}>
         <header className="sticky top-0 z-30 flex shrink-0 items-center gap-3 border-b border-line bg-bg/80 px-4 py-3 backdrop-blur sm:px-6">
@@ -66,9 +69,9 @@ export function Layout({ children }: { children: ReactNode }) {
             <Menu size={18} />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="display truncate text-base font-semibold">{data.settings.company}</div>
+            <div className="display truncate text-base font-semibold">{pageLabel(page)}</div>
             <div className="truncate text-xs text-subtle">
-              {data.settings.branch} · {data.settings.currency}
+              {data.settings.company} · {data.settings.branch} · {data.settings.currency}
             </div>
           </div>
           <NetworkSelector />
