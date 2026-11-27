@@ -1,6 +1,6 @@
 # MAINNET-ONLY 1.1 — Complete Testnet Removal & Financial Integrity Certification
 
-**HEAD inicial:** `fa97b67` · **HEAD final:** `(commit desta fase)`
+**HEAD inicial:** `fa97b67` · **HEAD final:** `dfad621`
 
 Resultado: **726 testes passando** (eram 728) · typecheck app/servidor limpo · lint limpo · build de produção OK.
 
@@ -41,4 +41,4 @@ Resultado: **726 testes passando** (eram 728) · typecheck app/servidor limpo ·
 
 ## Rollback
 
-`git revert <commit-testes> && git revert <commit-feat>`
+`git revert 4d4ce47 && git revert 3b6a2f0`
